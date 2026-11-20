@@ -26,6 +26,22 @@ static void seamIsContinuous() {
     r.feed(slice(in, 24064, 24064 + 4864));                        // keep playing through the tail
     CHECK(maxStep(wrap(r.loopImage())) < 2.5f * sineStep(220, 0.1f));
 }
+static void backDatedTailFoldMatchesAnalytic() {                    // R9: fold of the D samples + live tail
+    Rig r; r.lp.setTriggerLatencyMs(2.0f);                          // D = 96, tail 50 ms (default): T = 2400
+    const uint32_t s = 4096, D = 96, T = 2400, L = 24064;           // s = index of the start press
+    auto in = sine(220, 0.1f, 48000);
+    r.feed(slice(in, 0, s)); r.lp.pressRec(0); r.feed(slice(in, s, s + L)); r.lp.pressRec(0);
+    r.feed(slice(in, s + L, s + L + 4864));                         // keep playing through the tail
+    CHECK(r.lp.loopLength() == L);
+    auto img = r.loopImage();
+    float err = 0.0f;
+    for (uint32_t p = 0; p < L; ++p) {
+        float e = in[s - D + p] * fadeInGain(p);
+        if (p < T) e += in[s - D + L + p] * float(T - p) / float(T);
+        err = std::max(err, std::fabs(img[p] - e));
+    }
+    CHECK(err < 1e-6f);
+}
 static void tailClampedOnShortLoop() {
     Rig r; r.lp.setTailMs(500); auto in = sine(220, 0.1f, 48000);
     r.lp.pressRec(0); r.feed(slice(in, 0, 7168)); r.lp.pressRec(0); r.feed(slice(in, 7168, 31168));
@@ -58,7 +74,7 @@ static void initFailureIsSafe() {                                   // Review Fo
 
 int main() {
     recordSetsLengthAndPlays(); loopPlaysRecordedAudio(); backDatingKeepsLengthAndShiftsStart();
-    seamIsContinuous(); tailClampedOnShortLoop(); tooShortIsAborted(); undoWhileRecordingAborts();
+    seamIsContinuous(); backDatedTailFoldMatchesAnalytic(); tailClampedOnShortLoop(); tooShortIsAborted(); undoWhileRecordingAborts();
     elapsedCountsWhileRecording(); maxLengthAutoCloses(); initFailureIsSafe();
     REPORT();
 }
