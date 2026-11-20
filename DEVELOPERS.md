@@ -75,7 +75,7 @@ before publishing. See
 │   ├── modgui.ttl                 - MOD GUI declaration
 │   └── Makefile                   - DPF inner build glue (BETA=1 retags here)
 ├── docs/manual/                   - one-page PDF manual (HTML source + generated PDF)
-├── tests/                         - host-less DSP and LV2 tests (`make test`)
+├── tests/                         - host-less DSP tests (`make test`), LV2 host tests (`make test-lv2`)
 ├── patches/                       - the DPF patch (see above)
 ├── dpf/                           - DISTRHO Plugin Framework (git submodule)
 ├── mod-build/                     - self-contained Dwarf cross-build setup
