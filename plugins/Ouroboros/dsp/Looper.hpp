@@ -329,6 +329,7 @@ private:
             ly.seq = ++seq_;
             ly.refs = 0;
         }
+        tr.state = base ? TrackState::Recording : TrackState::Overdubbing;   // first: evict() counts the new slot
         const bool split = overlap();                    // else the history's shares are stale
         for (uint32_t i = 0; i < D; ++i) {
             const uint32_t k = (histW_ + histLen_ - D + i) % histLen_;
@@ -338,7 +339,6 @@ private:
             dub.env = e;
             histUsed_[k] += e;
         }
-        tr.state = base ? TrackState::Recording : TrackState::Overdubbing;
     }
 
     // Punch-out (a layer, then a 5 ms fade that is not back-dated), or cancel/silent (subtracted, no layer).

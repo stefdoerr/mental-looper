@@ -137,12 +137,13 @@ static void disabledEngineOutputsDryOnly() {                        // init fail
     CHECK(maxAbsDiff(std::vector<float>(out, out + 128), std::vector<float>(in, in + 128)) == 0.0f);
     CHECK(lp.state(0) == ouro::TrackState::Empty);
 }
-static void stressRandomPresses() {                                 // Review Focus 3
+static void stressRandomPresses(float trigMs, bool recToDub) {     // Review Focus 3
     // fixed-seed LCG, 2000 blocks of sine input; each block one random action on a random track among
     // pressRec, undo, redo, toggleOn, clearTrack, clearAll, or nothing (mostly nothing, so loops can form).
     // After every block (R5): output finite and |y| <= 1; pendingOps(t) <= kMaxPendingOps;
-    // any track Playing or Overdubbing => loopLength() > 0.
+    // any track Playing or Overdubbing => loopLength() > 0. At the end every block is back in the pool.
     Rig r; r.lp.setBudgetMb(0.0625f);                               // 4 blocks: eviction under the presses too
+    r.lp.setTriggerLatencyMs(trigMs); r.lp.setRecToDub(recToDub);
     const uint32_t B = 128, N = 2000;
     auto in = sine(220, 0.5f, B * N);
     uint32_t seed = 1;
@@ -175,7 +176,7 @@ static void stressRandomPresses() {                                 // Review Fo
     CHECK(bounded && opsCapped && lengthSet);
     CHECK(looping > 500 && dubbing > 50 && recOnLoop > 50);         // the presses did reach loops, dubs, recordings on L
     r.lp.clearAll(); r.silence(2000);
-    CHECK(r.lp.loopLength() == 0);
+    CHECK(r.lp.loopLength() == 0 && r.lp.undoBytes() == 0);
     for (int u = 0; u < ouro::kTracks; ++u) CHECK(r.lp.state(u) == ouro::TrackState::Empty);
 }
 
@@ -183,6 +184,7 @@ int main() {
     secondTrackLockedToLoop(); handoverClosesAndStarts(); handoverSplitKeepsUnity(); handoverAtPunchOutKeepsUnity();
     onOffRampsAndResumesInPlace(); volumeIsPlaybackOnly(); softClipOnlyAboveKnee(); dryThruAndBypass();
     clearAllResetsAndOverwrites(); recordOnEmptyTrackZeroesReusedBuffer(); baseUndoRedoAndLengthReset();
-    offTrackStillRecords(); disabledEngineOutputsDryOnly(); stressRandomPresses();
+    offTrackStillRecords(); disabledEngineOutputsDryOnly();
+    stressRandomPresses(0.0f, false); stressRandomPresses(3.0f, true);   // 3 ms: back-dated starts hit a full pool
     REPORT();
 }
