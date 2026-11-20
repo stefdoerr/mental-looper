@@ -53,9 +53,8 @@ public:
         // fields, publish the handle last.
         if (fWidgetDraw == nullptr || fSlot.handle.load(std::memory_order_acquire) != nullptr)
             return;
-        fSlot.w = area->width;
-        fSlot.h = area->height;
-        fSlot.fresh = true;
+        fSlot.w.store(area->width, std::memory_order_relaxed);
+        fSlot.h.store(area->height, std::memory_order_relaxed);
         fSlot.handle.store(w, std::memory_order_release);
     }
 
@@ -119,12 +118,14 @@ protected:
         std::fill(outputs[0], outputs[0] + frames, 0.0f);
 
         // ponytail: placeholder until the widget renderer: one slot, cleared once per showing.
-        if (ALABS_HMI_Widget w = fSlot.handle.load(std::memory_order_acquire))
-            if (fSlot.fresh)
-            {
-                fWidgetDraw->draw_bitmap(fWidgetDraw->handle, w, 0, 0, fSlot.w, fSlot.h, nullptr);
-                fSlot.fresh = false;
-            }
+        // Every showing gets a new handle, so comparing with the last one drawn
+        // can't lose a clear, even when hide + show race this block.
+        const ALABS_HMI_Widget w = fSlot.handle.load(std::memory_order_acquire);
+        if (w != nullptr && w != fDrawn)
+            fWidgetDraw->draw_bitmap(fWidgetDraw->handle, w, 0, 0,
+                                     fSlot.w.load(std::memory_order_relaxed),
+                                     fSlot.h.load(std::memory_order_relaxed), nullptr);
+        fDrawn = w;
     }
 
 private:
@@ -136,9 +137,9 @@ private:
     // One shown widget; handle is null while the slot is free.
     struct WidgetSlot {
         std::atomic<ALABS_HMI_Widget> handle{nullptr};
-        uint16_t w = 0, h = 0;
-        bool fresh = false;  // not yet drawn since shown
+        std::atomic<uint16_t> w{0}, h{0};
     } fSlot;
+    ALABS_HMI_Widget fDrawn = nullptr;  // run() only: the handle it last drew
 
     DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OuroborosPlugin)
 };

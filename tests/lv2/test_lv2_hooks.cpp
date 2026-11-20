@@ -2,6 +2,7 @@
 // to check the DPF patch (features in, extension data out). `make test-lv2`.
 #include <dlfcn.h>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -26,11 +27,13 @@ static LV2_URID mapUri(LV2_URID_Map_Handle, const char* uri)
 
 struct Draw { ALABS_HMI_Widget widget; uint16_t x, y, w, h; bool nullBits; };
 static std::vector<Draw> gDraws;
+static std::function<void()> gDuringDraw;  // once, inside draw_bitmap: a host call racing run()
 
 static void drawBitmap(ALABS_HMI_WidgetDraw_Handle, ALABS_HMI_Widget widget,
                        uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t* bits)
 {
     gDraws.push_back({ widget, x, y, w, h, bits == nullptr });
+    if (gDuringDraw) { auto f = gDuringDraw; gDuringDraw = nullptr; f(); }
 }
 
 static int32_t gBlockLength = 128;
@@ -114,6 +117,21 @@ static void widgetShownLeadsToDraw(const LV2_Descriptor* d)
     for (int i = 0; i < 20; ++i)
         d->run(h, 128);
     CHECK(gDraws.size() == n);
+
+    // Hide + re-show racing run(): they land while run() is drawing the old
+    // handle. The new handle must still get its whole area drawn.
+    ALABS_HMI_WidgetArea small = { sizeof(small), 51, 8, ALABS_HMI_PixelFormat_Mono1 };
+    wn->widget_shown(h, "loop", (ALABS_HMI_Widget)0x2, &small);
+    gDuringDraw = [&] {
+        wn->widget_hidden(h, (ALABS_HMI_Widget)0x2);
+        wn->widget_shown(h, "loop", (ALABS_HMI_Widget)0x3, &small);
+    };
+    for (int i = 0; i < 20; ++i)
+        d->run(h, 128);
+    bool whole = false;
+    for (auto& r : gDraws)
+        whole |= r.widget == (ALABS_HMI_Widget)0x3 && r.x == 0 && r.y == 0 && r.w == 51 && r.h == 8;
+    CHECK(whole);
     d->cleanup(h);
 }
 
