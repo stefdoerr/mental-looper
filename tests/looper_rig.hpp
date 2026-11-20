@@ -51,3 +51,8 @@ inline std::vector<float> recordBase(Rig& r, uint32_t n, float amp) {
     r.lp.pressRec(0); r.feed(sine(220, amp, n)); r.lp.pressRec(0);
     return r.loopImage();
 }
+
+// Track t, with L set: press, one pass of sine(hz, amp), press.
+inline void recordBaseOn(Rig& r, int t, float amp = 0.1f, double hz = 550.0) {
+    r.lp.pressRec(t); r.feed(sine(hz, amp, r.lp.loopLength())); r.lp.pressRec(t);
+}

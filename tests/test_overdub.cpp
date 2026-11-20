@@ -24,8 +24,9 @@ static void undoRampsSpanThePress() {                               // the ramps
     r.lp.pressRec(0); r.feed(sine(330, 0.3f, 30000)); r.lp.pressRec(0); r.settle();
     r.silence(5000); const size_t from = r.out.size() - 100;       // mid-layer, where the delta is loud
     r.lp.undo(0); r.silence(2000);                                  // the layer
-    r.lp.undo(0); r.silence(2000);                                  // the base: the track goes Empty
+    r.lp.undo(0);                                                   // the base: the track goes Empty
     CHECK(r.lp.state(0) == ouro::TrackState::Empty && r.lp.canRedo(0));
+    r.silence(2000);                                                // (the last track: then L resets, redo goes)
     CHECK(peak(slice(r.out, r.out.size() - 1000, r.out.size())) == 0.0f);
     CHECK(maxStep(slice(r.out, from, r.out.size())) < 2.5f * (sineStep(330, 0.3f) + sineStep(220, 0.1f)));
 }

@@ -30,4 +30,26 @@ static void evictionKeepsTheLiveDeltaIntact() {
     r.lp.reset(); CHECK(r.lp.undoBytes() == 0);                    // no leaked block
 }
 
-int main() { evictionKeepsTheLiveDeltaIntact(); fullLayersEvictOldest(); newDubDiscardsOwnRedoBeforeEvicting(); oversizedOverdubKeepsRecording(); REPORT(); }
+static void globallyOldestMerged() {
+    Rig r; r.lp.setTailMs(0); r.lp.setBudgetMb(0.25f); recordBase(r, 48000, 0.1f);
+    recordBaseOn(r, 1); dub(r, 0, 14400); dub(r, 1, 14400);          // A(t0), B(t1): 4 + 4 blocks
+    dub(r, 0, 48000);                                              // C needs 12: A merged
+    CHECK(r.lp.undoDepth(0) == 1 && r.lp.undoDepth(1) == 1);
+    dub(r, 1, 48000);                                              // D needs 12: B, then C merged
+    CHECK(r.lp.undoDepth(0) == 0 && r.lp.undoDepth(1) == 1);
+}
+// R11: a redo entry on another track goes before this track's older undo layer.
+static void redoDroppedBeforeUndo() {
+    Rig r; r.lp.setTailMs(0); r.lp.setBudgetMb(0.25f); recordBase(r, 48000, 0.1f);
+    recordBaseOn(r, 1); dub(r, 0, 14400);                          // A(t0): 4 blocks, the oldest layer
+    dub(r, 1, 14400); r.lp.undo(1); r.settle();                    // B(t1): 4 blocks, now a redo entry
+    CHECK(r.lp.canRedo(1));
+    dub(r, 0, 48000);                                              // C needs 12: dropping B alone makes room
+    CHECK(!r.lp.canRedo(1) && r.lp.undoDepth(0) == 2);             // A kept
+}
+
+int main() {
+    evictionKeepsTheLiveDeltaIntact(); fullLayersEvictOldest(); newDubDiscardsOwnRedoBeforeEvicting(); oversizedOverdubKeepsRecording();
+    globallyOldestMerged(); redoDroppedBeforeUndo();
+    REPORT();
+}

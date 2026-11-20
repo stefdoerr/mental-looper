@@ -5,13 +5,30 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <cstring>
 #include <new>
 
 namespace ouro {
 
 enum class TrackState : uint8_t { Empty, Recording, Playing, Overdubbing };
 enum class NextAction : uint8_t { Rec, Play, Dub };
+
+// A gain that moves linearly to a new target over n samples, from wherever it is.
+struct Ramp {
+    float v = 0.0f, to = 0.0f, step = 0.0f;
+    uint32_t left = 0;
+    float next(float target, uint32_t n) {
+        if (target != to) { to = target; left = n; step = n ? (to - v) / float(n) : 0.0f; }
+        v = left && --left ? v + step : to;
+        return v;
+    }
+    void snap(float target) { v = to = target; left = 0; }
+};
+
+// The output safety net: unchanged below the knee, then bends smoothly towards +-1.
+inline float softclip(float y) {
+    const float k = kSoftClipKnee, a = std::fabs(y);
+    return a < k ? y : std::copysign(k + (1.0f - k) * std::tanh((a - k) / (1.0f - k)), y);
+}
 
 // The looper engine. init() is the only allocating call (non-RT). process() and the
 // controls are RT-safe and single-threaded: controls are called between process() calls
@@ -23,7 +40,7 @@ public:
     Looper& operator=(const Looper&) = delete;
     ~Looper() { release(); }
 
-    // False => disabled: process() outputs silence and every control is ignored.
+    // False => disabled: process() outputs only the dry path, and the actions (rec, undo, redo, clear) are ignored.
     bool init(double sampleRate, uint32_t /*maxBlock: the engine runs per sample, no block scratch*/) {
         release();
         // Positions are uint32_t: reject rates whose reservation would not fit (also NaN and absurdly low rates).
@@ -56,61 +73,66 @@ public:
         return true;
     }
 
+    // Every track empty, L unset, all undo/redo gone. Settings (on, volume, dry, bypass, ...) stay.
     void reset() {
         for (Track& tr : tracks_) {                      // hand every delta back to the pool
-            for (uint32_t i = 0; i < tr.redoTop; ++i) tr.layers[i].d.release(pool_);
-            if (tr.state == TrackState::Overdubbing) tr.layers[tr.undoTop].d.release(pool_);
-            for (uint32_t k = 0; k < tr.nOps; ++k) if (tr.ops[k].owns) tr.ops[k].d.release(pool_);
-            tr.undoTop = tr.redoTop = tr.nOps = 0;
-            tr.dub = tr.fade = Writer{};
+            wipe(tr);
             tr.state = TrackState::Empty;
-            tr.tailEnd = 0;
-            tr.gain = 0.0f;
-            tr.baseUndone = false;
+            tr.gain.snap(0.0f);
         }
         L_ = pos_ = rec_ = recD_ = 0;
         recTrack_ = -1;
     }
 
     void process(const float* in, float* out, uint32_t n) {
-        if (!enabled_) { std::memset(out, 0, n * sizeof(float)); return; }
+        const float dryTo = dryThru_ ? 1.0f : 0.0f;
+        if (!enabled_) { for (uint32_t i = 0; i < n; ++i) out[i] = dry_.next(dryTo, ramp_) * in[i]; return; }
         for (uint32_t i = 0; i < n; ++i) {
             const float x = in[i];                       // read first: in and out may alias
-            if (recTrack_ >= 0 && rec_ == maxRec_) closeFirst();   // max length: close as if B were pressed
+            if (recTrack_ >= 0 && rec_ == maxRec_) closeFirst(recToDub_);   // max length: close as if B were pressed
+            if (L_ && idle()) reset();                   // the last track went empty and its ramp ended: L resets
             const uint32_t h = histW_;
             hist_[h] = x;
             if (++histW_ == histLen_) histW_ = 0;
-            float y = 0.0f, used = 0.0f;
-            for (Track& tr : tracks_) {
-                if (tr.state == TrackState::Recording) { // first recording: overwrite (reused pages hold old audio)
-                    tr.buf[rec_] = x * fadeInGain(rec_);
-                    ++rec_;
-                    continue;
-                }
-                y += play(tr);                           // read before write: the player hears the dry path
-                used += writeInput(tr, x);
+            float y = dry_.next(dryTo, ramp_) * x, used = 0.0f;
+            if (recTrack_ >= 0) {                        // first recording: overwrite (reused pages hold old audio)
+                tracks_[recTrack_].buf[rec_] = x * fadeInGain(rec_);
+                ++rec_;
+            } else if (L_) {
+                for (Track& tr : tracks_) y += play(tr); // read before write: the player hears the dry path
+                for (Track& tr : tracks_) used += writeOut(tr, x);   // tails and fades first: the one track
+                for (Track& tr : tracks_) if (writing(tr)) used += writeIn(tr, x, used);   // recording takes the rest
+                if (++pos_ == L_) pos_ = 0;
             }
             histUsed_[h] = used;
-            if (L_ && ++pos_ == L_) pos_ = 0;
-            out[i] = y;
+            out[i] = softclip(y);
         }
     }
 
+    // Only one track records at a time: a press while another track records or overdubs first closes that one
+    // (to Playing, never Rec->Dub), then does this track's own action.
     void pressRec(int t) {
         if (!valid(t)) return;
+        bool cont = false;                               // the new writer complements the closed one's tail/fade
+        for (int u = 0; u < kTracks; ++u)
+            if (u != t && writing(tracks_[u])) cont = close(u, false);
         Track& tr = tracks_[t];
+        const uint32_t D = msToSamples(trigMs_, sr_);
         switch (tr.state) {
-        case TrackState::Empty:       if (L_ == 0 && recTrack_ < 0) startFirst(t); break;
-        case TrackState::Recording:   closeFirst(); break;
-        case TrackState::Playing:     startDub(tr, msToSamples(trigMs_, sr_), false); break;
-        case TrackState::Overdubbing: endDub(tr, false); break;
+        case TrackState::Empty:   if (L_) startDub(tr, D, cont, true); else startFirst(t); break;
+        case TrackState::Playing: startDub(tr, D, cont); break;
+        default:                  close(t, recToDub_); break;
         }
     }
 
     void undo(int t) {
         if (!valid(t)) return;
         Track& tr = tracks_[t];
-        if (tr.state == TrackState::Recording) { tr.state = TrackState::Empty; recTrack_ = -1; return; }
+        if (tr.state == TrackState::Recording) {         // abort: the track is empty again
+            tr.state = TrackState::Empty;
+            if (recTrack_ == t) recTrack_ = -1;
+            return;
+        }
         if (tr.nOps == kMaxPendingOps) return;           // presses past the cap are ignored
         if (tr.state == TrackState::Overdubbing) {
             endDub(tr, true);                            // cancel: subtracted, not kept for redo
@@ -135,6 +157,33 @@ public:
             addOp(tr, tr.layers[tr.undoTop].d, 1.0f, true, int32_t(tr.undoTop));
             ++tr.undoTop;
         }
+    }
+
+    // Drops the track's layers and redo; it goes Empty and ramps out. The buffer stays for the next zero op.
+    void clearTrack(int t) {
+        if (!valid(t)) return;
+        Track& tr = tracks_[t];
+        if (recTrack_ == t) recTrack_ = -1;
+        dropLayers(tr);                                  // an op still reading a layer keeps it: the ramp-out is smooth
+        tr.state = TrackState::Empty;
+    }
+    void clearAll() { for (int t = 0; t < kTracks; ++t) clearTrack(t); }
+
+    // Playback gains: settings, stored even while disabled; every gain ramps to its target over kRampMs.
+    void setOn(int t, bool on) { if (inRange(t)) tracks_[t].on = on; }
+    void toggleOn(int t) { if (inRange(t)) tracks_[t].on = !tracks_[t].on; }
+    bool isOn(int t) const { return inRange(t) && tracks_[t].on; }
+    void setVolumeDb(int t, float db) {
+        if (!inRange(t)) return;
+        tracks_[t].volDb = std::max(-60.0f, std::min(db, 6.0f));   // NaN -> -60
+        tracks_[t].vol = std::pow(10.0f, tracks_[t].volDb / 20.0f);
+    }
+    float volumeDb(int t) const { return inRange(t) ? tracks_[t].volDb : 0.0f; }
+    void setDryThru(bool on) { dryThru_ = on; }
+    void setBypass(bool on) { bypass_ = on; }            // mutes the loops (they keep running); dry is unchanged
+    void snapGains() {                                   // jump every gain to its target (first run after load)
+        for (Track& tr : tracks_) tr.gain.snap(target(tr));
+        dry_.snap(dryThru_ ? 1.0f : 0.0f);
     }
 
     void setTailMs(float ms) { tailMs_ = std::max(0.0f, std::min(ms, kMaxLoopSeconds * 1000.0f)); }
@@ -172,20 +221,21 @@ private:
         Delta d;                         // a copy of the handle: the blocks are shared with the layer
         DeltaCursor c;
         float sign = 0.0f;
-        uint32_t done = 0;               // samples since it started; ramps for ramp_, ends at L
+        uint32_t done = 0, len = 0;      // samples since it started; ramps for ramp_, ends at len
         int32_t layer = -1;              // its layer while d is in a stack, else -1
         bool owns = false, ramp = false; // owns: releases d when it ends
+        bool zero = false;               // a zero op: sets buf = 0 instead (a recording onto the loop)
     };
-    struct Writer {                      // writes one layer: the overdub, or its punch-out fade
-        int32_t layer = -1;              // index in layers; -1 = no delta
+    struct Writer {                      // writes the overdub (or a recording onto the loop), or its punch-out fade
+        int32_t layer = -1;              // index in layers; -1 = no delta (a recording onto the loop: the base)
         uint32_t w = 0, n = 0;           // write position; samples written (delta offset = n mod L)
         uint32_t left = 0;               // punch-out fade samples to go (0 = idle)
         float env = 0.0f, peak = 0.0f;   // last envelope; peak |v| written
         DeltaCursor c;
-        bool cont = false, lost = false; // cont: envelope = 1 - what others write (Rec->Dub); lost: pool was full
+        bool cont = false, lost = false; // cont: envelope = 1 - what others write (Rec->Dub, handover); lost: pool full
     };
     struct Track {
-        float* buf = nullptr;
+        float* buf = nullptr;            // the base, plus every layer still in the undo stack
         Layer* layers = nullptr;         // [0, undoTop) undo stack, [undoTop, redoTop) redo stack, top at undoTop
         uint32_t undoTop = 0, redoTop = 0;
         Op ops[kMaxPendingOps];          // in start order
@@ -193,12 +243,25 @@ private:
         Writer dub, fade;
         TrackState state = TrackState::Empty;
         uint32_t tailEnd = 0;            // > 0: the input still blends into [pos, tailEnd) on the pass after the close
-        float gain = 0.0f;               // output ramp for base undo/redo
+        Ramp gain;                       // output gain, towards target()
+        float volDb = 0.0f, vol = 1.0f;  // volume in dB and linear
+        bool on = true;
         bool baseUndone = false;         // the base is on top of the redo stack
     };
 
-    bool valid(int t) const { return enabled_ && t >= 0 && t < kTracks; }
+    static bool inRange(int t) { return t >= 0 && t < kTracks; }
+    bool valid(int t) const { return enabled_ && inRange(t); }
     float fadeInGain(uint32_t i) const { return i < fadeIn_ ? float(i) / float(fadeIn_) : 1.0f; }
+    static bool writing(const Track& tr) { return tr.state == TrackState::Recording || tr.state == TrackState::Overdubbing; }
+    float target(const Track& tr) const { return tr.state != TrackState::Empty && tr.on && !bypass_ ? tr.vol : 0.0f; }
+    bool idle() const {                                  // every track empty and ramped out
+        for (const Track& tr : tracks_) if (tr.state != TrackState::Empty || tr.gain.v != 0.0f) return false;
+        return true;
+    }
+    bool overlap() const {                               // some track still takes a share of the input
+        for (const Track& tr : tracks_) if (pos_ < tr.tailEnd || tr.fade.left) return true;
+        return false;
+    }
 
     // Back-date by D: the last D inputs from the history ring become buf[0..D).
     void startFirst(int t) {
@@ -211,12 +274,23 @@ private:
         tracks_[t].state = TrackState::Recording;
     }
 
-    // The close is back-dated by the same D, so L = r - D and the D samples past it are tail.
-    void closeFirst() {
+    // Ends u's recording or overdub as its B press would. True if u still takes a share of the input after it
+    // (a tail or punch-out fade): a track starting now takes the complement.
+    bool close(int u, bool toDub) {
+        Track& tr = tracks_[u];
+        if (recTrack_ == u) return closeFirst(toDub);
+        const bool base = tr.state == TrackState::Recording;   // a recording onto the loop
+        endDub(tr, false);
+        if (base && toDub) startDub(tr, 0, true);        // Rec->Dub: the fade input splits g / 1-g
+        return tr.fade.left > 0;
+    }
+
+    // The close is back-dated by the same D, so L = r - D and the D samples past it are tail. True if it has a tail.
+    bool closeFirst(bool toDub) {
         Track& tr = tracks_[recTrack_];
         const uint32_t L = rec_ - recD_;
         recTrack_ = -1;
-        if (L < minLoop_) { tr.state = TrackState::Empty; return; }   // an accidental double press
+        if (L < minLoop_) { tr.state = TrackState::Empty; return false; }   // an accidental double press
         const uint32_t T = std::min(msToSamples(tailMs_, sr_), L / 2);
         for (uint32_t i = 0; i < std::min(recD_, T); ++i)             // fold the tail recorded so far
             tr.buf[i] += tr.buf[L + i] * float(T - i) / float(T);
@@ -226,25 +300,36 @@ private:
         L_ = L;
         pos_ = recD_ % L;                                             // D <= histLen_ == minLoop_ <= L
         tr.state = TrackState::Playing;
-        tr.gain = 1.0f;                                               // no ramp: the recording has its fade-in
-        if (recToDub_) startDub(tr, recD_, true);                     // Rec->Dub: the tail input splits g / 1-g
+        tr.gain.snap(target(tr));                                     // no ramp: the recording has its fade-in
+        if (toDub) startDub(tr, recD_, true);                         // Rec->Dub: the tail input splits g / 1-g
+        return T > 0;
     }
 
     // Punch-in, back-dated by D: the last D inputs go to the D positions before the write position.
-    // cont (Rec->Dub): the layer takes exactly the complement of the tail. Otherwise it fades in, capped by
-    // the complement of a tail or punch-out fade still writing, so it never steps where it starts.
-    void startDub(Track& tr, uint32_t D, bool cont) {
-        clearRedo(tr);
+    // cont (Rec->Dub, handover): the layer takes exactly the complement of what the others write. Otherwise it
+    // fades in, capped by the complement of a tail or punch-out fade still writing, so it never steps where it starts.
+    // base: a recording onto the loop (L set, track Empty). It becomes the track's base, with no delta. The reused
+    // buffer reads as silence: the positions behind the playhead are zeroed now, the rest by a zero op ahead of it.
+    // ponytail: the zero op does not ramp; a re-record within kRampMs of a clear or base undo cuts that ramp-out
+    void startDub(Track& tr, uint32_t D, bool cont, bool base = false) {
+        const uint32_t back = D + msToSamples(advMs_, sr_);   // the offset writes behind the playhead
+        if (base) wipe(tr); else clearRedo(tr);          // a stale base or its pending ops never come back
         Writer& dub = tr.dub;
         dub = Writer{};
-        dub.layer = int32_t(tr.undoTop);
-        dub.w = (pos_ + 2 * L_ - D - msToSamples(advMs_, sr_)) % L_;   // the offset writes behind the playhead
-        Layer& ly = tr.layers[tr.undoTop];
-        ly.d.begin(dub.w);
-        ly.seq = ++seq_;
-        ly.refs = 0;
+        dub.w = (pos_ + 2 * L_ - back) % L_;
         dub.cont = cont;
-        const bool split = pos_ < tr.tailEnd || tr.fade.left;      // else the history's shares are stale
+        if (base) {
+            const uint32_t z = std::min(back, L_);
+            for (uint32_t i = 1; i <= z; ++i) tr.buf[(pos_ + L_ - i) % L_] = 0.0f;
+            if (z < L_) { Op& op = tr.ops[tr.nOps++]; op = Op{}; op.zero = true; op.len = L_ - z; }
+        } else {
+            dub.layer = int32_t(tr.undoTop);
+            Layer& ly = tr.layers[tr.undoTop];
+            ly.d.begin(dub.w);
+            ly.seq = ++seq_;
+            ly.refs = 0;
+        }
+        const bool split = overlap();                    // else the history's shares are stale
         for (uint32_t i = 0; i < D; ++i) {
             const uint32_t k = (histW_ + histLen_ - D + i) % histLen_;
             const float rest = std::max(0.0f, 1.0f - histUsed_[k]);
@@ -253,52 +338,57 @@ private:
             dub.env = e;
             histUsed_[k] += e;
         }
-        tr.state = TrackState::Overdubbing;
+        tr.state = base ? TrackState::Recording : TrackState::Overdubbing;
     }
 
     // Punch-out (a layer, then a 5 ms fade that is not back-dated), or cancel/silent (subtracted, no layer).
+    // A recording onto the loop (no delta) just gets the fade: it is the base.
     void endDub(Track& tr, bool cancel) {
         Writer& dub = tr.dub;
-        Delta& d = tr.layers[dub.layer].d;
         tr.state = TrackState::Playing;
-        if (dub.lost) {                                  // the pool was full: the audio stays, without undo
-            d.release(pool_);
-            dub.layer = -1;
-        } else if (d.length() == 0) {
-            return;                                      // nothing written (D = 0, both presses in one gap)
-        } else if ((cancel || dub.peak < kSilenceFloor) && tr.nOps < kMaxPendingOps) {
-            addOp(tr, d, -1.0f, cancel, -1);             // the op owns the blocks now
-            d.begin(0);
-            return;                                      // all of it is subtracted: nothing to fade out
-        } else {                                         // a layer (silent only if no op slot is free)
-            tr.redoTop = ++tr.undoTop;
+        if (dub.layer >= 0) {
+            Delta& d = tr.layers[dub.layer].d;
+            if (dub.lost) {                              // the pool was full: the audio stays, without undo
+                d.release(pool_);
+                dub.layer = -1;
+            } else if (d.length() == 0) {
+                return;                                  // nothing written (D = 0, both presses in one gap)
+            } else if ((cancel || dub.peak < kSilenceFloor) && tr.nOps < kMaxPendingOps) {
+                addOp(tr, d, -1.0f, cancel, -1);         // the op owns the blocks now
+                d.begin(0);
+                return;                                  // all of it is subtracted: nothing to fade out
+            } else {                                     // a layer (silent only if no op slot is free)
+                tr.redoTop = ++tr.undoTop;
+            }
         }
         // ponytail: a fade still running (PLAY, DUB, PLAY within 5 ms) is cut short; give it a second slot if heard
         tr.fade = dub;
         tr.fade.left = fadeOut_;
     }
 
-    // Commits the pending ops at the playhead, then reads it.
+    // Commits the pending ops at the playhead, then reads it through the track's gain.
     float play(Track& tr) {
         float adj = 0.0f;                                // holds back the ops' change during their ramp
         for (uint32_t k = 0; k < tr.nOps;) {
             Op& op = tr.ops[k];
-            const uint32_t off = (pos_ + L_ - op.d.start()) % L_;
-            if (off < op.d.length()) {
-                const float v = op.sign * op.d.read(pool_, op.c, off);
-                tr.buf[pos_] += v;
-                if (op.ramp && op.done < ramp_) adj -= v * (1.0f - float(op.done) / float(ramp_));
+            if (op.zero) {
+                tr.buf[pos_] = 0.0f;
+            } else {
+                const uint32_t off = (pos_ + L_ - op.d.start()) % L_;
+                if (off < op.d.length()) {
+                    const float v = op.sign * op.d.read(pool_, op.c, off);
+                    tr.buf[pos_] += v;
+                    if (op.ramp && op.done < ramp_) adj -= v * (1.0f - float(op.done) / float(ramp_));
+                }
             }
-            if (++op.done == L_) endOp(tr, k); else ++k;
+            if (++op.done == op.len) endOp(tr, k); else ++k;
         }
-        const float target = tr.state == TrackState::Empty ? 0.0f : 1.0f;
-        const float step = 1.0f / float(ramp_);
-        tr.gain = tr.gain < target ? std::min(target, tr.gain + step) : std::max(target, tr.gain - step);
-        return tr.gain > 0.0f ? tr.gain * (tr.buf[pos_] + adj) : 0.0f;
+        const float g = tr.gain.next(target(tr), ramp_);
+        return g != 0.0f ? g * (tr.buf[pos_] + adj) : 0.0f;
     }
 
-    // Adds the input to the base tail, the punch-out fade and the overdub; returns the envelopes' sum.
-    float writeInput(Track& tr, float x) {
+    // The outgoing shares of the input: the first recording's tail and the punch-out fade; returns their sum.
+    float writeOut(Track& tr, float x) {
         float used = 0.0f;
         if (pos_ < tr.tailEnd) {                         // tail of the first recording, g: 1 -> 0 over T = tailEnd
             tr.buf[pos_] += x * float(tr.tailEnd - pos_) / float(tr.tailEnd);
@@ -311,19 +401,21 @@ private:
             used += e;
             --tr.fade.left;
         }
-        if (tr.state == TrackState::Overdubbing) {
-            const float rest = std::max(0.0f, 1.0f - used);
-            const float e = tr.dub.cont ? rest : std::min(fadeInGain(tr.dub.n), rest);
-            write(tr, tr.dub, x * e);
-            tr.dub.env = e;
-            used += e;
-        }
         return used;
+    }
+
+    // The recording or overdub takes what the others left (used): all of it (cont), else its fade-in capped by it.
+    float writeIn(Track& tr, float x, float used) {
+        const float rest = std::max(0.0f, 1.0f - used);
+        const float e = tr.dub.cont ? rest : std::min(fadeInGain(tr.dub.n), rest);
+        write(tr, tr.dub, x * e);
+        tr.dub.env = e;
+        return e;
     }
 
     void write(Track& tr, Writer& wr, float v) {
         tr.buf[wr.w] += v;
-        if (!wr.lost) store(tr, wr, v);
+        if (wr.layer >= 0 && !wr.lost) store(tr, wr, v);
         wr.peak = std::max(wr.peak, std::fabs(v));
         if (++wr.w == L_) wr.w = 0;
         ++wr.n;
@@ -388,13 +480,30 @@ private:
         ly.d.begin(0);
     }
 
+    // Empties both stacks (and the overdub in progress) and stops the track's writers. The buffer stays.
+    void dropLayers(Track& tr) {
+        const uint32_t top = tr.redoTop + (tr.state == TrackState::Overdubbing ? 1 : 0);   // + the overdub's slot
+        for (uint32_t i = 0; i < top; ++i) dropLayer(tr, i);
+        tr.undoTop = tr.redoTop = 0;
+        tr.dub = tr.fade = Writer{};
+        tr.tailEnd = 0;
+        tr.baseUndone = false;
+    }
+
+    // dropLayers, and the pending ops too (the buffer they would change is about to be zeroed or dropped).
+    void wipe(Track& tr) {
+        dropLayers(tr);                                  // first: it hands layers still read to their ops
+        for (uint32_t k = 0; k < tr.nOps; ++k) if (tr.ops[k].owns) tr.ops[k].d.release(pool_);
+        tr.nOps = 0;
+    }
+
     // layer >= 0: d is that layer's delta; -1: the op owns d.
     void addOp(Track& tr, const Delta& d, float sign, bool ramp, int32_t layer) {
         Op& op = tr.ops[tr.nOps++];
+        op = Op{};
         op.d = d;
-        op.c = DeltaCursor{};
         op.sign = sign;
-        op.done = 0;
+        op.len = L_;
         op.layer = layer;
         op.owns = layer < 0;
         op.ramp = ramp;
@@ -432,9 +541,10 @@ private:
     uint32_t L_ = 0, pos_ = 0;       // shared loop length (0 = unset) and playhead
     uint32_t rec_ = 0, recD_ = 0;    // first recording: write index and its back-date D
     uint32_t seq_ = 0;               // global layer sequence number (oldest first, across tracks)
-    int recTrack_ = -1;
+    int recTrack_ = -1;              // the track making the first recording (L unset), else -1
     float tailMs_ = 50.0f, trigMs_ = 3.0f, advMs_ = 0.0f;
-    bool recToDub_ = false, enabled_ = false;
+    Ramp dry_;
+    bool recToDub_ = false, enabled_ = false, dryThru_ = false, bypass_ = false;
 };
 
 } // namespace ouro
