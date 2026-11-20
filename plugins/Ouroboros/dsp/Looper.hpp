@@ -323,7 +323,7 @@ private:
 
     void write(Track& tr, Writer& wr, float v) {
         tr.buf[wr.w] += v;
-        if (!wr.lost) store(tr.layers[wr.layer].d, wr, v);
+        if (!wr.lost) store(tr, wr, v);
         wr.peak = std::max(wr.peak, std::fabs(v));
         if (++wr.w == L_) wr.w = 0;
         ++wr.n;
@@ -333,10 +333,11 @@ private:
     // stops storing; endDub() then releases the overdub's delta. A full pool first frees the oldest redo
     // entry, then the globally-oldest undo layer.
     // ponytail: a punch-out fade that hits a full pool keeps a truncated delta (undo leaves <= 5 ms of fade)
-    void store(Delta& d, Writer& wr, float v) {
-        if (wr.n >= L_) d.accumulate(pool_, wr.c, wr.n % L_, v);
+    void store(Track& tr, Writer& wr, float v) {
+        // evict() moves layer slots: re-resolve the delta by index after each one
+        if (wr.n >= L_) tr.layers[wr.layer].d.accumulate(pool_, wr.c, wr.n % L_, v);
         else {
-            while (!d.append(pool_, v))
+            while (!tr.layers[wr.layer].d.append(pool_, v))
                 if (!evict()) { wr.lost = true; break; }
         }
     }
