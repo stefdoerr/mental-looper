@@ -24,7 +24,7 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
                 if (fill || x == x0 || x == x1 - 1 || y == y0 || y == y1 - 1) setPixel(bits, w, x, y);
     };
 
-    const bool tall = h >= 20;
+    const bool tall = h >= 24;   // below 24 rows the text+marks rows (0..16) would overlap the 7-row bar
     const int barH = tall ? 7 : h, barY = h - barH;
 
     if (tall)
@@ -32,7 +32,7 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
         static const char* const names[] = { "--", "REC", "PLAY", "DUB" };   // by TrackState: Empty, Recording, Playing, Overdubbing
         char t[3] = { 'T', char('1' + v.selected), '\0' };
         drawText(bits, w, 0, 0, t);
-        drawText(bits, w, 18, 0, names[int(v.state[v.selected])]);
+        drawText(bits, w, 14, 0, names[int(v.state[v.selected])]);
 
         const int cell = w / kTracks;
         for (int i = 0; i < kTracks; ++i)
