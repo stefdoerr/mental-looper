@@ -9,6 +9,7 @@
 #include "hmi/alabs-hmi-widgets.h"
 #include "dsp/Looper.hpp"
 #include "hmi/HmiBridge.hpp"
+#include "hmi/LoopWidget.hpp"
 #include "hmi/lv2-hmi.h"
 
 #include <algorithm>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <thread>
 
 START_NAMESPACE_DISTRHO
 
@@ -100,21 +102,34 @@ public:
         if (p >= 0) fHmi.unaddressed(ouro::HmiPort(p));
     }
 
-    void widgetShown(const char*, ALABS_HMI_Widget w, const ALABS_HMI_WidgetArea* area)
+    void widgetShown(const char* symbol, ALABS_HMI_Widget w, const ALABS_HMI_WidgetArea* area)
     {
-        // As in the aLabs example: take the slot only while free, write its
-        // fields, publish the handle last.
-        if (fWidgetDraw == nullptr || fSlot.handle.load(std::memory_order_acquire) != nullptr)
+        if (fWidgetDraw == nullptr || w == nullptr || area == nullptr || std::strcmp(symbol, "loop") != 0
+            || area->pixelFormat != ALABS_HMI_PixelFormat_Mono1
+            || area->width == 0 || area->width > kMaxW || area->height == 0 || area->height > kMaxH)
             return;
-        fSlot.w.store(area->width, std::memory_order_relaxed);
-        fSlot.h.store(area->height, std::memory_order_relaxed);
-        fSlot.handle.store(w, std::memory_order_release);
+        // Take a free slot, write its size, publish the handle last. Every showing gets a new
+        // handle, so run() redraws the whole area whenever the handle differs from the one it drew.
+        for (auto& s : fSlots)
+            if (s.handle.load(std::memory_order_acquire) == nullptr)
+            {
+                s.w.store(area->width, std::memory_order_relaxed);
+                s.h.store(area->height, std::memory_order_relaxed);
+                s.handle.store(w, std::memory_order_release);
+                return;
+            }
     }
 
     void widgetHidden(ALABS_HMI_Widget w)
     {
-        if (fSlot.handle.load(std::memory_order_acquire) == w)
-            fSlot.handle.store(nullptr, std::memory_order_release);
+        // Null the handle, then wait out a run() that loaded it just before: when this returns,
+        // no draw_bitmap for w is running or will start. run() holds `drawing` only for one render+draw.
+        for (auto& s : fSlots)
+        {
+            ALABS_HMI_Widget expected = w;
+            if (w != nullptr && s.handle.compare_exchange_strong(expected, nullptr))
+                while (s.drawing.load()) std::this_thread::yield();
+        }
     }
 
 protected:
@@ -340,20 +355,47 @@ protected:
         if (fWasFirst) fEngine.snapGains();
         fEngine.process(inputs[0], outputs[0], frames);
 
-        // ponytail: placeholder until the widget renderer: one slot, cleared once per showing.
-        // Every showing gets a new handle, so comparing with the last one drawn
-        // can't lose a clear, even when hide + show race this block.
-        const ALABS_HMI_Widget w = fSlot.handle.load(std::memory_order_acquire);
-        if (w != nullptr && w != fDrawn)
-            fWidgetDraw->draw_bitmap(fWidgetDraw->handle, w, 0, 0,
-                                     fSlot.w.load(std::memory_order_relaxed),
-                                     fSlot.h.load(std::memory_order_relaxed), nullptr);
-        fDrawn = w;
+        // Widgets: blink toggles every 250 ms of audio; slots are redrawn every 960 samples (20 ms at 48 kHz).
+        fBlinkAcc += frames;
+        const uint32_t blinkPeriod = uint32_t(getSampleRate() * 0.25);
+        if (fBlinkAcc >= blinkPeriod) { fBlinkAcc = 0; fBlinkOn = !fBlinkOn; }
+        fDrawAcc += frames;
+        if (fDrawAcc >= 960) { fDrawAcc %= 960; drawWidgets(); }
 
         fHmi.update({fEngine.state(sel), fEngine.nextAction(sel), fEngine.canUndo(sel), sel, fEngine.isOn(sel)});
     }
 
 private:
+    // Renders each shown slot and draws it when the bitmap changed or the handle is new. No allocation: fixed buffers.
+    void drawWidgets()
+    {
+        if (fWidgetDraw == nullptr) return;
+        ouro::WidgetView v = {};
+        v.selected = fSel;
+        for (int t = 0; t < ouro::kTracks; ++t) { v.state[t] = fEngine.state(t); v.on[t] = fEngine.isOn(t); }
+        v.loopLength = fEngine.loopLength(); v.position = fEngine.position();
+        v.recordedSamples = fEngine.recordedSamples(); v.sampleRate = fEngine.sampleRate(); v.blinkOn = fBlinkOn;
+
+        uint8_t bits[kMaxBytes];
+        for (auto& s : fSlots)
+        {
+            s.drawing.store(true);                       // seq_cst: pairs with widgetHidden's null store + drawing load
+            const ALABS_HMI_Widget w = s.handle.load();
+            if (w != nullptr)
+            {
+                const uint16_t sw = s.w.load(std::memory_order_relaxed), sh = s.h.load(std::memory_order_relaxed);
+                const size_t n = ouro::renderLoopWidget(v, sw, sh, bits);
+                if (w != s.drawn || std::memcmp(bits, s.last, n) != 0)
+                {
+                    fWidgetDraw->draw_bitmap(fWidgetDraw->handle, w, 0, 0, sw, sh, bits);
+                    std::memcpy(s.last, bits, n);
+                }
+            }
+            s.drawn = w;
+            s.drawing.store(false);
+        }
+    }
+
     ouro::Looper fEngine;
     float fVal[kNumParams] = {};            // current port values
     float fPrev[kParamBypass] = {};         // values as of the last run() (NaN: apply everything)
@@ -365,12 +407,19 @@ private:
     ouro::HmiBridge fHmi;                           // labels and LEDs; inert without the host's HMI
     const ALABS_HMI_WidgetDraw* fWidgetDraw = nullptr;  // null: host can't show widgets
 
+    static constexpr uint16_t kMaxW = 128, kMaxH = 64;
+    static constexpr size_t kMaxBytes = (kMaxW / 8) * kMaxH;   // 1024
+
     // One shown widget; handle is null while the slot is free.
     struct WidgetSlot {
         std::atomic<ALABS_HMI_Widget> handle{nullptr};
         std::atomic<uint16_t> w{0}, h{0};
-    } fSlot;
-    ALABS_HMI_Widget fDrawn = nullptr;  // run() only: the handle it last drew
+        std::atomic<bool> drawing{false};   // run() is between loading the handle and finishing draw_bitmap
+        ALABS_HMI_Widget drawn = nullptr;   // run() only: the handle last drawn (new handle = redraw all)
+        uint8_t last[kMaxBytes] = {};       // run() only: the last bitmap drawn
+    } fSlots[4];
+    uint32_t fDrawAcc = 0, fBlinkAcc = 0;   // samples since the last widget redraw / blink toggle
+    bool fBlinkOn = false;
 
     DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OuroborosPlugin)
 };

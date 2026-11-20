@@ -223,7 +223,7 @@ test: dpf-patch
 # patch end to end (host features in, HMI / widget extension data out).
 test-lv2: all
 	@mkdir -p build/tests
-	g++ -std=gnu++14 -g -O0 -fsanitize=address -Idpf/distrho/src -I$(PLUGIN_DIR)/hmi tests/lv2/test_lv2_hooks.cpp -ldl -o build/tests/test_lv2_hooks
+	g++ -std=gnu++14 -g -O0 -fsanitize=address -Idpf/distrho/src -I$(PLUGIN_DIR)/hmi tests/lv2/test_lv2_hooks.cpp -ldl -pthread -o build/tests/test_lv2_hooks
 	build/tests/test_lv2_hooks $(BUNDLE)/$(BUNDLE_NAME).so
 
 .PHONY: test test-lv2

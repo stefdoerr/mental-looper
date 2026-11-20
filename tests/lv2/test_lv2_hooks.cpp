@@ -2,7 +2,10 @@
 // to check the DPF patch (features in, extension data out). `make test-lv2`.
 #include <dlfcn.h>
 #include <fstream>
+#include <atomic>
+#include <chrono>
 #include <functional>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -57,6 +60,7 @@ static const LV2_Feature* const fullFeatures[] = { &gOptionsFeature, &gMapFeatur
                                                    &gHmiFeature, &gDrawFeature, nullptr };
 
 static std::string bundleDir;
+static int portIndex(const std::string& ttlPath, const std::string& symbol);
 static float gIn[128], gOut[128], gPorts[64];  // gPorts[i]: port i's lv2:default
 
 // Each control port's lv2:default, from the generated TTL next to the .so.
@@ -115,28 +119,88 @@ static void widgetShownLeadsToDraw(const LV2_Descriptor* d)
     for (int i = 0; i < 20; ++i)
         d->run(h, 128);
     CHECK(!gDraws.empty());
+    if (!gDraws.empty())   // the first draw covers the whole area, with a real bitmap
+        CHECK(gDraws[0].x == 0 && gDraws[0].y == 0 && gDraws[0].w == 40 && gDraws[0].h == 37);
     for (auto& r : gDraws)
-        CHECK(r.x + r.w <= 40 && r.y + r.h <= 37 && r.widget == (ALABS_HMI_Widget)0x1);
+        CHECK(r.x + r.w <= 40 && r.y + r.h <= 37 && r.widget == (ALABS_HMI_Widget)0x1 && !r.nullBits);
+    wn->widget_shown(h, "other", (ALABS_HMI_Widget)0x9, &area);   // unknown symbol: ignored
+    for (int i = 0; i < 20; ++i)
+        d->run(h, 128);
+    for (auto& r : gDraws)
+        CHECK(r.widget != (ALABS_HMI_Widget)0x9);
     wn->widget_hidden(h, (ALABS_HMI_Widget)0x1);
     const size_t n = gDraws.size();
     for (int i = 0; i < 20; ++i)
         d->run(h, 128);
     CHECK(gDraws.size() == n);
 
-    // Hide + re-show racing run(): they land while run() is drawing the old
-    // handle. The new handle must still get its whole area drawn.
+    // Hide + re-show racing run(), from another thread while run() is drawing the old handle:
+    // widget_hidden must not return before that draw ends, and the new handle gets its whole area drawn.
     ALABS_HMI_WidgetArea small = { sizeof(small), 51, 8, ALABS_HMI_PixelFormat_Mono1 };
     wn->widget_shown(h, "loop", (ALABS_HMI_Widget)0x2, &small);
+    std::atomic<bool> hiddenReturned{false};
+    std::thread host;
     gDuringDraw = [&] {
-        wn->widget_hidden(h, (ALABS_HMI_Widget)0x2);
-        wn->widget_shown(h, "loop", (ALABS_HMI_Widget)0x3, &small);
+        host = std::thread([&] {
+            wn->widget_hidden(h, (ALABS_HMI_Widget)0x2);
+            hiddenReturned = true;
+            wn->widget_shown(h, "loop", (ALABS_HMI_Widget)0x3, &small);
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        CHECK(!hiddenReturned);   // still waiting for this draw to finish
     };
+    for (int i = 0; i < 20; ++i)
+        d->run(h, 128);
+    if (host.joinable()) host.join();
+    CHECK(hiddenReturned);
     for (int i = 0; i < 20; ++i)
         d->run(h, 128);
     bool whole = false;
     for (auto& r : gDraws)
-        whole |= r.widget == (ALABS_HMI_Widget)0x3 && r.x == 0 && r.y == 0 && r.w == 51 && r.h == 8;
+        whole |= r.widget == (ALABS_HMI_Widget)0x3 && r.x == 0 && r.y == 0 && r.w == 51 && r.h == 8 && !r.nullBits;
     CHECK(whole);
+    d->cleanup(h);
+}
+
+// A host that shows the widget but gave no WidgetDraw feature: nothing to draw with, nothing crashes.
+static void widgetShownWithoutDrawFeature(const LV2_Descriptor* d)
+{
+    static const LV2_Feature* const noDraw[] = { &gOptionsFeature, &gMapFeature, &gHmiFeature, nullptr };
+    gDraws.clear();
+    LV2_Handle h = d->instantiate(d, 48000, bundleDir.c_str(), noDraw);
+    connectAll(d, h);
+    d->activate(h);
+    auto wn = (const ALABS_HMI_WidgetNotification*)d->extension_data(ALABS_HMI__WidgetNotification);
+    ALABS_HMI_WidgetArea area = { sizeof(area), 40, 37, ALABS_HMI_PixelFormat_Mono1 };
+    wn->widget_shown(h, "loop", (ALABS_HMI_Widget)0x1, &area);
+    for (int i = 0; i < 40; ++i)
+        d->run(h, 128);
+    wn->widget_hidden(h, (ALABS_HMI_Widget)0x1);
+    CHECK(gDraws.empty());
+    d->cleanup(h);
+}
+
+// Records a 0.5 s loop through the rec port, shows the widget, runs 2 s: the progress bar keeps being redrawn.
+static void widgetRedrawsWhenProgressMoves(const LV2_Descriptor* d, const std::string& ttlPath)
+{
+    gDraws.clear();
+    const int rec = portIndex(ttlPath, "rec");
+    CHECK(rec == 2);
+    LV2_Handle h = d->instantiate(d, 48000, bundleDir.c_str(), fullFeatures);
+    connectAll(d, h);
+    d->activate(h);
+    auto wn = (const ALABS_HMI_WidgetNotification*)d->extension_data(ALABS_HMI__WidgetNotification);
+    float& recPort = gPorts[rec];
+    auto press = [&] { recPort = 1; d->run(h, 128); recPort = 0; d->run(h, 128); };
+    press();
+    for (int i = 0; i < 187; ++i) d->run(h, 128);   // ~0.5 s
+    press();
+    ALABS_HMI_WidgetArea area = { sizeof(area), 40, 37, ALABS_HMI_PixelFormat_Mono1 };
+    wn->widget_shown(h, "loop", (ALABS_HMI_Widget)0x1, &area);
+    for (int i = 0; i < 750; ++i) d->run(h, 128);   // 2 s
+    CHECK(gDraws.size() >= 3);
+    for (auto& r : gDraws)
+        CHECK(!r.nullBits && r.x == 0 && r.y == 0 && r.w == 40 && r.h == 37);
     d->cleanup(h);
 }
 
@@ -196,6 +260,8 @@ int main(int argc, char** argv)
     extensionDataForwarded(d);
     instantiateWithoutFeatures(d);
     widgetShownLeadsToDraw(d);
+    widgetShownWithoutDrawFeature(d);
     addressedRecGetsLabel(d, so.substr(0, so.size() - 3) + ".ttl");
+    widgetRedrawsWhenProgressMoves(d, so.substr(0, so.size() - 3) + ".ttl");
     REPORT();
 }
