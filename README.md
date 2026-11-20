@@ -67,5 +67,4 @@ For LLM-assisted work, point your agent at [`INSTRUCTIONS.md`](INSTRUCTIONS.md).
 
 ## License
 
-Ouroboros is released under [CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/),
-like the template it was built from. DPF is ISC-licensed (see [`dpf/LICENSE`](dpf/LICENSE)).
+Plugin code is ISC-licensed. DPF is ISC-licensed (see [`dpf/LICENSE`](dpf/LICENSE)).
