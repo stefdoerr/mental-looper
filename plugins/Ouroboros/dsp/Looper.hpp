@@ -291,7 +291,7 @@ private:
         const uint32_t L = rec_ - recD_;
         recTrack_ = -1;
         if (L < minLoop_) { tr.state = TrackState::Empty; return false; }   // an accidental double press
-        const uint32_t T = std::min(msToSamples(tailMs_, sr_), L / 2);
+        const uint32_t T = std::min(std::max(msToSamples(tailMs_, sr_), fadeIn_), L / 2);   // tail 0: a 3 ms crossfade
         for (uint32_t i = 0; i < std::min(recD_, T); ++i)             // fold the tail recorded so far
             tr.buf[i] += tr.buf[L + i] * float(T - i) / float(T);
         for (uint32_t i = 0; i < recD_; ++i)                          // the share those inputs went to the base

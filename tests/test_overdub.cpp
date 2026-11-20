@@ -61,6 +61,16 @@ static void recToDubUndoIsSeamless() {
     r.feed(slice(in, 24064, 33664)); r.lp.pressRec(0); r.lp.undo(0);
     CHECK(maxStep(wrap(r.settle())) < 2.5f * sineStep(220, 0.1f));
 }
+static void recToDubTailZeroUndoIsSeamless() {                     // undoing the dub leaves the 3 ms crossfade
+    for (float trig : {0.0f, 3.0f}) {
+        Rig r; r.lp.setRecToDub(true); r.lp.setTailMs(0); r.lp.setTriggerLatencyMs(trig);
+        auto in = sine(220, 0.3f, 60000);
+        r.lp.pressRec(0); r.feed(slice(in, 0, 24100)); r.lp.pressRec(0);
+        r.feed(slice(in, 24100, 30000)); r.lp.pressRec(0); r.feed(slice(in, 30000, 30240));
+        CHECK(maxStep(wrap(r.settle())) < 2.5f * sineStep(220, 0.3f));
+        r.lp.undo(0); CHECK(maxStep(wrap(r.settle())) < 2.5f * sineStep(220, 0.3f));
+    }
+}
 static void recToDubSplitsTheBackDatedTail() {                      // D = 96 < T = 2400: fold + live tail
     Rig r; r.lp.setRecToDub(true); r.lp.setTriggerLatencyMs(2.0f);
     const uint32_t s = 4096, D = 96, T = 2400, L = 24064;
@@ -124,7 +134,7 @@ static void undoMashIsBounded() {                                   // Review Fo
 
 int main() {
     undoRestoresExactly(); undoIsLazy(); undoIsClickFree(); undoRampsSpanThePress(); undoWhileOverdubbingCancels();
-    onePressOneLayer(); silentOverdubMakesNoLayer(); punchesAreClickFree(); recToDubUndoIsSeamless();
+    onePressOneLayer(); silentOverdubMakesNoLayer(); punchesAreClickFree(); recToDubUndoIsSeamless(); recToDubTailZeroUndoIsSeamless();
     recToDubSplitsTheBackDatedTail(); redubRightAfterCancelFadesIn(); dubMidTailFadesIn(); dubLateInPunchOutFadeFadesIn();
     advanceWritesEarlier(); newOverdubDiscardsRedo(); undoMashIsBounded();
     REPORT();

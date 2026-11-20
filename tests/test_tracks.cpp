@@ -26,6 +26,15 @@ static void handoverSplitKeepsUnity() {
     for (uint32_t i = 0; i < 2400; ++i)
         CHECK(std::fabs(img[i] - (in[i] * fadeInGain(i) + in[24064 + i])) < 1e-5f);
 }
+static void handoverTailZeroKeepsBaseSmooth() {                    // tail 0: a 3 ms split, t0 alone has no step
+    Rig r; r.lp.setTailMs(0); auto in = sine(220, 0.1f, 48000);
+    r.lp.pressRec(0); r.feed(slice(in, 0, 24100)); r.lp.pressRec(1);   // closed mid-wave
+    r.feed(slice(in, 24100, 24100 + 4800)); r.lp.pressRec(1);
+    auto img = r.settle(); float err = 0.0f;
+    for (uint32_t i = 0; i < 4800; ++i) err = std::max(err, std::fabs(img[i] - (in[i] * fadeInGain(i) + in[24100 + i])));
+    CHECK(err < 1e-5f);
+    CHECK(maxStep(wrap(soloImage(r, 0))) < 2.5f * sineStep(220, 0.1f));
+}
 static void handoverAtPunchOutKeepsUnity() {                        // t0 overdubbing -> t1, inside t0's 5 ms fade
     Rig r; r.lp.setTailMs(0); recordBase(r, 24064, 0.0f); recordBaseOn(r, 1, 0.0f); r.settle();   // silent loops
     const uint32_t L = 24064, p0 = r.lp.position(); auto in = sine(330, 0.1f, 9600);
@@ -181,7 +190,7 @@ static void stressRandomPresses(float trigMs, bool recToDub) {     // Review Foc
 }
 
 int main() {
-    secondTrackLockedToLoop(); handoverClosesAndStarts(); handoverSplitKeepsUnity(); handoverAtPunchOutKeepsUnity();
+    secondTrackLockedToLoop(); handoverClosesAndStarts(); handoverSplitKeepsUnity(); handoverTailZeroKeepsBaseSmooth(); handoverAtPunchOutKeepsUnity();
     onOffRampsAndResumesInPlace(); volumeIsPlaybackOnly(); softClipOnlyAboveKnee(); dryThruAndBypass();
     clearAllResetsAndOverwrites(); recordOnEmptyTrackZeroesReusedBuffer(); baseUndoRedoAndLengthReset();
     offTrackStillRecords(); disabledEngineOutputsDryOnly();
