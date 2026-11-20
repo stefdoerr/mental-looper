@@ -1,18 +1,39 @@
 /*
  * Ouroboros — 4-track looper LV2 plugin for the MOD Dwarf.
- * Mono in / mono out. Skeleton: silent output, bypass parameter only.
+ * Mono in / mono out. The plugin maps ports and footswitch gestures onto the
+ * engine (dsp/Looper.hpp); it makes no DSP decisions of its own.
  */
 #pragma once
 
 #include "DistrhoPlugin.hpp"
 #include "hmi/alabs-hmi-widgets.h"
+#include "dsp/Looper.hpp"
 #include "hmi/lv2-hmi.h"
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
+#include <memory>
 
 START_NAMESPACE_DISTRHO
+
+// Flush denormals on the audio thread (denormals cost ~100x on x86 and cause xruns).
+#if defined(__SSE2__) || defined(__x86_64__) || defined(_M_X64)
+  #include <xmmintrin.h>
+  #include <pmmintrin.h>
+  static inline void flushDenormals() {
+      _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+      _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+  }
+#elif defined(__aarch64__)
+  static inline void flushDenormals() {
+      uint64_t fpcr; __asm__ __volatile__("mrs %0, fpcr" : "=r"(fpcr));
+      __asm__ __volatile__("msr fpcr, %0" :: "r"(fpcr | (1ULL << 24)));  // FZ bit
+  }
+#else
+  static inline void flushDenormals() {}
+#endif
 
 // LV2 port index -> parameter index. Valid because the plugin has no event
 // ports (no state, MIDI or time position): params follow the audio ports.
@@ -21,16 +42,32 @@ constexpr uint32_t paramFromLv2Index(uint32_t lv2Index)
     return lv2Index - (DISTRHO_PLUGIN_NUM_INPUTS + DISTRHO_PLUGIN_NUM_OUTPUTS);
 }
 
+// Port order and symbols are frozen from the first release (saved pedalboards).
+enum ParamIndex {
+    kParamRec = 0, kParamUndoRedo, kParamTrack, kParamOnOff, kParamVolume,
+    kParamUndo, kParamRedo, kParamClearTrack, kParamClearAll,
+    kParamOn1, kParamOn2, kParamOn3, kParamOn4,
+    kParamVolume1, kParamVolume2, kParamVolume3, kParamVolume4,
+    kParamAfterRec, kParamDryThru, kParamTail, kParamHoldTime, kParamBudget,
+    kParamOffset, kParamTriggerLatency,
+    kParamBypass,
+    kNumParams
+};
+
+enum GroupId { kGroupPerform = 0, kGroupTracks, kGroupSettings };
+
 class OuroborosPlugin : public Plugin
 {
 public:
-    enum ParamIndex {
-        kParamBypass = 0,
-        kNumParams
-    };
-
     OuroborosPlugin() : Plugin(kNumParams, 0, 0)
     {
+        for (uint32_t i = 0; i < kNumParams; ++i)
+        {
+            Parameter p;
+            initParameter(i, p);
+            fVal[i] = p.ranges.def;
+        }
+        fEngine.init(getSampleRate(), getBufferSize());   // the only allocation: never in run()
         // LV2 only (null for VST3/CLAP): the host's optional HMI features.
         if (const auto* f = static_cast<const LV2_Feature* const*>(d_nextLv2Features))
             for (; *f != nullptr; ++f)
@@ -41,6 +78,9 @@ public:
                     fWidgetDraw = static_cast<const ALABS_HMI_WidgetDraw*>((*f)->data);
             }
     }
+
+    const ouro::Looper& engine() const { return fEngine; }
+    int selectedTrack() const { return fSel; }   // 0-3
 
     // LV2 extension callbacks (OuroborosPlugin.cpp), from non-RT host threads,
     // possibly while run() runs: share state with run() through atomics only.
@@ -65,7 +105,7 @@ public:
     }
 
 protected:
-    const char* getLabel()       const override { return DISTRHO_PLUGIN_BRAND; }
+    const char* getLabel()       const override { return DISTRHO_PLUGIN_NAME; }
     const char* getMaker()       const override { return DISTRHO_PLUGIN_BRAND; }
     const char* getHomePage()    const override { return PLUGIN_HOMEPAGE; }
     const char* getLicense()     const override { return "ISC"; }
@@ -96,26 +136,184 @@ protected:
         Plugin::initAudioPort(input, index, port);
     }
 
-    void initParameter(uint32_t index, Parameter& parameter) override
+    void initPortGroup(uint32_t groupId, PortGroup& pg) override
+    {
+        // The gN_ prefixes pin the band order in MOD (alphabetical by symbol).
+        switch (groupId)
+        {
+        case kGroupPerform:  pg.name = "Perform";  pg.symbol = "g1_perform";  break;
+        case kGroupTracks:   pg.name = "Tracks";   pg.symbol = "g2_tracks";   break;
+        case kGroupSettings: pg.name = "Settings"; pg.symbol = "g3_settings"; break;
+        default: Plugin::initPortGroup(groupId, pg); break;
+        }
+    }
+
+    void initParameter(uint32_t index, Parameter& p) override
     {
         if (index == kParamBypass)
-            parameter.initDesignation(kParameterDesignationBypass);
+        {
+            p.initDesignation(kParameterDesignationBypass);
+            return;
+        }
+        enum { Trig, Bool, Int, Enum, Db, Ms };
+        struct Def { const char* symbol; const char* name; int kind; float min, max, def; const char* unit; };
+        static const Def defs[kParamBypass] = {
+            {"rec",             "Rec",                Trig, 0, 1, 0, ""},
+            {"undo_redo",       "Undo/Redo",          Bool, 0, 1, 0, ""},
+            {"track",           "Track",              Enum, 1, 4, 1, ""},
+            {"onoff",           "On/Off",             Trig, 0, 1, 0, ""},
+            {"volume",          "Volume",             Db,  -60, 6, 0, "dB"},
+            {"undo",            "Undo",               Trig, 0, 1, 0, ""},
+            {"redo",            "Redo",               Trig, 0, 1, 0, ""},
+            {"clear_track",     "Clear Track",        Trig, 0, 1, 0, ""},
+            {"clear_all",       "Clear All",          Trig, 0, 1, 0, ""},
+            {"on_1",            "On 1",               Bool, 0, 1, 1, ""},
+            {"on_2",            "On 2",               Bool, 0, 1, 1, ""},
+            {"on_3",            "On 3",               Bool, 0, 1, 1, ""},
+            {"on_4",            "On 4",               Bool, 0, 1, 1, ""},
+            {"volume_1",        "Volume 1",           Db,  -60, 6, 0, "dB"},
+            {"volume_2",        "Volume 2",           Db,  -60, 6, 0, "dB"},
+            {"volume_3",        "Volume 3",           Db,  -60, 6, 0, "dB"},
+            {"volume_4",        "Volume 4",           Db,  -60, 6, 0, "dB"},
+            {"after_rec",       "After Rec",          Enum, 0, 1, 0, ""},
+            {"dry_thru",        "Dry Thru",           Bool, 0, 1, 0, ""},
+            {"tail",            "Tail",               Ms,   0, 500, 50, "ms"},
+            {"hold_time",       "Hold Time",          Ms, 200, 2000, 500, "ms"},
+            {"budget",          "Undo Budget",        Ms,  16, 400, 200, "MB"},
+            {"offset",          "Overdub earlier by", Ms,   0, 30, 0, "ms"},
+            {"trigger_latency", "Trigger Latency",    Ms,   0, 50, 3, "ms"},
+        };
+        const Def& d = defs[index];
+        p.symbol = d.symbol;
+        p.name = d.name;
+        p.unit = d.unit;
+        p.ranges.min = d.min; p.ranges.max = d.max; p.ranges.def = d.def;
+        p.groupId = index <= kParamClearAll ? kGroupPerform : index <= kParamVolume4 ? kGroupTracks : kGroupSettings;
+        p.hints = kParameterIsAutomatable;
+        switch (d.kind)
+        {
+        case Trig: p.hints |= kParameterIsTrigger | kParameterIsInteger; break;   // includes boolean
+        case Bool: p.hints |= kParameterIsBoolean | kParameterIsInteger; break;
+        case Int:  p.hints |= kParameterIsInteger; break;
+        case Enum:
+        {
+            const uint8_t n = index == kParamTrack ? 4 : 2;
+            static const char* const trackNames[] = {"Track 1", "Track 2", "Track 3", "Track 4"};
+            static const char* const afterNames[] = {"Rec > Play", "Rec > Dub"};
+            p.hints |= kParameterIsInteger;
+            p.enumValues.count = n;
+            p.enumValues.restrictedMode = true;
+            p.enumValues.values = new ParameterEnumerationValue[n];
+            for (uint8_t k = 0; k < n; ++k)
+            {
+                p.enumValues.values[k].value = d.min + k;
+                p.enumValues.values[k].label = index == kParamTrack ? trackNames[k] : afterNames[k];
+            }
+            break;
+        }
+        default: break;
+        }
     }
 
-    float getParameterValue(uint32_t index) const override
+    float getParameterValue(uint32_t index) const override { return fVal[index]; }
+
+    void setParameterValue(uint32_t index, float value) override { fVal[index] = value; }
+
+    void activate() override
     {
-        return index == kParamBypass && fBypass ? 1.0f : 0.0f;
+        fEngine.reset();
+        fFirst = true;
+        fHold = 0;
+        fHeld = fRedone = false;
     }
 
-    void setParameterValue(uint32_t index, float value) override
+    void sampleRateChanged(double sr) override
     {
-        if (index == kParamBypass)
-            fBypass = value > 0.5f;
+        fEngine.init(sr, getBufferSize());      // non-RT; re-reserves for the new rate
+        fFirst = true;                          // the fresh engine takes every value again
     }
 
-    void run(const float**, float** outputs, uint32_t frames) override
+    void run(const float** inputs, float** outputs, uint32_t frames) override
     {
-        std::fill(outputs[0], outputs[0] + frames, 0.0f);
+        flushDenormals();
+
+        const auto on = [this](uint32_t i) { return fVal[i] > 0.5f; };
+        const auto request = [this](uint32_t i, float v) { fVal[i] = v; fPrev[i] = v; requestParameterValueChange(i, v); };
+
+        // Track selection first: it retargets everything below.
+        const int sel = std::min(3, std::max(0, int(std::lround(fVal[kParamTrack])) - 1));
+        const bool trackChanged = sel != fSel;
+        fSel = sel;
+        if (fFirst)
+            for (uint32_t i = 0; i < kParamBypass; ++i) fPrev[i] = std::nanf("");   // every value counts as changed
+        const auto changed = [this](uint32_t i) { return fVal[i] != fPrev[i]; };
+
+        // Settings and per-track ports: drive the engine on change (all of them on the first run).
+        for (int t = 0; t < 4; ++t)
+        {
+            if (changed(kParamOn1 + t)) fEngine.setOn(t, on(kParamOn1 + t));
+            if (changed(kParamVolume1 + t))
+            {
+                fEngine.setVolumeDb(t, fVal[kParamVolume1 + t]);
+                if (t == sel && !changed(kParamVolume)) request(kParamVolume, fVal[kParamVolume1 + t]);
+            }
+        }
+        if (changed(kParamAfterRec))      fEngine.setRecToDub(on(kParamAfterRec));
+        if (changed(kParamDryThru))       fEngine.setDryThru(on(kParamDryThru));
+        if (changed(kParamTail))          fEngine.setTailMs(fVal[kParamTail]);
+        if (changed(kParamBudget))        fEngine.setBudgetMb(fVal[kParamBudget]);
+        if (changed(kParamOffset))        fEngine.setAdvanceMs(fVal[kParamOffset]);
+        if (changed(kParamTriggerLatency)) fEngine.setTriggerLatencyMs(fVal[kParamTriggerLatency]);
+        fEngine.setBypass(on(kParamBypass));
+
+        // Volume proxy: follows the selected track; a different value written to it goes to that track.
+        const uint32_t vn = kParamVolume1 + sel;
+        if (trackChanged || (fFirst && fVal[kParamVolume] != fVal[vn]))
+            request(kParamVolume, fVal[vn]);
+        else if (changed(kParamVolume) && fVal[kParamVolume] != fVal[vn])
+        {
+            fEngine.setVolumeDb(sel, fVal[kParamVolume]);
+            request(vn, fVal[kParamVolume]);
+        }
+
+        // Triggers and the footswitch act on rising edges only; a trigger held high from the
+        // start (previous value NaN on the first run) counts as a press.
+        const auto rising = [&](uint32_t i) { return on(i) && !(fPrev[i] > 0.5f); };
+        if (rising(kParamRec))        fEngine.pressRec(sel);
+        if (rising(kParamUndo))       fEngine.undo(sel);
+        if (rising(kParamRedo))       fEngine.redo(sel);
+        if (rising(kParamClearTrack)) fEngine.clearTrack(sel);
+        if (rising(kParamClearAll))   fEngine.clearAll();
+        if (rising(kParamOnOff))
+        {
+            fEngine.toggleOn(sel);
+            request(kParamOn1 + sel, fEngine.isOn(sel) ? 1.0f : 0.0f);
+        }
+
+        // Undo/redo footswitch: a tap undoes on release, a hold of hold_time redoes once, while held.
+        // ponytail: the hold is timed in whole blocks (<= one block of error); sample-exact if it matters.
+        if (on(kParamUndoRedo))
+        {
+            if (!fHeld) { fHeld = true; fRedone = false; fHold = 0; }
+            fHold += frames;
+            if (!fRedone && fHold >= uint64_t(fVal[kParamHoldTime] * 0.001 * getSampleRate()))
+            {
+                fRedone = true;
+                fEngine.redo(sel);
+            }
+        }
+        else if (fHeld)
+        {
+            fHeld = false;
+            if (!fRedone) fEngine.undo(sel);
+        }
+
+        for (uint32_t i = 0; i < kParamBypass; ++i) fPrev[i] = fVal[i];
+        const bool fWasFirst = fFirst;
+        fFirst = false;
+
+        if (fWasFirst) fEngine.snapGains();
+        fEngine.process(inputs[0], outputs[0], frames);
 
         // ponytail: placeholder until the widget renderer: one slot, cleared once per showing.
         // Every showing gets a new handle, so comparing with the last one drawn
@@ -129,7 +327,13 @@ protected:
     }
 
 private:
-    bool fBypass = false;
+    ouro::Looper fEngine;
+    float fVal[kNumParams] = {};            // current port values
+    float fPrev[kParamBypass] = {};         // values as of the last run() (NaN: apply everything)
+    int fSel = 0;                           // selected track, 0-3
+    bool fFirst = true;                     // first run after activate(): apply every value, then snap gains
+    uint64_t fHold = 0;                     // samples undo_redo has been held
+    bool fHeld = false, fRedone = false;
 
     const LV2_HMI_WidgetControl* fHmiWc = nullptr;  // null: host has no MOD HMI
     const ALABS_HMI_WidgetDraw* fWidgetDraw = nullptr;  // null: host can't show widgets

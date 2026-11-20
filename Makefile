@@ -117,6 +117,11 @@ plugin: dpf-patch
 
 ttl: plugin dpf/utils/lv2_ttl_generator
 	@$(CURDIR)/dpf/utils/generate-ttl.sh
+	@# Momentary footswitch: DPF can't emit MOD-specific port properties, so patch
+	@# mod:preferMomentaryOnByDefault into the undo_redo port here.
+	@for sym in undo_redo; do \
+		sed -i "/lv2:symbol \"$$sym\" ;/a\        lv2:portProperty mod:preferMomentaryOnByDefault ;" "$(BUNDLE)/$(BUNDLE_NAME).ttl"; \
+	done
 	@# HMI / widget declarations DPF can't emit (generate-ttl.sh rewrites the
 	@# TTL fresh each build, so this never stacks).
 	sed 's|@PLUGIN_URI@|$(PLUGIN_URI)|' $(PLUGIN_DIR)/hmi.ttl.in >> $(BUNDLE)/$(BUNDLE_NAME).ttl
