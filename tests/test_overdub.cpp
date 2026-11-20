@@ -106,6 +106,26 @@ static void dubLateInPunchOutFadeFadesIn() {                        // DUB 200 s
     r.feed(slice(s, 5000, 9600)); r.lp.pressRec(0); r.feed(slice(s, 9600, 9840));
     CHECK(r.lp.undoDepth(0) == 2 && maxStep(wrap(r.settle())) < 2.5f * sineStep(330, 0.3f));
 }
+// D > 0: a DUB back-dated into a punch-out fade or into the first recording's tail takes only the complement there.
+static void backDatedDubIntoFadeOrTail(float trigMs) {
+    for (uint32_t into : {50u, 200u, 239u}) {                      // DUB this far into the 240-sample punch-out fade
+        Rig r; r.lp.setTailMs(0); recordBase(r, 24064, 0.0f); r.lp.setTriggerLatencyMs(trigMs);   // silent loop
+        auto s = sine(330, 0.3f, 9840);
+        r.lp.pressRec(0); r.feed(slice(s, 0, 4800)); r.lp.pressRec(0);
+        r.feed(slice(s, 4800, 4800 + into)); r.lp.pressRec(0);
+        r.feed(slice(s, 4800 + into, 9600)); r.lp.pressRec(0); r.feed(slice(s, 9600, 9840));
+        CHECK(r.lp.undoDepth(0) == 2 && maxStep(wrap(r.settle())) < 2.5f * sineStep(330, 0.3f));
+        r.lp.undo(0); CHECK(maxStep(wrap(r.settle())) < 2.5f * sineStep(330, 0.3f));
+    }
+    for (uint32_t at : {100u, 1200u, 2300u}) {                     // DUB this far into the 2400-sample tail
+        Rig r; r.lp.setTriggerLatencyMs(trigMs); auto in = sine(220, 0.1f, 48000);
+        r.feed(slice(in, 0, 1000)); r.lp.pressRec(0); r.feed(slice(in, 1000, 25064)); r.lp.pressRec(0);
+        r.feed(slice(in, 25064, 25064 + at)); r.lp.pressRec(0);
+        r.feed(slice(in, 25064 + at, 34664)); r.lp.pressRec(0); r.feed(slice(in, 34664, 34904));
+        CHECK(maxStep(wrap(r.settle())) < 2.5f * sineStep(220, 0.1f));
+        r.lp.undo(0); CHECK(maxStep(wrap(r.settle())) < 2.5f * sineStep(220, 0.1f));
+    }
+}
 // A 2 ms burst overdubbed at position 4000 of a silent loop; returns the first loop position it reaches.
 static int onsetWith(float advanceMs) {
     Rig r; r.lp.setTailMs(0); recordBase(r, 24064, 0.0f); r.lp.setAdvanceMs(advanceMs);
@@ -147,6 +167,7 @@ int main() {
     undoRestoresExactly(); undoIsLazy(); undoIsClickFree(); undoRampsSpanThePress(); undoWhileOverdubbingCancels();
     onePressOneLayer(); silentOverdubMakesNoLayer(); punchesAreClickFree(); recToDubUndoIsSeamless(); recToDubTailZeroUndoIsSeamless();
     recToDubSplitsTheBackDatedTail(0.0f); recToDubSplitsTheBackDatedTail(5.0f); redubRightAfterCancelFadesIn(); dubMidTailFadesIn(); dubLateInPunchOutFadeFadesIn();
+    backDatedDubIntoFadeOrTail(2.0f); backDatedDubIntoFadeOrTail(3.0f);
     advanceWritesEarlier(); newOverdubDiscardsRedo(); undoMashIsBounded(); capBlocksOnlyLayerUndoRedo();
     REPORT();
 }
