@@ -63,7 +63,7 @@ PLUGIN_URI   := $(PLUGIN_URI_BASE)/$(PLUGIN)
 endif
 BUNDLE := bin/$(BUNDLE_NAME).lv2
 
-.PHONY: all plugin ttl modgui features clean distclean
+.PHONY: all plugin ttl modgui features clean distclean dpf-patch
 
 # Desktop CI (dpf-makefile-action) sets DESKTOP_ONLY=1 (via the workflow's
 # `extraargs`) to build ONLY the self-describing desktop formats: VST3 + CLAP.
@@ -83,11 +83,19 @@ else
 all: plugin ttl modgui
 endif
 
+# The dpf submodule stays pinned and pristine in git (.gitmodules: ignore =
+# dirty); patches/dpf-lv2-hooks.patch is applied to its working tree here. It
+# passes the host's LV2 features to the plugin constructor and forwards
+# extension_data() to the plugin (see DEVELOPERS.md). The grep makes this a
+# no-op once applied, e.g. inside the read-only cross-build containers.
+dpf-patch:
+	@grep -q d_nextLv2Features dpf/distrho/src/DistrhoPlugin.cpp || git -C dpf apply ../patches/dpf-lv2-hooks.patch
+
 # dpf-makefile-action runs `make features` (to print DPF's detected build
 # features) before building. Our top-level Makefile isn't a DPF Makefile, so
 # delegate to the inner plugin Makefile — it includes dpf/Makefile.base.mk,
 # where the real `features` target lives.
-features:
+features: dpf-patch
 	@$(MAKE) -C $(PLUGIN_DIR) features
 
 # ---------------------------------------------------------------------------
@@ -98,7 +106,7 @@ features:
 # cross-builds set PLUGIN_FORMATS=lv2 so they don't waste time building the
 # desktop formats they never ship.
 PLUGIN_FORMATS ?=
-plugin:
+plugin: dpf-patch
 	$(MAKE) -C $(PLUGIN_DIR) $(PLUGIN_FORMATS)
 
 # ---------------------------------------------------------------------------
@@ -109,6 +117,9 @@ plugin:
 
 ttl: plugin dpf/utils/lv2_ttl_generator
 	@$(CURDIR)/dpf/utils/generate-ttl.sh
+	@# HMI / widget declarations DPF can't emit (generate-ttl.sh rewrites the
+	@# TTL fresh each build, so this never stacks).
+	sed 's|@PLUGIN_URI@|$(PLUGIN_URI)|' $(PLUGIN_DIR)/hmi.ttl.in >> $(BUNDLE)/$(BUNDLE_NAME).ttl
 
 dpf/utils/lv2_ttl_generator:
 	$(MAKE) -C dpf/utils/lv2-ttl-generator
@@ -190,10 +201,10 @@ manual:
 # INSTRUCTIONS.md and the annotated demo test.
 
 TEST_CXXFLAGS := -std=gnu++14 -g -O0 -fsanitize=address \
-                 -I$(PLUGIN_DIR) -Idpf/distrho
+                 -I$(PLUGIN_DIR) -I$(PLUGIN_DIR)/hmi -Idpf/distrho
 TEST_SRCS     := $(wildcard $(PLUGIN_DIR)/*.cpp) dpf/distrho/src/DistrhoPlugin.cpp
 
-test:
+test: dpf-patch
 	@mkdir -p build/tests
 	@set -e; for t in tests/test_*.cpp; do \
 		bin=build/tests/$$(basename $$t .cpp); \
@@ -203,7 +214,14 @@ test:
 	done
 	@echo "==> all tests passed"
 
-.PHONY: test
+# test-lv2: a fake LV2 host dlopens the built bundle's .so and checks the DPF
+# patch end to end (host features in, HMI / widget extension data out).
+test-lv2: all
+	@mkdir -p build/tests
+	g++ -std=gnu++14 -g -O0 -fsanitize=address -Idpf/distrho/src -I$(PLUGIN_DIR)/hmi tests/lv2/test_lv2_hooks.cpp -ldl -o build/tests/test_lv2_hooks
+	build/tests/test_lv2_hooks $(BUNDLE)/$(BUNDLE_NAME).so
+
+.PHONY: test test-lv2
 
 beta:
 	$(MAKE) BETA=1
@@ -237,7 +255,7 @@ DWARF_BUNDLE := build/dwarf/$(BUNDLE_NAME).lv2
 dwarf-image:
 	docker build -t $(CROSS_IMAGE) mod-build/
 
-dwarf-build:
+dwarf-build: dpf-patch
 	@if ! docker image inspect $(CROSS_IMAGE) >/dev/null 2>&1; then \
 		echo "==> $(CROSS_IMAGE) image not built yet — building (~30-60 min, one-time)"; \
 		$(MAKE) dwarf-image; \
@@ -289,7 +307,7 @@ PS_TARGETS := linux-amd64 rpi-aarch64 patchbox-os-arm32
 PS_DIR     := build/patchstorage
 PYTHON     ?= python3
 
-patchstorage-build:
+patchstorage-build: dpf-patch
 	@set -e; for slug in $(PS_TARGETS); do \
 	  case $$slug in \
 	    linux-amd64) plat=x86_64; tuple=x86_64-mod-linux-gnu; \

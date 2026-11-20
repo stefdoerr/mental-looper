@@ -34,6 +34,21 @@ toolchain — copy the `.vst3` / `.clap` into `~/.vst3` / `~/.clap` to test in a
 The portable, cross-platform desktop binaries (Linux, Windows, macOS) are built by
 GitHub Actions on each `v*` tag, not by `make` — see below.
 
+## The DPF patch
+
+DPF can't hand LV2 host features to a plugin or answer extra `extension_data()` URIs,
+which the MOD HMI (footswitch labels/LEDs) and aLabs widgets need. So the `dpf`
+submodule stays pinned and clean in git (`ignore = dirty` in `.gitmodules`), and every
+build target that compiles DPF code first runs `make dpf-patch`, which applies
+`patches/dpf-lv2-hooks.patch` to its working tree (a no-op once applied). The patch adds
+`d_nextLv2Features` (the host's features, non-null only inside the `Plugin` constructor
+of an LV2 build) and, with `DISTRHO_PLUGIN_WANT_LV2_EXTENSION_DATA`, forwards unknown
+`extension_data()` URIs to the plugin's `d_lv2PluginExtensionData()`. The vendored
+headers live in `plugins/Ouroboros/hmi/`, the matching TTL lines in
+`plugins/Ouroboros/hmi.ttl.in`, and `make test-lv2` checks it all with a fake LV2 host.
+To change the patch, edit the files under `dpf/` and run
+`git -C dpf diff > patches/dpf-lv2-hooks.patch`.
+
 ## Publishing to Patchstorage
 
 This template also wires up publishing to [patchstorage.com](https://patchstorage.com)'s

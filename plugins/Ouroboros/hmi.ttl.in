@@ -1,0 +1,14 @@
+@prefix ahw: <https://github.com/sejerpz/alabs-hmi-widgets#> .
+@prefix hmi: <http://moddevices.com/ns/hmi#> .
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+
+# Appended to the generated <plugin>.ttl by the Makefile's `ttl` target.
+# mod-host only asks for PluginNotification when lv2:extensionData declares it,
+# and Starless does the same for WidgetNotification. No ahw:suggestedPorts:
+# auto-binding would put `onoff` on a footswitch of another page.
+<@PLUGIN_URI@>
+    lv2:optionalFeature hmi:WidgetControl , ahw:WidgetDraw ;
+    lv2:extensionData hmi:PluginNotification , ahw:WidgetNotification ;
+    ahw:widget [ a ahw:Widget ; lv2:symbol "loop" ; lv2:name "Loop" ;
+                 ahw:minWidth 40 ; ahw:minHeight 8 ; ahw:naturalWidth 40 ; ahw:naturalHeight 37 ;
+                 ahw:pixelFormat ahw:Mono1 ] .

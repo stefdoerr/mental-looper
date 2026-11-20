@@ -1,0 +1,107 @@
+diff --git a/distrho/DistrhoPlugin.hpp b/distrho/DistrhoPlugin.hpp
+index 8570f9e9..7ec9e473 100644
+--- a/distrho/DistrhoPlugin.hpp
++++ b/distrho/DistrhoPlugin.hpp
+@@ -444,6 +444,21 @@ private:
+  */
+ extern Plugin* createPlugin();
+ 
++/**
++   LV2 only: the `const LV2_Feature* const*` the host passed to instantiate().@n
++   Non-null only inside the Plugin constructor of an LV2 build.
++ */
++extern const void* d_nextLv2Features;
++
++#if DISTRHO_PLUGIN_WANT_LV2_EXTENSION_DATA
++/**
++   LV2 only: asked for every extension_data() URI DPF does not answer itself.@n
++   Return the interface for @a uri, or nullptr.
++   @a instanceOf maps the LV2_Handle passed to the interface's functions to the Plugin instance.
++ */
++extern const void* d_lv2PluginExtensionData(const char* uri, void* (*instanceOf)(void* lv2Handle));
++#endif
++
+ /** @} */
+ 
+ // -----------------------------------------------------------------------------------------------------------
+diff --git a/distrho/src/DistrhoPlugin.cpp b/distrho/src/DistrhoPlugin.cpp
+index e2ffadb2..38a1213e 100644
+--- a/distrho/src/DistrhoPlugin.cpp
++++ b/distrho/src/DistrhoPlugin.cpp
+@@ -27,6 +27,7 @@ const char* d_nextBundlePath = nullptr;
+ bool        d_nextPluginIsDummy = false;
+ bool        d_nextPluginIsSelfTest = false;
+ bool        d_nextCanRequestParameterValueChanges = false;
++const void* d_nextLv2Features = nullptr;
+ 
+ /* ------------------------------------------------------------------------------------------------------------
+  * Static fallback data, see DistrhoPluginInternal.hpp */
+diff --git a/distrho/src/DistrhoPluginChecks.h b/distrho/src/DistrhoPluginChecks.h
+index 52dc9d76..1d91e624 100644
+--- a/distrho/src/DistrhoPluginChecks.h
++++ b/distrho/src/DistrhoPluginChecks.h
+@@ -65,6 +65,10 @@
+ # define DISTRHO_PLUGIN_WANT_LATENCY 0
+ #endif
+ 
++#ifndef DISTRHO_PLUGIN_WANT_LV2_EXTENSION_DATA
++# define DISTRHO_PLUGIN_WANT_LV2_EXTENSION_DATA 0
++#endif
++
+ #ifndef DISTRHO_PLUGIN_WANT_MIDI_AS_MPE
+ # define DISTRHO_PLUGIN_WANT_MIDI_AS_MPE 0
+ #endif
+diff --git a/distrho/src/DistrhoPluginLV2.cpp b/distrho/src/DistrhoPluginLV2.cpp
+index d2791951..c1cf7086 100644
+--- a/distrho/src/DistrhoPluginLV2.cpp
++++ b/distrho/src/DistrhoPluginLV2.cpp
+@@ -1173,6 +1173,11 @@ public:
+     }
+    #endif
+ 
++    void* getPluginInstancePointer() const noexcept
++    {
++        return fPlugin.getInstancePointer();
++    }
++
+     // -------------------------------------------------------------------
+ 
+ private:
+@@ -1551,7 +1556,10 @@ static LV2_Handle lv2_instantiate(const LV2_Descriptor*, double sampleRate, cons
+     if (std::getenv("RUNNING_UNDER_LV2LINT") != nullptr)
+         d_nextPluginIsDummy = true;
+ 
+-    return new PluginLv2(sampleRate, uridMap, worker, ctrlInPortChangeReq, usingNominal);
++    d_nextLv2Features = features;
++    PluginLv2* const instance = new PluginLv2(sampleRate, uridMap, worker, ctrlInPortChangeReq, usingNominal);
++    d_nextLv2Features = nullptr;
++    return instance;
+ }
+ 
+ #define instancePtr ((PluginLv2*)instance)
+@@ -1640,6 +1648,13 @@ static void* lv2_get_instance_pointer(LV2_Handle instance)
+ }
+ #endif
+ 
++#if DISTRHO_PLUGIN_WANT_LV2_EXTENSION_DATA
++static void* lv2_instance_of(void* instance)
++{
++    return instancePtr->getPluginInstancePointer();
++}
++#endif
++
+ // -----------------------------------------------------------------------
+ 
+ static const void* lv2_extension_data(const char* uri)
+@@ -1677,6 +1692,11 @@ static const void* lv2_extension_data(const char* uri)
+         return &directaccess;
+ #endif
+ 
++#if DISTRHO_PLUGIN_WANT_LV2_EXTENSION_DATA
++    if (const void* const ext = d_lv2PluginExtensionData(uri, lv2_instance_of))
++        return ext;
++#endif
++
+ #ifdef DISTRHO_PLUGIN_LICENSED_FOR_MOD
+     return mod_license_interface(uri);
+ #else

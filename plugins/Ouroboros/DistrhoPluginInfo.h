@@ -58,5 +58,8 @@
 // echo parameter changes back to the host (e.g. for derived ports
 // recomputed from other ports).
 #define DISTRHO_PLUGIN_WANT_PARAMETER_VALUE_CHANGE_REQUEST    1
+// From patches/dpf-lv2-hooks.patch: the plugin answers LV2 extension_data()
+// (MOD HMI + aLabs widget notifications) via d_lv2PluginExtensionData().
+#define DISTRHO_PLUGIN_WANT_LV2_EXTENSION_DATA                1
 
 #endif // DISTRHO_PLUGIN_INFO_H_INCLUDED
