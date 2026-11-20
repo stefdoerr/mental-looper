@@ -159,7 +159,7 @@ static void disabledEngineOutputsDryOnly() {                        // init fail
 static void stressRandomPresses(float trigMs, bool recToDub) {     // Review Focus 3
     // fixed-seed LCG, 2000 blocks of sine input; each block one random action on a random track among
     // pressRec, undo, redo, toggleOn, clearTrack, clearAll, or nothing (mostly nothing, so loops can form).
-    // After every block (R5): output finite and |y| <= 1; pendingOps(t) <= kMaxPendingOps;
+    // After every block (R5): output finite and |y| <= 1; pendingOps(t) <= kMaxPendingOps + 1 (the spare cancel slot);
     // any track Playing or Overdubbing => loopLength() > 0. At the end every block is back in the pool.
     Rig r; r.lp.setBudgetMb(0.0625f);                               // 4 blocks: eviction under the presses too
     r.lp.setTriggerLatencyMs(trigMs); r.lp.setRecToDub(recToDub);
@@ -184,7 +184,7 @@ static void stressRandomPresses(float trigMs, bool recToDub) {     // Review Foc
         bool live = false;
         for (int u = 0; u < ouro::kTracks; ++u) {
             const ouro::TrackState s = r.lp.state(u);
-            opsCapped &= r.lp.pendingOps(u) <= ouro::kMaxPendingOps;
+            opsCapped &= r.lp.pendingOps(u) <= ouro::kMaxPendingOps + 1;
             live |= s == ouro::TrackState::Playing || s == ouro::TrackState::Overdubbing;
             dubbing += s == ouro::TrackState::Overdubbing;
             recOnLoop += s == ouro::TrackState::Recording && r.lp.loopLength() > 0;

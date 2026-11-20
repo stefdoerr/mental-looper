@@ -131,11 +131,22 @@ static void undoMashIsBounded() {                                   // Review Fo
                                    CHECK(r.lp.pendingOps(0) <= ouro::kMaxPendingOps); }
     CHECK(maxAbsDiff(r.settle(), dubbed) < 1e-5f);                 // even count ends on redo
 }
+static void capBlocksOnlyLayerUndoRedo() {                          // at the op cap: base undo/redo and a cancel still work
+    Rig r; r.lp.setTailMs(0); auto base = recordBase(r, 24064, 0.1f);
+    auto x = sine(330, 0.1f, 64);
+    for (uint32_t i = 0; i < ouro::kMaxPendingOps; ++i) { r.lp.pressRec(0); r.feed(x); r.lp.undo(0); }   // 32 cancels
+    CHECK(r.lp.pendingOps(0) == ouro::kMaxPendingOps);
+    r.lp.undo(0); CHECK(r.lp.state(0) == ouro::TrackState::Empty && r.lp.canRedo(0));   // the base: no op slot
+    r.lp.redo(0); CHECK(r.lp.state(0) == ouro::TrackState::Playing);
+    r.lp.pressRec(0); r.feed(sine(440, 0.1f, 4800)); r.lp.undo(0);   // cancel
+    CHECK(r.lp.state(0) == ouro::TrackState::Playing && r.lp.undoDepth(0) == 0 && !r.lp.canRedo(0));
+    CHECK(maxAbsDiff(r.settle(), base) < 1e-5f);
+}
 
 int main() {
     undoRestoresExactly(); undoIsLazy(); undoIsClickFree(); undoRampsSpanThePress(); undoWhileOverdubbingCancels();
     onePressOneLayer(); silentOverdubMakesNoLayer(); punchesAreClickFree(); recToDubUndoIsSeamless(); recToDubTailZeroUndoIsSeamless();
     recToDubSplitsTheBackDatedTail(0.0f); recToDubSplitsTheBackDatedTail(5.0f); redubRightAfterCancelFadesIn(); dubMidTailFadesIn(); dubLateInPunchOutFadeFadesIn();
-    advanceWritesEarlier(); newOverdubDiscardsRedo(); undoMashIsBounded();
+    advanceWritesEarlier(); newOverdubDiscardsRedo(); undoMashIsBounded(); capBlocksOnlyLayerUndoRedo();
     REPORT();
 }

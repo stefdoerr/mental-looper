@@ -134,10 +134,10 @@ public:
             if (recTrack_ == t) recTrack_ = -1;
             return;
         }
-        if (tr.nOps == kMaxPendingOps) return;           // presses past the cap are ignored
         if (tr.state == TrackState::Overdubbing) {
             endDub(tr, true);                            // cancel: subtracted, not kept for redo
         } else if (tr.undoTop > 0) {
+            if (tr.nOps >= kMaxPendingOps) return;       // layer undo/redo past the cap is ignored
             const uint32_t i = --tr.undoTop;
             if (tr.fade.left && tr.fade.layer == int32_t(i)) tr.fade.left = 0;   // stop writing into it
             addOp(tr, tr.layers[i].d, -1.0f, true, int32_t(i));
@@ -150,11 +150,10 @@ public:
     void redo(int t) {
         if (!valid(t)) return;
         Track& tr = tracks_[t];
-        if (tr.nOps == kMaxPendingOps) return;
         if (tr.baseUndone) {
             tr.baseUndone = false;
             tr.state = TrackState::Playing;
-        } else if (tr.undoTop < tr.redoTop) {
+        } else if (tr.undoTop < tr.redoTop && tr.nOps < kMaxPendingOps) {
             addOp(tr, tr.layers[tr.undoTop].d, 1.0f, true, int32_t(tr.undoTop));
             ++tr.undoTop;
         }
@@ -239,7 +238,7 @@ private:
         float* buf = nullptr;            // the base, plus every layer still in the undo stack
         Layer* layers = nullptr;         // [0, undoTop) undo stack, [undoTop, redoTop) redo stack, top at undoTop
         uint32_t undoTop = 0, redoTop = 0;
-        Op ops[kMaxPendingOps];          // in start order
+        Op ops[kMaxPendingOps + 1];      // in start order; the spare slot lets a cancel past the cap go through
         uint32_t nOps = 0;
         Writer dub, fade;
         TrackState state = TrackState::Empty;
@@ -355,11 +354,12 @@ private:
                 dub.layer = -1;
             } else if (d.length() == 0) {
                 return;                                  // nothing written (D = 0, both presses in one gap)
-            } else if ((cancel || dub.peak < kSilenceFloor) && tr.nOps < kMaxPendingOps) {
+            } else if (cancel ? tr.nOps <= kMaxPendingOps : dub.peak < kSilenceFloor && tr.nOps < kMaxPendingOps) {
                 addOp(tr, d, -1.0f, cancel, -1);         // the op owns the blocks now
                 d.begin(0);
                 return;                                  // all of it is subtracted: nothing to fade out
-            } else {                                     // a layer (silent only if no op slot is free)
+            } else {                                     // a layer (silent, or a cancel, only if no op slot is free)
+                // ponytail: one spare slot: a 2nd cancel within one pass at the cap keeps its layer; more spares if hit
                 tr.redoTop = ++tr.undoTop;
             }
         }
