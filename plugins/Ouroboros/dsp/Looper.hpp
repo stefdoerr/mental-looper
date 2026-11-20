@@ -424,8 +424,8 @@ private:
     }
 
     // The one place deltas grow: append on the first pass, accumulate after. If the pool is full the writer
-    // stops storing; endDub() then releases the overdub's delta. A full pool first frees the oldest redo
-    // entry, then the globally-oldest undo layer.
+    // stops storing; endDub() then releases the overdub's delta. A full pool first frees a redo entry, then the
+    // globally-oldest undo layer.
     // ponytail: a punch-out fade that hits a full pool keeps a truncated delta (undo leaves <= 5 ms of fade)
     void store(Track& tr, Writer& wr, float v) {
         // evict() moves layer slots: re-resolve the delta by index after each one
@@ -436,14 +436,17 @@ private:
         }
     }
 
-    // Frees one layer: the oldest redo entry (lowest seq) of any track, else the oldest undo layer. Layers read
-    // by a pending op or still written by a punch-out fade are skipped. False if nothing could be freed.
+    // Frees one layer: a redo entry, else the oldest undo layer. A track offers the redo entry undone longest ago
+    // (the far end of its redo stack, redone last), so its next redo stays the layer just undone; across tracks
+    // the lowest seq goes. Layers read by a pending op or still written by a punch-out fade are skipped (when the
+    // far end is still read, so is the rest of that redo stack: undone later, its ops end later). False if nothing
+    // could be freed.
     bool evict() {
         Track* bt = nullptr;
         uint32_t bi = 0, best = UINT32_MAX;
         for (int pass = 0; pass < 2 && !bt; ++pass)      // pass 0: redo stacks, pass 1: undo stacks
             for (Track& tr : tracks_) {
-                const uint32_t lo = pass ? 0 : tr.undoTop, hi = pass ? tr.undoTop : tr.redoTop;
+                const uint32_t hi = pass ? tr.undoTop : tr.redoTop, lo = pass ? 0 : hi > tr.undoTop ? hi - 1 : hi;
                 for (uint32_t i = lo; i < hi; ++i) {
                     const Layer& ly = tr.layers[i];
                     if (ly.refs || (tr.fade.left && tr.fade.layer == int32_t(i)) || ly.seq >= best) continue;
