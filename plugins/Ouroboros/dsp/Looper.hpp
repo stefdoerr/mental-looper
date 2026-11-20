@@ -142,6 +142,11 @@ public:
     void setRecToDub(bool on) { recToDub_ = on; }
     void setAdvanceMs(float ms) { advMs_ = std::max(0.0f, std::min(ms, 30.0f)); }   // earlier only (R7)
 
+    // Not clamped here (the plugin's parameter range does that); the pool clamps to what it reserved.
+    // Lowering it below the current use only takes effect at the next allocation.
+    void setBudgetMb(float mb) { pool_.setBudgetBytes(mb > 0.0f ? size_t(double(mb) * 1048576.0) : 0); }   // NaN -> 0
+    size_t undoBytes() const { return size_t(pool_.usedBlocks()) * BlockPool::kBlock * sizeof(float); }
+
     TrackState state(int t) const { return valid(t) ? tracks_[t].state : TrackState::Empty; }
     NextAction nextAction(int t) const {
         switch (state(t)) {
@@ -325,11 +330,43 @@ private:
     }
 
     // The one place deltas grow: append on the first pass, accumulate after. If the pool is full the writer
-    // stops storing; endDub() then releases the overdub's delta.
+    // stops storing; endDub() then releases the overdub's delta. A full pool first frees the oldest redo
+    // entry, then the globally-oldest undo layer.
     // ponytail: a punch-out fade that hits a full pool keeps a truncated delta (undo leaves <= 5 ms of fade)
     void store(Delta& d, Writer& wr, float v) {
         if (wr.n >= L_) d.accumulate(pool_, wr.c, wr.n % L_, v);
-        else if (!d.append(pool_, v)) wr.lost = true;
+        else {
+            while (!d.append(pool_, v))
+                if (!evict()) { wr.lost = true; break; }
+        }
+    }
+
+    // Frees one layer: the oldest redo entry (lowest seq) of any track, else the oldest undo layer. Layers read
+    // by a pending op or still written by a punch-out fade are skipped. False if nothing could be freed.
+    bool evict() {
+        Track* bt = nullptr;
+        uint32_t bi = 0, best = UINT32_MAX;
+        for (int pass = 0; pass < 2 && !bt; ++pass)      // pass 0: redo stacks, pass 1: undo stacks
+            for (Track& tr : tracks_) {
+                const uint32_t lo = pass ? 0 : tr.undoTop, hi = pass ? tr.undoTop : tr.redoTop;
+                for (uint32_t i = lo; i < hi; ++i) {
+                    const Layer& ly = tr.layers[i];
+                    if (ly.refs || (tr.fade.left && tr.fade.layer == int32_t(i)) || ly.seq >= best) continue;
+                    best = ly.seq; bt = &tr; bi = i;
+                }
+            }
+        if (!bt) return false;
+        Track& tr = *bt;
+        tr.layers[bi].d.release(pool_);
+        const uint32_t top = tr.redoTop + (tr.state == TrackState::Overdubbing ? 1 : 0);   // + the overdub's slot
+        std::copy(tr.layers + bi + 1, tr.layers + top, tr.layers + bi);
+        auto fix = [&](int32_t& l) { if (l > int32_t(bi) && l < int32_t(top)) --l; };
+        fix(tr.dub.layer);
+        fix(tr.fade.layer);
+        for (uint32_t k = 0; k < tr.nOps; ++k) fix(tr.ops[k].layer);
+        if (bi < tr.undoTop) --tr.undoTop;
+        --tr.redoTop;
+        return true;
     }
 
     void clearRedo(Track& tr) {
