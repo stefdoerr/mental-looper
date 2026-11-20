@@ -80,6 +80,21 @@ static void redubRightAfterCancelFadesIn() {                        // the cance
     r.feed(slice(x, 4836, 9600)); r.lp.pressRec(0); r.feed(slice(x, 9600, 9840));
     CHECK(maxStep(wrap(r.settle())) < 2.5f * sineStep(330, 0.3f));
 }
+static void dubMidTailFadesIn() {                                   // Rec->Play, DUB at g = 0.5: no step at q
+    Rig r; auto in = sine(220, 0.1f, 48000);                       // tail 50 ms = 2400
+    r.lp.pressRec(0); r.feed(slice(in, 0, 24064)); r.lp.pressRec(0);
+    r.feed(slice(in, 24064, 25264)); r.lp.pressRec(0);             // DUB at position 1200
+    r.feed(slice(in, 25264, 33664)); r.lp.pressRec(0); r.feed(slice(in, 33664, 33904));
+    CHECK(maxStep(wrap(r.settle())) < 2.5f * sineStep(220, 0.1f));
+}
+static void dubLateInPunchOutFadeFadesIn() {                        // DUB 200 samples into the 240-sample fade
+    Rig r; r.lp.setTailMs(0); recordBase(r, 24064, 0.0f);          // silent loop
+    auto s = sine(330, 0.3f, 9840);
+    r.lp.pressRec(0); r.feed(slice(s, 0, 4800)); r.lp.pressRec(0);
+    r.feed(slice(s, 4800, 5000)); r.lp.pressRec(0);
+    r.feed(slice(s, 5000, 9600)); r.lp.pressRec(0); r.feed(slice(s, 9600, 9840));
+    CHECK(r.lp.undoDepth(0) == 2 && maxStep(wrap(r.settle())) < 2.5f * sineStep(330, 0.3f));
+}
 // A 2 ms burst overdubbed at position 4000 of a silent loop; returns the first loop position it reaches.
 static int onsetWith(float advanceMs) {
     Rig r; r.lp.setTailMs(0); recordBase(r, 24064, 0.0f); r.lp.setAdvanceMs(advanceMs);
@@ -109,7 +124,7 @@ static void undoMashIsBounded() {                                   // Review Fo
 int main() {
     undoRestoresExactly(); undoIsLazy(); undoIsClickFree(); undoRampsSpanThePress(); undoWhileOverdubbingCancels();
     onePressOneLayer(); silentOverdubMakesNoLayer(); punchesAreClickFree(); recToDubUndoIsSeamless();
-    recToDubSplitsTheBackDatedTail(); redubRightAfterCancelFadesIn();
+    recToDubSplitsTheBackDatedTail(); redubRightAfterCancelFadesIn(); dubMidTailFadesIn(); dubLateInPunchOutFadeFadesIn();
     advanceWritesEarlier(); newOverdubDiscardsRedo(); undoMashIsBounded();
     REPORT();
 }

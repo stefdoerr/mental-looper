@@ -177,7 +177,7 @@ private:
         uint32_t left = 0;               // punch-out fade samples to go (0 = idle)
         float env = 0.0f, peak = 0.0f;   // last envelope; peak |v| written
         DeltaCursor c;
-        bool cont = false, lost = false; // cont: envelope = 1 - what others write (split); lost: pool was full
+        bool cont = false, lost = false; // cont: envelope = 1 - what others write (Rec->Dub); lost: pool was full
     };
     struct Track {
         float* buf = nullptr;
@@ -226,7 +226,8 @@ private:
     }
 
     // Punch-in, back-dated by D: the last D inputs go to the D positions before the write position.
-    // While a tail or a punch-out fade is still writing, the layer takes the complement of it (split).
+    // cont (Rec->Dub): the layer takes exactly the complement of the tail. Otherwise it fades in, capped by
+    // the complement of a tail or punch-out fade still writing, so it never steps where it starts.
     void startDub(Track& tr, uint32_t D, bool cont) {
         clearRedo(tr);
         Writer& dub = tr.dub;
@@ -237,10 +238,12 @@ private:
         ly.d.begin(dub.w);
         ly.seq = ++seq_;
         ly.refs = 0;
-        dub.cont = cont = cont || pos_ < tr.tailEnd || tr.fade.left;
+        dub.cont = cont;
+        const bool split = pos_ < tr.tailEnd || tr.fade.left;      // else the history's shares are stale
         for (uint32_t i = 0; i < D; ++i) {
             const uint32_t k = (histW_ + histLen_ - D + i) % histLen_;
-            const float e = cont ? std::max(0.0f, 1.0f - histUsed_[k]) : fadeInGain(i);
+            const float rest = std::max(0.0f, 1.0f - histUsed_[k]);
+            const float e = cont ? rest : split ? std::min(fadeInGain(i), rest) : fadeInGain(i);
             write(tr, dub, hist_[k] * e);
             dub.env = e;
             histUsed_[k] += e;
@@ -304,7 +307,8 @@ private:
             --tr.fade.left;
         }
         if (tr.state == TrackState::Overdubbing) {
-            const float e = tr.dub.cont ? std::max(0.0f, 1.0f - used) : fadeInGain(tr.dub.n);
+            const float rest = std::max(0.0f, 1.0f - used);
+            const float e = tr.dub.cont ? rest : std::min(fadeInGain(tr.dub.n), rest);
             write(tr, tr.dub, x * e);
             tr.dub.env = e;
             used += e;
