@@ -139,6 +139,8 @@ public:
         } else if (tr.undoTop > 0) {
             if (tr.nOps >= kMaxPendingOps) return;       // layer undo/redo past the cap is ignored
             const uint32_t i = --tr.undoTop;
+            // ponytail: undone during its 5 ms punch-out fade, the layer keeps a hard cut where the fade stopped, which
+            // a redo brings back; let the fade finish into the delta if that is heard
             if (tr.fade.left && tr.fade.layer == int32_t(i)) tr.fade.left = 0;   // stop writing into it
             addOp(tr, tr.layers[i].d, -1.0f, true, int32_t(i));
         } else if (tr.state == TrackState::Playing) {    // the base: the output ramps out, the buffer stays for redo
@@ -332,6 +334,9 @@ private:
         }
         tr.state = base ? TrackState::Recording : TrackState::Overdubbing;   // first: evict() counts the new slot
         const bool split = overlap();                    // else the history's shares are stale
+        // ponytail: with D > 5 ms (the punch-out fade), a DUB after the last fade ended but within D of its PLAY
+        // back-dates inputs the closed layer already took in full (split is false): they double. Not reachable by
+        // foot at the 3 ms default (MIDI/automation only); fix by back-dating only the trailing zero-share inputs.
         for (uint32_t i = 0; i < D; ++i) {
             const uint32_t k = (histW_ + histLen_ - D + i) % histLen_;
             const float rest = std::max(0.0f, 1.0f - histUsed_[k]);
@@ -441,6 +446,9 @@ private:
     // the lowest seq goes. Layers read by a pending op or still written by a punch-out fade are skipped (when the
     // far end is still read, so is the rest of that redo stack: undone later, its ops end later). False if nothing
     // could be freed.
+    // ponytail: O(tracks x layers) scan plus an array shift per call. Lowering the budget far below the use with
+    // thousands of layers evicts them all in one block (multi-ms, an xrun); keep a per-track oldest index / a ring
+    // of layers, or spread the evictions over blocks, if that is hit.
     bool evict() {
         Track* bt = nullptr;
         uint32_t bi = 0, best = UINT32_MAX;
