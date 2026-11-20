@@ -26,6 +26,16 @@ static void handoverSplitKeepsUnity(float advanceMs) {              // t1 starts
     for (uint32_t i = 0; i < 2400; ++i) err = std::max(err, std::fabs(img[i] - (in[i] * fadeInGain(i) + in[24064 + i])));
     CHECK(err < 1e-5f);
 }
+static void latencyRaisedMidRecordingKeepsUnity() {                // the first recording's inputs count as used
+    Rig r; auto in = sine(220, 0.1f, 48000); const uint32_t L = 24064;   // D = 0 at the start; tail 50 ms
+    r.lp.pressRec(0); r.feed(slice(in, 0, L));
+    r.lp.setTriggerLatencyMs(20.0f); r.lp.pressRec(1);               // t1 back-dates 960 inputs already in t0
+    r.feed(slice(in, L, L + 9600)); r.lp.pressRec(1);
+    auto img = r.settle(); float err = 0.0f;
+    for (uint32_t p = 0; p < L; ++p)
+        err = std::max(err, std::fabs(img[p] - in[p] * fadeInGain(p) - (p < 9600 ? in[L + p] : 0.0f)));
+    CHECK(err < 1e-5f);
+}
 static void handoverTailZeroKeepsBaseSmooth() {                    // tail 0: a 3 ms split, t0 alone has no step
     Rig r; r.lp.setTailMs(0); auto in = sine(220, 0.1f, 48000);
     r.lp.pressRec(0); r.feed(slice(in, 0, 24100)); r.lp.pressRec(1);   // closed mid-wave
@@ -191,7 +201,7 @@ static void stressRandomPresses(float trigMs, bool recToDub) {     // Review Foc
 
 int main() {
     secondTrackLockedToLoop(); handoverClosesAndStarts(); handoverSplitKeepsUnity(0.0f); handoverSplitKeepsUnity(5.0f);
-    handoverTailZeroKeepsBaseSmooth(); handoverAtPunchOutKeepsUnity();
+    latencyRaisedMidRecordingKeepsUnity(); handoverTailZeroKeepsBaseSmooth(); handoverAtPunchOutKeepsUnity();
     onOffRampsAndResumesInPlace(); volumeIsPlaybackOnly(); softClipOnlyAboveKnee(); dryThruAndBypass();
     clearAllResetsAndOverwrites(); recordOnEmptyTrackZeroesReusedBuffer(); baseUndoRedoAndLengthReset();
     offTrackStillRecords(); disabledEngineOutputsDryOnly();

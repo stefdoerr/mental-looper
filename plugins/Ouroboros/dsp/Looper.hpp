@@ -96,7 +96,7 @@ public:
             if (++histW_ == histLen_) histW_ = 0;
             float y = dry_.next(dryTo, ramp_) * x, used = 0.0f;
             if (recTrack_ >= 0) {                        // first recording: overwrite (reused pages hold old audio)
-                tracks_[recTrack_].buf[rec_] = x * fadeInGain(rec_);
+                tracks_[recTrack_].buf[rec_] = x * (used = fadeInGain(rec_));   // closeFirst() rewrites the last D
                 ++rec_;
             } else if (L_) {
                 for (Track& tr : tracks_) y += play(tr); // read before write: the player hears the dry path
