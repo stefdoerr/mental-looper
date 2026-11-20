@@ -210,7 +210,7 @@ test: dpf-patch
 		bin=build/tests/$$(basename $$t .cpp); \
 		echo "==> $$t"; \
 		g++ $(TEST_CXXFLAGS) $$t $(TEST_SRCS) -o $$bin; \
-		$$bin; \
+		ASAN_OPTIONS=allocator_may_return_null=1 $$bin; \
 	done
 	@echo "==> all tests passed"
 
