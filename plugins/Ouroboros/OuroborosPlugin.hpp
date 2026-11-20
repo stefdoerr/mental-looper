@@ -17,7 +17,6 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
-#include <thread>
 
 START_NAMESPACE_DISTRHO
 
@@ -128,7 +127,7 @@ public:
         {
             ALABS_HMI_Widget expected = w;
             if (w != nullptr && s.handle.compare_exchange_strong(expected, nullptr))
-                while (s.drawing.load()) std::this_thread::yield();
+                while (s.drawing.load()) {}              // spin: std::this_thread is missing on MinGW win32-threads
         }
     }
 
