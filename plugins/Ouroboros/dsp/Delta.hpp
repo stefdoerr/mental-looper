@@ -4,6 +4,7 @@
 namespace ouro {
 
 struct DeltaCursor { int32_t block = -1; uint32_t index = 0; };   // index = block number within the delta
+// begin()/release() do not invalidate cursors: reset each one reading a reused delta to DeltaCursor{}, never share one.
 
 // Samples one overdub added, at loop positions start..start+length-1 (mod L),
 // stored as a linked list of pool blocks (block k = offsets [k*kBlock, (k+1)*kBlock)).
