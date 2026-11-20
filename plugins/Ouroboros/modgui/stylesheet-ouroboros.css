@@ -22,8 +22,8 @@
 
 /* ============================ Pedal frame ============================ */
 .ouroboros-pedal {
-    width: 320px;
-    height: 160px;
+    width: 340px;
+    height: 220px;
     position: absolute;
     /* Self-contained skin so the pedal renders without MOD's built-in panel
        image — used by render_screenshot.py, and a clean base to restyle. */
@@ -51,6 +51,7 @@
 .ouroboros-pedal .mod-plugin-brand,
 .ouroboros-pedal .mod-plugin-name,
 .ouroboros-pedal .ouroboros-controls,
+.ouroboros-pedal .ouroboros-keys,
 .ouroboros-pedal .mod-light,
 .ouroboros-pedal .mod-footswitch,
 .ouroboros-pedal .mod-pedal-input,
@@ -95,11 +96,12 @@
    background-position-x at runtime; width/height set display size. */
 .ouroboros-pedal .ouroboros-controls {
     position: absolute;
-    top: 70px;
+    top: 56px;
     left: 0;
     right: 0;
     display: flex;
     justify-content: center;
+    gap: 44px;
 }
 .ouroboros-pedal .ouroboros-knob {
     display: flex;
@@ -114,14 +116,47 @@
     background-image: url(/resources/knobs/black.png{{{ns}}});
     background-repeat: no-repeat;
     background-position: left center;
-    width: 56px;
-    height: 56px;
-    background-size: auto 56px;
+    width: 52px;
+    height: 52px;
+    background-size: auto 52px;
 }
 .ouroboros-pedal .ouroboros-knob .mod-knob-title {
     font-size: 10px;
     letter-spacing: 0.18em;
     color: rgba(240, 226, 200, 0.85);
+}
+
+/* ============================ Trigger buttons ============================
+   Two rows of three. Plain flat keys, no custom art (v1). */
+.ouroboros-pedal .ouroboros-keys {
+    position: absolute;
+    top: 142px;
+    left: 70px;
+    right: 14px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+}
+.ouroboros-pedal .ouroboros-key {
+    margin: 0;
+    padding: 7px 4px;
+    border: 1px solid rgba(255, 220, 160, 0.3);
+    border-radius: 4px;
+    background: linear-gradient(180deg, #3d2a1c, #271a11);
+    color: #f0e2c8;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    line-height: 12px;
+    cursor: pointer;
+    pointer-events: auto;
+}
+.ouroboros-pedal .ouroboros-key-main { border-color: #d9a441; color: #ffd98a; }
+.ouroboros-pedal .ouroboros-key:focus-visible { outline: 2px solid #d9a441; }
+.ouroboros-pedal .ouroboros-key.on {
+    background: linear-gradient(180deg, #ffd98a, #d9a441);
+    color: #2a1a0a;
 }
 
 /* ============================ Bypass light + footswitch ============================

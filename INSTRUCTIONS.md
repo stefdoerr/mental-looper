@@ -197,7 +197,7 @@ The repo-root `patchstorage.json` carries the fields the uploader can't infer
 from the plugin's `.ttl`:
 ```json
 {
-    "source_code_url": "https://github.com/<you>/<yourplugin>",
+    "source_code_url": "https://github.com/<you>/<plugin>",
     "donate_url": null
 }
 ```
@@ -257,7 +257,7 @@ CI is only the release conveyor for the portable / cross-platform binaries.
 
 When the user describes an effect, these patterns are commonly needed.
 Apart from the in-plugin bypass, **none of them are pre-installed** in this
-template's `OuroborosPlugin.cpp`, which is a plain gain stage. Add what you need.
+template's gain-stage origin; Ouroboros's `OuroborosPlugin.cpp` is a looper. Add what you need.
 
 ### Precompute everything you can at load time — NEVER on the audio thread
 `run()` must do as little as possible. **Anything whose result does not depend
@@ -802,7 +802,7 @@ horizontally in the pedalboard view.
 
 ## Testing the DSP
 
-`tests/test_gain.cpp` is a working, annotated demo. `make test` builds and
+`tests/test_*.cpp` (e.g. `test_overdub.cpp`) are working examples. `make test` builds and
 runs every `tests/test_*.cpp` under AddressSanitizer — OOB reads/writes in
 delay lines and buffers become hard failures instead of latent corruption.
 Write a regression test for every DSP bug you fix, and run `make test`

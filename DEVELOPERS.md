@@ -1,8 +1,7 @@
-# MOD Plugin Template — build & release reference
+# Ouroboros — build & release reference
 
-Everything for building, cross-compiling, testing, and publishing a plugin made from
-this template. New here? Start with the [README](README.md#quick-start), then rename
-the template to your plugin.
+Everything for building, cross-compiling, testing, and publishing Ouroboros. New here?
+Start with the [README](README.md#install).
 
 ## Build targets
 
@@ -51,7 +50,7 @@ To change the patch, edit the files under `dpf/` and run
 
 ## Publishing to Patchstorage
 
-This template also wires up publishing to [patchstorage.com](https://patchstorage.com)'s
+Ouroboros also wires up publishing to [patchstorage.com](https://patchstorage.com)'s
 LV2-plugins platform (`linux-amd64`, `rpi-aarch64`, and `patchbox-os-arm32` targets):
 
 - `make patchstorage-build` — cross-build all three bundles
@@ -60,36 +59,32 @@ LV2-plugins platform (`linux-amd64`, `rpi-aarch64`, and `patchbox-os-arm32` targ
   interactively)
 
 Fill in `patchstorage.json` at the repo root (`source_code_url` / `donate_url`)
-when you fork the template. See
+before publishing. See
 [`patchstorage-build/README.md`](patchstorage-build/README.md) for prerequisites and details.
 
 ## Project layout
 
 ```
 .
-├── plugins/Ouroboros/             — the DPF plugin (C++ DSP + modgui)
-│   ├── OuroborosPlugin.cpp        — DSP code; replace with your plugin
-│   ├── DistrhoPluginInfo.h       — LV2 identity (stable + beta)
-│   ├── modgui/                   — MOD pedalboard GUI (HTML/CSS/JS/sprite)
-│   ├── modgui.ttl                — MOD GUI declaration
-│   └── Makefile                  — DPF inner build glue (BETA=1 retags here)
-├── docs/manual/                  — beginner PDF manual (annotated demo; HTML source + generated PDF)
-├── tests/                        — host-less DSP regression tests (annotated demo; `make test`)
-├── dpf/                          — DISTRHO Plugin Framework (git submodule)
-├── mod-build/                    — Self-contained Dwarf cross-build setup
-│   ├── Dockerfile                — vendored MPB Dockerfile, builds aarch64 toolchain
-│   ├── build-plugin.sh           — runs inside the container; native TTL + aarch64 .so
-│   └── README.md                 — Dwarf cross-build walkthrough
-├── patchstorage-build/           — Patchstorage cross-build + publish pipeline
-│   ├── build-target.sh           — runs inside Patchstorage's toolchain image
-│   ├── prepare.sh                — assembles the uploader working tree
-│   ├── uploader/                 — vendored Patchstorage uploader (see PROVENANCE)
-│   └── README.md                 — Patchstorage publishing walkthrough
-├── patchstorage.json             — per-plugin metadata (source_code_url, donate_url)
-├── Makefile                      — top-level build + install + Dwarf + release
-├── install.sh                    — MOD Desktop installer
-├── README.md                     — the forker's entry point
-└── INSTRUCTIONS.md               — instructions for an LLM continuing this work
+├── plugins/Ouroboros/             - the DPF plugin
+│   ├── OuroborosPlugin.{hpp,cpp}  - plugin class, parameters (frozen port list), HMI glue
+│   ├── dsp/                       - header-only looper engine (loop, deltas, block pool)
+│   ├── hmi/, hmi.ttl.in           - vendored MOD HMI / aLabs widget headers + TTL lines
+│   ├── DistrhoPluginInfo.h        - LV2 identity (stable + beta)
+│   ├── modgui/                    - MOD pedalboard GUI (HTML/CSS/JS, knob sprite, screenshot)
+│   ├── modgui.ttl                 - MOD GUI declaration
+│   └── Makefile                   - DPF inner build glue (BETA=1 retags here)
+├── docs/manual/                   - one-page PDF manual (HTML source + generated PDF)
+├── tests/                         - host-less DSP and LV2 tests (`make test`)
+├── patches/                       - the DPF patch (see above)
+├── dpf/                           - DISTRHO Plugin Framework (git submodule)
+├── mod-build/                     - self-contained Dwarf cross-build setup
+├── patchstorage-build/            - Patchstorage cross-build + publish pipeline
+├── patchstorage.json              - per-plugin metadata (source_code_url, donate_url)
+├── Makefile                       - top-level build + install + Dwarf + release
+├── install.sh                     - MOD Desktop installer
+├── README.md                      - entry point
+└── INSTRUCTIONS.md                - instructions for an LLM continuing this work
 ```
 
 ## Local builds vs. CI

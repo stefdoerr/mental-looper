@@ -2,17 +2,13 @@
   Ouroboros — MOD pedalboard icon template.
 
   Mustache tokens ({{brand}}, {{label}}, {{color}}) are substituted by
-  MOD-UI at render time using the values from modgui.ttl. MOD-UI also
-  binds knobs / switches / displays via the `mod-role` attribute (e.g.
-  mod-role="input-control-port" mod-port-symbol="gain") — the LV2 port
-  symbol must match an `lv2:symbol` declared in modgui.ttl AND in the
-  plugin's generated TTL (which comes from initParameter()).
+  MOD-UI at render time using the values from modgui.ttl. Every
+  mod-port-symbol below must exist in modgui.ttl AND in the plugin's
+  generated TTL (initParameter()). The momentary undo_redo port is
+  footswitch-only and deliberately has no button here.
 
-  Required structural elements (MOD-UI complains visually if missing):
-    - <div mod-role="drag-handle">  whole-pedal drag region
-    - <div mod-role="bypass-light"> bypass LED
-    - <div mod-role="bypass">       footswitch
-    - audio I/O loops {{#effect.ports.audio.input}}…{{/...}}
+  Required structural elements: drag-handle, bypass-light, bypass
+  footswitch, and the audio I/O loops.
 -->
 <div class="mod-pedal ouroboros-pedal mod-pedal-ouroboros mod-{{color}} {{color}}">
 
@@ -25,18 +21,28 @@
     <div class="mod-light on" mod-role="bypass-light"></div>
     <div class="mod-footswitch" mod-role="bypass"></div>
 
-    <!-- Single GAIN knob. To add more knobs, duplicate this block and
-         change the port symbol + title. The port symbol must match a
-         parameter declared in initParameter() (e.g. "gain"). -->
     <div class="ouroboros-controls">
         <div class="mod-knob ouroboros-knob">
-            <div class="mod-knob-image" mod-role="input-control-port" mod-port-symbol="gain"></div>
-            <span class="mod-knob-title">GAIN</span>
+            <div class="mod-knob-image" mod-role="input-control-port" mod-port-symbol="track"></div>
+            <span class="mod-knob-title">TRACK</span>
+        </div>
+        <div class="mod-knob ouroboros-knob">
+            <div class="mod-knob-image" mod-role="input-control-port" mod-port-symbol="volume"></div>
+            <span class="mod-knob-title">VOLUME</span>
         </div>
     </div>
 
-    <!-- Audio I/O — required structure for pedalboard connections.
-         MOD-UI expands these {{#…}}{{/…}} blocks once per audio port. -->
+    <!-- Trigger buttons: script-ouroboros.js writes 1 on press, 0 on release. -->
+    <div class="ouroboros-keys">
+        <button type="button" class="ouroboros-key ouroboros-key-main" data-port="rec" title="Rec / Play / Dub on the selected track">REC</button>
+        <button type="button" class="ouroboros-key" data-port="undo" title="Undo the newest layer of the selected track">UNDO</button>
+        <button type="button" class="ouroboros-key" data-port="redo" title="Redo the layer you just undid">REDO</button>
+        <button type="button" class="ouroboros-key" data-port="onoff" title="Switch the selected track on or off">ON/OFF</button>
+        <button type="button" class="ouroboros-key" data-port="clear_track" title="Clear the selected track">CLEAR</button>
+        <button type="button" class="ouroboros-key" data-port="clear_all" title="Clear all four tracks">CLEAR ALL</button>
+    </div>
+
+    <!-- Audio I/O — required structure for pedalboard connections. -->
     <div class="mod-pedal-input">
         {{#effect.ports.audio.input}}
         <div class="mod-input mod-input-disconnected" title="{{name}}"

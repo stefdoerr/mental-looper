@@ -30,8 +30,8 @@ STYLE  = os.path.join(HERE, "stylesheet-ouroboros.css")
 SPRITE = os.path.join(HERE, "knobs", "black.png")
 OUT    = os.path.join(HERE, "screenshot-ouroboros.png")
 
-WIDTH  = 320
-HEIGHT = 160
+WIDTH  = 340
+HEIGHT = 220
 # Device pixel ratio for the render. 2x keeps the same CSS layout but outputs
 # at double resolution — crisper on HiDPI screens and in the printed manual.
 SCALE  = 2

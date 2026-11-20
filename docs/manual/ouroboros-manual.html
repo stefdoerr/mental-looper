@@ -3,25 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>Ouroboros User Manual</title>
-<!-- =========================================================================
-  DEMO USER MANUAL — this file is a working, annotated example of the manual
-  every plugin built from this template should ship. Read the comments; they
-  explain the conventions. See also "User manual (PDF)" in INSTRUCTIONS.md.
-
-  The rules:
-    - This ONE self-contained HTML file is the source of truth. Inline CSS
-      only — no external stylesheets, fonts, or JS.
-    - `make manual` renders it to <plugin>-manual.pdf with headless Chrome
-      (A4). Edit the HTML, regenerate, commit BOTH files. Never edit the PDF.
-    - `make release` attaches the PDF to the GitHub release automatically.
-    - Audience: a musician on MOD Desktop or a MOD Dwarf. No code, no DSP
-      math, no build instructions. Describe controls BY EAR.
-    - Content outline that works (scale to your plugin's complexity):
-      cover → what it does → quick start → the controls → recipes → tips →
-      installing → Q&A → specifications. This minimal gain plugin skips
-      recipes/tips; a real pedal should have both (see the boreas manual for
-      a full-size example).
-========================================================================== -->
 <style>
 /* ==========================================================================
    Print source. Rendered to PDF with headless Chrome via `make manual` (A4).
@@ -41,8 +22,8 @@
 }
 
 /* A4 with a full-bleed first page: the cover supplies its own margins.   */
-@page        { size: A4; margin: 18mm 16mm; }
-@page :first { margin: 0; }
+@page        { size: A4; margin: 10mm 12mm; }
+
 
 * { box-sizing: border-box; }
 
@@ -291,173 +272,103 @@ a { color: var(--acc-d); text-decoration: none; }
     font-size: 8.8pt;
     color: var(--muted);
 }
+
+html, body { font-size: 8pt; line-height: 1.28; }
+h2 { font-size: 10.5pt; margin: 7px 0 3px 0; padding-bottom: 2px; }
+.head { display: flex; align-items: center; gap: 5mm; margin-bottom: 4px; }
+.head img { width: 40mm; border-radius: 2.5mm; box-shadow: 0 1mm 3mm rgba(34,37,42,.35); }
+.head h1 { margin: 0; font-size: 24pt; letter-spacing: .2em; color: var(--ink); }
+.head .brand { letter-spacing: .4em; font-size: 8pt; color: var(--muted); text-transform: uppercase; }
+.head .tag { color: var(--acc-d); font-size: 10pt; }
+table { margin: 4px 0 7px 0; }
+th, td { padding: 1px 5px; font-size: 7.8pt; }
+p { margin: 0 0 5px 0; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 6mm; }
+
 </style>
 </head>
 <body>
 
-<!-- ======================================================= page 1: cover
-  A real manual puts the modgui screenshot here, referenced by RELATIVE path
-  into the plugin source tree, e.g.:
-
-    <img src="../../plugins/Ouroboros/modgui/screenshot-ouroboros.png"
-         alt="The Ouroboros pedal">
-
-  That path only resolves when rendering from inside the repo — which is fine,
-  because the PDF is the shipped artifact, not the HTML. The template has no
-  screenshot yet, so this demo shows a placeholder box instead. Swap it for
-  the <img> as soon as your fork has one (modgui screenshots are REQUIRED for
-  MOD anyway — see INSTRUCTIONS.md).
--->
-<div class="cover">
-    <div class="brand">ouroboros</div>
-    <h1>MY PLUGIN</h1>
-    <div class="tagline">One knob. Exactly as loud as you want.</div>
-    <div class="shot-placeholder">pedal screenshot goes here</div>
-    <div class="subtitle">Gain utility for MOD Desktop and MOD Dwarf</div>
-    <div class="edition">User Manual &middot; July 2026 edition</div>
+<div class="head">
+    <img src="../../plugins/Ouroboros/modgui/screenshot-ouroboros.png" alt="The Ouroboros pedal">
+    <div>
+        <div class="brand">Stefan</div>
+        <h1>OUROBOROS</h1>
+        <div class="tag">A four-track looper for free-time playing</div>
+        <p style="margin-top:4px">For MOD Dwarf and MOD Desktop. No click, no bars: the first loop you record sets the
+        length, and the other three tracks lock to it.</p>
+    </div>
 </div>
 
-<!-- ============================================ page 2: intro + quick start
-  "What it does" answers, in the reader's language, the only question that
-  matters: what will I hear? One plain-language sentence may gesture at HOW
-  it works; never more. Then Quick start: numbered steps from "drag it onto
-  the pedalboard" to "you are hearing the effect".
--->
-<section>
-    <h2>What Ouroboros does</h2>
-    <p>
-        Ouroboros is a <b>volume tool</b>. It takes your mono signal, adjusts its
-        level with a single <b>GAIN</b> knob — from a whisper 24&nbsp;dB quieter to a
-        roar 24&nbsp;dB louder — and sends it to both sides of a stereo output.
-    </p>
-    <p>
-        Use it to balance one instrument against another, to push a quiet synth up
-        in front of a band, or as a clean boost anywhere in your chain.
-    </p>
-    <div class="note">
-        <b>Good to know:</b> Ouroboros is completely clean — it changes nothing
-        about your tone, only the level, at any knob setting.
-    </div>
+<h2>Quick start</h2>
+<ol class="steps" style="margin:0 0 4px 0">
+    <li>Put Ouroboros on the pedalboard and wire a <b>parallel dry path</b> around it (see below).</li>
+    <li>Press <b>REC</b> and play your loop. Press <b>REC</b> again to close it: it now plays back and sets the loop length.</li>
+    <li>Press <b>REC</b> to overdub, and again to go back to play. Tap <b>UNDO</b> to remove the newest layer.</li>
+    <li>Turn the <b>Track</b> knob to another track and press <b>REC</b>: it records on top of silence, in time with the first.</li>
+</ol>
 
-    <h2 style="margin-top:18px">Quick start</h2>
-    <ol class="steps">
-        <li><b>Add Ouroboros to your pedalboard.</b> In the MOD web interface, find it
-            under the brand <b>ouroboros</b> and drag it into your signal chain.</li>
-        <li><b>Play.</b> At the default (noon) the plugin passes your signal through
-            at exactly the level it came in.</li>
-        <li><b>Turn GAIN</b> right to boost, left to cut, until it sits where you
-            want it in the mix.</li>
-    </ol>
+<h2>Knobs and buttons</h2>
+<table>
+<tr><th style="width:23%">Control</th><th>What it does (footswitches B and C and all three knobs act on the selected track)</th></tr>
+<tr><td class="ctl">Knob 1: Track</td><td>Picks track 1 to 4. It does not touch the sound; it chooses what B, C and the other knobs act on.</td></tr>
+<tr><td class="ctl">Knob 2: On/Off</td><td>Press the knob to mute or unmute the selected track. A muted track keeps running in time.</td></tr>
+<tr><td class="ctl">Knob 3: Volume</td><td>Playback level of the selected track, &minus;60 to +6&nbsp;dB, default 0&nbsp;dB. It never changes what is recorded, so undo stays exact.</td></tr>
+</table>
+<p>The web pedal has the same actions as buttons, plus <b>CLEAR</b> (selected track) and <b>CLEAR ALL</b>.</p>
 
-    <!-- A real pedal manual would continue with <section> Recipes (named knob
-         settings + what to listen for) and Tips (the mistakes every first-time
-         user makes). A one-knob utility has nothing to say there; your plugin
-         probably does. -->
-</section>
+<div class="cols">
+<div>
+<h2>Footswitch B (REC)</h2>
+<table>
+<tr><th>Track is</th><th>Press B</th><th>Shows</th></tr>
+<tr><td>Empty</td><td>starts recording</td><td>REC</td></tr>
+<tr><td>Recording</td><td>closes it, plays</td><td>PLAY</td></tr>
+<tr><td>Playing</td><td>starts overdubbing</td><td>DUB</td></tr>
+<tr><td>Overdubbing</td><td>back to playing</td><td>PLAY</td></tr>
+</table>
+<p>Set <b>After Rec</b> to <i>Rec &gt; Dub</i> to go from recording straight into overdubbing.
+The light shows the track&rsquo;s state: white empty, blinking red recording, blinking green overdubbing, green playing.</p>
+<p><b>One-press handover.</b> Press B on another track while one is recording: the running one closes and the new one starts, in the same press.
+This is how you set the loop length from track 1 and start track 2 without a gap.</p>
+</div>
+<div>
+<h2>Footswitch C (UNDO)</h2>
+<table>
+<tr><th>Gesture</th><th>Effect</th></tr>
+<tr><td>Tap</td><td>Undo the newest layer. The label reads <code>-</code> when there is nothing to undo. Keep tapping to peel layers down to the first recording; undoing that empties the track.</td></tr>
+<tr><td>Hold</td><td>Redo the layer you just undid. It fires as soon as you pass the hold time, with your foot still down.</td></tr>
+<tr><td>Undo while overdubbing</td><td>Cancels the overdub and plays on.</td></tr>
+<tr><td>Undo during the first recording</td><td>Aborts it. The track is empty again.</td></tr>
+</table>
+<p>One overdub is one layer, however many passes it ran. Overdubs where you played nothing are dropped, so they cost no undo step.
+Recording or overdubbing again forgets what you could still redo.</p>
+</div>
+</div>
 
-<!-- ================================================== page 3: the controls
-  Footswitches first (as a table), then one .knob card per knob. Every control
-  gets a numbered .badge that matches a .pin positioned over the screenshot in
-  a .pedal-map — with a real screenshot it looks like this:
+<h2>Sound, dry signal and bypass</h2>
+<p>Ouroboros outputs <b>only the loops</b>. Your live sound is not passed through, so run the dry signal around the pedal on the pedalboard (a parallel path) and mix the two.
+If you run the pedal in series instead, switch <b>Dry thru</b> on and it adds your input to the output with no delay.
+<b>Bypass</b> mutes the loops, but they keep running in time and pick up where they are when you switch back on. While bypassed you get the dry signal only if Dry thru is on.</p>
+<p>The loop point is click-free, and a note still ringing when you close the loop carries into the next pass. The first loop can be up to 5 minutes. Loops are not saved with the pedalboard. Each track&rsquo;s on/off and volume are also in the web interface (On 1&ndash;4, Volume 1&ndash;4).</p>
 
-    <div class="pedal-map">
-        <img src="../../plugins/Ouroboros/modgui/screenshot-ouroboros.png"
-             alt="Ouroboros control layout">
-        <span class="pin" style="left:50%; top:30%;">1</span>
-    </div>
+<h2>On the Dwarf screen (Starless 19 and later)</h2>
+<p>Ouroboros offers a <b>Loop</b> display widget. In Starless&rsquo; <b>Display</b> dialog, put it in the column above knob 1; it replaces knob 1&rsquo;s own text and keeps the footswitch labels visible.
+It shows the selected track and its state, a mark per track, and a bar that fills once per pass (elapsed time during the first recording). It needs an area at least 24 pixels tall for the full layout; a shorter area shows the bar only.
+Without the widget everything still works, just without the screen. On stock MOD OS the volume knob can be one step off right after you change track.</p>
 
-  Describe each knob BY EAR at min / default / max — what the listener hears,
-  not what the parameter does ("very slow, bowed swells", not "attack 4 s").
--->
-<section>
-    <h2>The controls</h2>
+<h2>Settings</h2>
+<table>
+<tr><th style="width:19%">Setting</th><th style="width:14%">Range</th><th style="width:10%">Default</th><th>What it does</th></tr>
+<tr><td class="ctl">After Rec</td><td>Play / Dub</td><td>Rec&gt;Play</td><td>What closing a first recording leads to.</td></tr>
+<tr><td class="ctl">Dry Thru</td><td>off / on</td><td>off</td><td>Adds your dry input to the output, for series use.</td></tr>
+<tr><td class="ctl">Tail</td><td>0&ndash;500&nbsp;ms</td><td>50&nbsp;ms</td><td>Ring-out after closing the first loop, blended into its start. Too long can double the first note.</td></tr>
+<tr><td class="ctl">Hold Time</td><td>200&ndash;2000&nbsp;ms</td><td>500&nbsp;ms</td><td>How long to hold C before it counts as redo instead of undo.</td></tr>
+<tr><td class="ctl">Undo Budget</td><td>16&ndash;400&nbsp;MB</td><td>200&nbsp;MB</td><td>Memory for undo history. When it runs out the oldest layers stay in the loop but can no longer be undone.</td></tr>
+<tr><td class="ctl">Overdub earlier by</td><td>0&ndash;30&nbsp;ms</td><td>0&nbsp;ms</td><td>Writes overdubs a little earlier. Raise it if your overdubs land slightly late.</td></tr>
+<tr><td class="ctl">Trigger Latency</td><td>0&ndash;50&nbsp;ms</td><td>3&nbsp;ms</td><td>Backs the start of a recording up to make up for the late footswitch press, so the first attack is kept.</td></tr>
+</table>
 
-    <div class="knob-grid">
-        <div class="knob">
-            <h4><span class="badge">1</span> GAIN</h4>
-            <p>How loud the output is compared to the input.</p>
-            <ul>
-                <li><b>Left (&minus;24&nbsp;dB):</b> a distant whisper</li>
-                <li><b>Noon (0&nbsp;dB, default):</b> exactly as loud as what comes in</li>
-                <li><b>Right (+24&nbsp;dB):</b> a big, clean boost</li>
-            </ul>
-        </div>
-    </div>
-
-    <div class="note">
-        <b>Stereo out of a mono pedal?</b> Ouroboros sends the same signal to left
-        and right, so it slots cleanly in front of stereo effects like reverb,
-        delay, or chorus.
-    </div>
-</section>
-
-<!-- ============================================= page 4: installing + Q&A
-  Installation covers exactly two audiences: MOD Desktop users (unzip into the
-  user-plugin folder) and Dwarf users (copy onto the unit). Point at the
-  GitHub release assets — the PDF they are reading was attached to the same
-  release as the tarballs. Keep the developer route ("build from source") to
-  a one-line pointer at the repo.
--->
-<section>
-    <h2>Installing Ouroboros</h2>
-    <p>
-        Download the build for your platform from the plugin's
-        <b>GitHub Releases</b> page — each release ships a MOD&nbsp;Desktop bundle
-        (<code>ouroboros-vX.Y.Z-linux-x86_64.tar.gz</code>) and a MOD&nbsp;Dwarf bundle
-        (<code>ouroboros-vX.Y.Z-dwarf-aarch64.tar.gz</code>).
-    </p>
-
-    <h3>MOD Desktop (Linux)</h3>
-    <ol class="steps">
-        <li>Extract the archive: <code>tar xzf ouroboros-vX.Y.Z-linux-x86_64.tar.gz</code></li>
-        <li>Move the extracted <code>ouroboros.lv2</code> folder into
-            <code>~/Documents/MOD Desktop/lv2/</code></li>
-        <li>Restart MOD Desktop. Ouroboros appears in the plugin library under
-            the brand <b>ouroboros</b>.</li>
-    </ol>
-
-    <h3>MOD Dwarf</h3>
-    <ol class="steps">
-        <li>Connect the Dwarf over USB and extract the Dwarf archive on your computer.</li>
-        <li>Copy the bundle onto the unit:
-            <pre>scp -O -r ouroboros.lv2 root@192.168.51.1:/root/.lv2/</pre></li>
-        <li>Restart the audio services (or simply reboot the Dwarf):
-            <pre>ssh root@192.168.51.1 'systemctl restart jack2 mod-ui'</pre></li>
-        <li>Hard-refresh the MOD web interface in your browser
-            (<b>Ctrl-Shift-R</b>) and drag Ouroboros onto a pedalboard.</li>
-    </ol>
-
-    <h2 class="pb" style="margin-top:0">Questions &amp; answers</h2>
-    <dl class="faq">
-        <div class="qa">
-            <dt>I hear nothing after installing.</dt>
-            <dd>Make sure the pedal is connected on the pedalboard — the input jack on
-                its left, both output jacks on its right — and that GAIN is not fully
-                left. On the Dwarf, restart <code>jack2</code> and <code>mod-ui</code>
-                (or reboot) after copying the bundle.</dd>
-        </div>
-        <div class="qa">
-            <dt>Does the boost distort?</dt>
-            <dd>Ouroboros itself stays clean at any setting, but a big boost can push
-                the <i>next</i> pedal — or the output stage — into clipping. If you hear
-                crackling, back GAIN off or lower the level further down the chain.</dd>
-        </div>
-    </dl>
-
-    <h2 style="margin-top:16px">Specifications</h2>
-    <table>
-        <tr><th style="width:34%">Format</th><td>LV2 audio plugin, mono in &rarr; stereo out</td></tr>
-        <tr><th>Platforms</th><td>MOD Desktop (Linux x86_64), MOD Dwarf (aarch64)</td></tr>
-        <tr><th>Controls</th><td>Gain: &minus;24&nbsp;dB &hellip; +24&nbsp;dB, default 0&nbsp;dB</td></tr>
-        <tr><th>Latency</th><td>None</td></tr>
-    </table>
-
-    <p class="credits">
-        Ouroboros is free software built with the DISTRHO Plugin Framework.
-        Manual edition July 2026 — for the plugin version it shipped with;
-        see the GitHub release page for the latest.
-    </p>
-</section>
 
 </body>
 </html>
