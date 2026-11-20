@@ -39,8 +39,13 @@ static void drawBitmap(ALABS_HMI_WidgetDraw_Handle, ALABS_HMI_Widget widget,
 static int32_t gBlockLength = 128;
 static LV2_Options_Option gOptions[2];  // filled in main(); the zeroed last one ends the list
 static LV2_URID_Map gMap = { nullptr, mapUri };
-// No callbacks: nothing may call them yet.
-static LV2_HMI_WidgetControl gHmi = { nullptr, LV2_HMI_WIDGETCONTROL_SIZE_POPUP_MESSAGE };
+struct HmiCall { std::string fn; LV2_HMI_Addressing a; std::string text; };
+static std::vector<HmiCall> gHmiCalls;
+static void hmiLed(void*, LV2_HMI_Addressing a, LV2_HMI_LED_Colour, int, int) { gHmiCalls.push_back({"led", a, ""}); }
+static void hmiLabel(void*, LV2_HMI_Addressing a, const char* t) { gHmiCalls.push_back({"label", a, t}); }
+static void hmiValue(void*, LV2_HMI_Addressing a, const char* t) { gHmiCalls.push_back({"value", a, t}); }
+static LV2_HMI_WidgetControl gHmi = { nullptr, LV2_HMI_WIDGETCONTROL_SIZE_POPUP_MESSAGE,
+                                      hmiLed, nullptr, hmiLabel, hmiValue, nullptr, nullptr, nullptr };
 static ALABS_HMI_WidgetDraw gDraw = { sizeof(ALABS_HMI_WidgetDraw), nullptr, drawBitmap };
 
 static LV2_Feature gOptionsFeature = { LV2_OPTIONS__options, gOptions };
@@ -135,6 +140,42 @@ static void widgetShownLeadsToDraw(const LV2_Descriptor* d)
     d->cleanup(h);
 }
 
+// The LV2 index of the port with this symbol, from the generated TTL.
+static int portIndex(const std::string& ttlPath, const std::string& symbol)
+{
+    std::ifstream ttl(ttlPath);
+    std::string tok;
+    int index = -1;
+    while (ttl >> tok)
+    {
+        if (tok == "lv2:index") ttl >> index;
+        else if (tok == "lv2:symbol") { ttl >> tok; if (tok == "\"" + symbol + "\"") return index; }
+    }
+    return -1;
+}
+
+static void addressedRecGetsLabel(const LV2_Descriptor* d, const std::string& ttlPath)
+{
+    gHmiCalls.clear();
+    const int idx = portIndex(ttlPath, "rec");
+    CHECK(idx == 2);
+    LV2_Handle h = d->instantiate(d, 48000, bundleDir.c_str(), fullFeatures);
+    connectAll(d, h);
+    d->activate(h);
+    auto hn = (const LV2_HMI_PluginNotification*)d->extension_data(LV2_HMI__PluginNotification);
+    LV2_HMI_AddressingInfo info = { LV2_HMI_AddressingCapabilities(0x7), LV2_HMI_AddressingFlags(0), "Rec", 0, 1, 0 };
+    LV2_HMI_Addressing a = (LV2_HMI_Addressing)0xA1;
+    hn->addressed(h, idx, a, &info);
+    d->run(h, 128);
+    bool label = false;
+    for (auto& c : gHmiCalls) label |= c.fn == "label" && c.a == a && c.text == "REC";
+    CHECK(label);
+    const size_t n = gHmiCalls.size();
+    d->run(h, 128);
+    CHECK(gHmiCalls.size() == n);   // nothing changed: nothing sent
+    d->cleanup(h);
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 2) { std::printf("usage: %s <bundle>/<plugin>.so\n", argv[0]); return 2; }
@@ -155,5 +196,6 @@ int main(int argc, char** argv)
     extensionDataForwarded(d);
     instantiateWithoutFeatures(d);
     widgetShownLeadsToDraw(d);
+    addressedRecGetsLabel(d, so.substr(0, so.size() - 3) + ".ttl");
     REPORT();
 }

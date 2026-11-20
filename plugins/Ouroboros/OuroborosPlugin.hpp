@@ -8,6 +8,7 @@
 #include "DistrhoPlugin.hpp"
 #include "hmi/alabs-hmi-widgets.h"
 #include "dsp/Looper.hpp"
+#include "hmi/HmiBridge.hpp"
 #include "hmi/lv2-hmi.h"
 
 #include <algorithm>
@@ -34,6 +35,10 @@ START_NAMESPACE_DISTRHO
 #else
   static inline void flushDenormals() {}
 #endif
+
+static_assert(!(DISTRHO_PLUGIN_WANT_STATE || DISTRHO_PLUGIN_WANT_MIDI_INPUT || DISTRHO_PLUGIN_WANT_MIDI_OUTPUT
+                || DISTRHO_PLUGIN_WANT_TIMEPOS || DISTRHO_PLUGIN_WANT_LATENCY),
+              "paramFromLv2Index assumes no LV2 event or latency ports");
 
 // LV2 port index -> parameter index. Valid because the plugin has no event
 // ports (no state, MIDI or time position): params follow the audio ports.
@@ -73,7 +78,7 @@ public:
             for (; *f != nullptr; ++f)
             {
                 if (std::strcmp((*f)->URI, LV2_HMI__WidgetControl) == 0)
-                    fHmiWc = static_cast<const LV2_HMI_WidgetControl*>((*f)->data);
+                    fHmi.setFeature(static_cast<const LV2_HMI_WidgetControl*>((*f)->data));
                 else if (std::strcmp((*f)->URI, ALABS_HMI__WidgetDraw) == 0)
                     fWidgetDraw = static_cast<const ALABS_HMI_WidgetDraw*>((*f)->data);
             }
@@ -84,8 +89,16 @@ public:
 
     // LV2 extension callbacks (OuroborosPlugin.cpp), from non-RT host threads,
     // possibly while run() runs: share state with run() through atomics only.
-    void hmiAddressed(uint32_t, LV2_HMI_Addressing, const LV2_HMI_AddressingInfo*) {}
-    void hmiUnaddressed(uint32_t) {}
+    void hmiAddressed(uint32_t lv2Index, LV2_HMI_Addressing a, const LV2_HMI_AddressingInfo* info)
+    {
+        int p = hmiPort(lv2Index);
+        if (p >= 0 && info != nullptr) fHmi.addressed(ouro::HmiPort(p), a, uint32_t(info->caps));
+    }
+    void hmiUnaddressed(uint32_t lv2Index)
+    {
+        int p = hmiPort(lv2Index);
+        if (p >= 0) fHmi.unaddressed(ouro::HmiPort(p));
+    }
 
     void widgetShown(const char*, ALABS_HMI_Widget w, const ALABS_HMI_WidgetArea* area)
     {
@@ -105,6 +118,18 @@ public:
     }
 
 protected:
+    static int hmiPort(uint32_t lv2Index)
+    {
+        if (lv2Index < DISTRHO_PLUGIN_NUM_INPUTS + DISTRHO_PLUGIN_NUM_OUTPUTS) return -1;
+        switch (paramFromLv2Index(lv2Index)) {
+        case kParamRec:      return ouro::kHmiRec;
+        case kParamUndoRedo: return ouro::kHmiUndo;
+        case kParamOnOff:    return ouro::kHmiOnOff;
+        case kParamVolume:   return ouro::kHmiVolume;
+        default:             return -1;
+        }
+    }
+
     const char* getLabel()       const override { return DISTRHO_PLUGIN_NAME; }
     const char* getMaker()       const override { return DISTRHO_PLUGIN_BRAND; }
     const char* getHomePage()    const override { return PLUGIN_HOMEPAGE; }
@@ -324,6 +349,8 @@ protected:
                                      fSlot.w.load(std::memory_order_relaxed),
                                      fSlot.h.load(std::memory_order_relaxed), nullptr);
         fDrawn = w;
+
+        fHmi.update({fEngine.state(sel), fEngine.nextAction(sel), fEngine.canUndo(sel), sel, fEngine.isOn(sel)});
     }
 
 private:
@@ -335,7 +362,7 @@ private:
     uint64_t fHold = 0;                     // samples undo_redo has been held
     bool fHeld = false, fRedone = false;
 
-    const LV2_HMI_WidgetControl* fHmiWc = nullptr;  // null: host has no MOD HMI
+    ouro::HmiBridge fHmi;                           // labels and LEDs; inert without the host's HMI
     const ALABS_HMI_WidgetDraw* fWidgetDraw = nullptr;  // null: host can't show widgets
 
     // One shown widget; handle is null while the slot is free.
