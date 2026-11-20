@@ -1,0 +1,12 @@
+--- host.py.orig	2026-11-21 00:07:45.518863931 +0200
++++ host.py	2026-11-21 00:07:55.134911101 +0200
+@@ -1906,6 +1906,9 @@
+                 else:
+                     pluginData['ports'][portsymbol] = value
+ 
++                    if instance_id != PEDALBOARD_INSTANCE_ID and portsymbol in pluginData['addressings']:
++                        self.paramhmi_set(instance, portsymbol, value, None)
++
+                     if instance_id == PEDALBOARD_INSTANCE_ID:
+                         self.process_read_message_pedal_changed(portsymbol, value)
+ 
