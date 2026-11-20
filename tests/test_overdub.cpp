@@ -71,8 +71,8 @@ static void recToDubTailZeroUndoIsSeamless() {                     // undoing th
         r.lp.undo(0); CHECK(maxStep(wrap(r.settle())) < 2.5f * sineStep(220, 0.3f));
     }
 }
-static void recToDubSplitsTheBackDatedTail() {                      // D = 96 < T = 2400: fold + live tail
-    Rig r; r.lp.setRecToDub(true); r.lp.setTriggerLatencyMs(2.0f);
+static void recToDubSplitsTheBackDatedTail(float advanceMs) {       // D = 96 < T = 2400: fold + live tail
+    Rig r; r.lp.setRecToDub(true); r.lp.setTriggerLatencyMs(2.0f); r.lp.setAdvanceMs(advanceMs);   // no offset: it continues
     const uint32_t s = 4096, D = 96, T = 2400, L = 24064;
     auto in = sine(220, 0.1f, 48000);
     r.feed(slice(in, 0, s)); r.lp.pressRec(0); r.feed(slice(in, s, s + L)); r.lp.pressRec(0);
@@ -135,7 +135,7 @@ static void undoMashIsBounded() {                                   // Review Fo
 int main() {
     undoRestoresExactly(); undoIsLazy(); undoIsClickFree(); undoRampsSpanThePress(); undoWhileOverdubbingCancels();
     onePressOneLayer(); silentOverdubMakesNoLayer(); punchesAreClickFree(); recToDubUndoIsSeamless(); recToDubTailZeroUndoIsSeamless();
-    recToDubSplitsTheBackDatedTail(); redubRightAfterCancelFadesIn(); dubMidTailFadesIn(); dubLateInPunchOutFadeFadesIn();
+    recToDubSplitsTheBackDatedTail(0.0f); recToDubSplitsTheBackDatedTail(5.0f); redubRightAfterCancelFadesIn(); dubMidTailFadesIn(); dubLateInPunchOutFadeFadesIn();
     advanceWritesEarlier(); newOverdubDiscardsRedo(); undoMashIsBounded();
     REPORT();
 }

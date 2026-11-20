@@ -114,12 +114,13 @@ public:
     void pressRec(int t) {
         if (!valid(t)) return;
         bool cont = false;                               // the new writer complements the closed one's tail/fade
+        const bool afterFirst = recTrack_ >= 0 && recTrack_ != t;   // it continues the first recording: no offset
         for (int u = 0; u < kTracks; ++u)
             if (u != t && writing(tracks_[u])) cont = close(u, false);
         Track& tr = tracks_[t];
         const uint32_t D = msToSamples(trigMs_, sr_);
         switch (tr.state) {
-        case TrackState::Empty:   if (L_) startDub(tr, D, cont, true); else startFirst(t); break;
+        case TrackState::Empty:   if (L_) startDub(tr, D, cont, true, !afterFirst); else startFirst(t); break;
         case TrackState::Playing: startDub(tr, D, cont); break;
         default:                  close(t, recToDub_); break;
         }
@@ -301,7 +302,7 @@ private:
         pos_ = recD_ % L;                                             // D <= histLen_ == minLoop_ <= L
         tr.state = TrackState::Playing;
         tr.gain.snap(target(tr));                                     // no ramp: the recording has its fade-in
-        if (toDub) startDub(tr, recD_, true);                         // Rec->Dub: the tail input splits g / 1-g
+        if (toDub) startDub(tr, recD_, true, false, false);           // Rec->Dub: the tail input splits g / 1-g
         return T > 0;
     }
 
@@ -310,9 +311,10 @@ private:
     // fades in, capped by the complement of a tail or punch-out fade still writing, so it never steps where it starts.
     // base: a recording onto the loop (L set, track Empty). It becomes the track's base, with no delta. The reused
     // buffer reads as silence: the positions behind the playhead are zeroed now, the rest by a zero op ahead of it.
+    // offset: false for a layer that continues the first recording (Rec->Dub, handover before L), which has none.
     // ponytail: the zero op does not ramp; a re-record within kRampMs of a clear or base undo cuts that ramp-out
-    void startDub(Track& tr, uint32_t D, bool cont, bool base = false) {
-        const uint32_t back = D + msToSamples(advMs_, sr_);   // the offset writes behind the playhead
+    void startDub(Track& tr, uint32_t D, bool cont, bool base = false, bool offset = true) {
+        const uint32_t back = D + (offset ? msToSamples(advMs_, sr_) : 0);   // the offset writes behind the playhead
         if (base) wipe(tr); else clearRedo(tr);          // a stale base or its pending ops never come back
         Writer& dub = tr.dub;
         dub = Writer{};

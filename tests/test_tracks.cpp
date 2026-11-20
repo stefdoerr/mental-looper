@@ -18,13 +18,13 @@ static void handoverClosesAndStarts() {
     CHECK(r.lp.state(0) == ouro::TrackState::Playing && r.lp.state(1) == ouro::TrackState::Recording);
     CHECK(r.lp.loopLength() == 24064);
 }
-static void handoverSplitKeepsUnity() {
-    Rig r; auto in = sine(220, 0.1f, 48000);                        // tail 50 ms = 2400
+static void handoverSplitKeepsUnity(float advanceMs) {              // t1 starts at 0 (no offset: it continues t0)
+    Rig r; r.lp.setAdvanceMs(advanceMs); auto in = sine(220, 0.1f, 48000);   // tail 50 ms = 2400
     r.lp.pressRec(0); r.feed(slice(in, 0, 24064)); r.lp.pressRec(1);
     r.feed(slice(in, 24064, 24064 + 4864)); r.lp.pressRec(1);
-    auto img = r.settle();
-    for (uint32_t i = 0; i < 2400; ++i)
-        CHECK(std::fabs(img[i] - (in[i] * fadeInGain(i) + in[24064 + i])) < 1e-5f);
+    auto img = r.settle(); float err = 0.0f;
+    for (uint32_t i = 0; i < 2400; ++i) err = std::max(err, std::fabs(img[i] - (in[i] * fadeInGain(i) + in[24064 + i])));
+    CHECK(err < 1e-5f);
 }
 static void handoverTailZeroKeepsBaseSmooth() {                    // tail 0: a 3 ms split, t0 alone has no step
     Rig r; r.lp.setTailMs(0); auto in = sine(220, 0.1f, 48000);
@@ -190,7 +190,8 @@ static void stressRandomPresses(float trigMs, bool recToDub) {     // Review Foc
 }
 
 int main() {
-    secondTrackLockedToLoop(); handoverClosesAndStarts(); handoverSplitKeepsUnity(); handoverTailZeroKeepsBaseSmooth(); handoverAtPunchOutKeepsUnity();
+    secondTrackLockedToLoop(); handoverClosesAndStarts(); handoverSplitKeepsUnity(0.0f); handoverSplitKeepsUnity(5.0f);
+    handoverTailZeroKeepsBaseSmooth(); handoverAtPunchOutKeepsUnity();
     onOffRampsAndResumesInPlace(); volumeIsPlaybackOnly(); softClipOnlyAboveKnee(); dryThruAndBypass();
     clearAllResetsAndOverwrites(); recordOnEmptyTrackZeroesReusedBuffer(); baseUndoRedoAndLengthReset();
     offTrackStillRecords(); disabledEngineOutputsDryOnly();
