@@ -320,6 +320,13 @@ public:
     bool canUndo(int t) const { return state(t) != TrackState::Empty; }
     bool canRedo(int t) const { return valid(t) && (tracks_[t].baseUndone || tracks_[t].undoTop < tracks_[t].redoTop); }
     uint32_t undoDepth(int t) const { return valid(t) ? tracks_[t].undoTop : 0; }
+    // The layers heard now: 0 empty, else the recording plus its dubs still applied (one in progress, and those the
+    // budget merged into the base, count). It follows the presses: an undo counts at once, not as its pass applies it.
+    uint32_t layerCount(int t) const {
+        if (state(t) == TrackState::Empty) return 0;
+        const Track& tr = tracks_[t];
+        return 1 + tr.baked + tr.undoTop + (tr.state == TrackState::Overdubbing ? 1 : 0);
+    }
     uint32_t pendingOps(int t) const { return valid(t) ? tracks_[t].nOps : 0; }
     uint32_t loopLength() const { return L_; }
     uint32_t position() const { return pos_; }
@@ -368,6 +375,7 @@ private:
         float* buf = nullptr;            // the base, plus every layer still in the undo stack
         Layer* layers = nullptr;         // [0, undoTop) undo stack, [undoTop, redoTop) redo stack, top at undoTop
         uint32_t undoTop = 0, redoTop = 0;
+        uint32_t baked = 0;              // dubs left in buf without a layer (evicted, or not stored): layerCount() keeps them
         // In start order, a park's split parts first. The spare slot lets a cancel past the cap go through. x2: a
         // park can split every op once (one is added only at nOps <= cap); see park() for parts that split again.
         Op ops[kOpSlots];
@@ -550,6 +558,7 @@ private:
             if (dub.lost) {                              // the pool was full: the audio stays, without undo
                 d.release(pool_);
                 dub.layer = -1;
+                ++tr.baked;
             } else if (d.length() == 0) {
                 return;                                  // nothing written (D = 0, both presses in one gap)
             } else if (cancel ? tr.nOps <= kMaxPendingOps : dub.peak < kSilenceFloor && tr.nOps < kMaxPendingOps) {
@@ -669,7 +678,7 @@ private:
         fix(tr.dub.layer);
         fix(tr.fade.layer);
         for (uint32_t k = 0; k < tr.nOps; ++k) fix(tr.ops[k].layer);
-        if (bi < tr.undoTop) --tr.undoTop;
+        if (bi < tr.undoTop) { --tr.undoTop; ++tr.baked; }   // an undo layer: its sound stays in buf
         --tr.redoTop;
         return true;
     }
@@ -696,7 +705,7 @@ private:
     void dropLayers(Track& tr) {
         const uint32_t top = tr.redoTop + (tr.state == TrackState::Overdubbing ? 1 : 0);   // + the overdub's slot
         for (uint32_t i = 0; i < top; ++i) dropLayer(tr, i);
-        tr.undoTop = tr.redoTop = 0;
+        tr.undoTop = tr.redoTop = tr.baked = 0;
         tr.dub = tr.fade = Writer{};
         tr.tailEnd = 0;
         tr.baseUndone = false;

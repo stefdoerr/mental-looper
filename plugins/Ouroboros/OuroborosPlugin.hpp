@@ -414,7 +414,11 @@ private:
         ouro::WidgetView v = {};
         v.selected = fSel;
         v.transport = fEngine.transport();
-        for (int t = 0; t < ouro::kTracks; ++t) { v.state[t] = fEngine.state(t); v.on[t] = fEngine.isOn(t); v.armed[t] = fEngine.armedTrack() == t; }
+        for (int t = 0; t < ouro::kTracks; ++t)
+        {
+            v.state[t] = fEngine.state(t); v.on[t] = fEngine.isOn(t); v.armed[t] = fEngine.armedTrack() == t;
+            v.layers[t] = fEngine.layerCount(t);   // the bitmap compare below redraws on a count change
+        }
         v.loopLength = fEngine.loopLength(); v.position = fEngine.position();
         v.trackLength = fEngine.trackLength(fSel); v.trackPosition = fEngine.trackPosition(fSel);
         v.recordedSamples = fEngine.recordedSamples(); v.sampleRate = fEngine.sampleRate(); v.blinkOn = fBlinkOn;

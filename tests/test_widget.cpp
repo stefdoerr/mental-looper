@@ -32,33 +32,33 @@ static void barFillsProportionally()
     int lit = 0; for (int x = 1; x < 39; ++x) lit += px(b, 40, x, 30);    // a row inside the bar
     CHECK(std::abs(lit - 19) <= 1);
     CHECK(px(b, 40, 0, 30) == 1 && px(b, 40, 39, 30) == 1);               // outline
-    CHECK(litIn(b, 40, 0, 27, 40, 34) > 0 && litIn(b, 40, 0, 23, 40, 27) == 0);   // nothing between marks and bar
+    CHECK(litIn(b, 40, 0, 28, 40, 35) > 0 && litIn(b, 40, 0, 20, 40, 28) == 0);   // nothing between marks and bar (no counts)
 }
 
 static void emptyBarWhenNoLoop()
 {
     auto v = view(); uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
-    CHECK(litIn(b, 40, 1, 28, 39, 33) == 0);       // no loop, nothing recording: nothing inside the outline
-    CHECK(litIn(b, 40, 0, 27, 40, 28) == 40);      // the outline is there
+    CHECK(litIn(b, 40, 1, 29, 39, 34) == 0);       // no loop, nothing recording: nothing inside the outline
+    CHECK(litIn(b, 40, 0, 28, 40, 29) == 40);      // the outline is there
 }
 
 static void elapsedShownWhileRecording()
 {
     auto v = view(); v.state[0] = TrackState::Recording; v.recordedSamples = 7 * 48000;
     uint8_t b[1024], ref[1024]; ouro::renderLoopWidget(v, 40, 37, b);
-    std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 40, 1, 27, "0:07");
+    std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 40, 1, 28, "0:07");
     bool same = true;
-    for (int y = 27; y < 34; ++y) for (int x = 0; x < 40; ++x) same &= px(b, 40, x, y) == px(ref, 40, x, y);
+    for (int y = 28; y < 35; ++y) for (int x = 0; x < 40; ++x) same &= px(b, 40, x, y) == px(ref, 40, x, y);
     CHECK(same);
-    CHECK(litIn(ref, 40, 0, 27, 40, 34) > 0);
+    CHECK(litIn(ref, 40, 0, 28, 40, 35) > 0);
     v.recordedSamples = 8 * 48000;
     uint8_t b8[1024]; ouro::renderLoopWidget(v, 40, 37, b8);
     CHECK(std::memcmp(b, b8, 5 * 37) != 0);
 }
 
-static bool cellIs(const uint8_t* b, int x0, const uint8_t* g)   // 7x7 mark cell at (x0, 15) equals glyph g
+static bool cellIs(const uint8_t* b, int x0, const uint8_t* g)   // 7x7 mark cell at (x0, 12) equals glyph g
 {
-    for (int r = 0; r < 7; ++r) for (int c = 0; c < 7; ++c) if (px(b, 40, x0 + c, 15 + r) != ((g[r] >> (6 - c)) & 1)) return false;
+    for (int r = 0; r < 7; ++r) for (int c = 0; c < 7; ++c) if (px(b, 40, x0 + c, 12 + r) != ((g[r] >> (6 - c)) & 1)) return false;
     return true;
 }
 
@@ -70,19 +70,19 @@ static void marksReflectTracks()
     uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
     const int x0[4] = { 1, 11, 21, 31 };    // 7 px marks centred in w/4 = 10 px cells
     CHECK(cellIs(b, x0[0], ouro::kMarkPlay));                                 // playing, on: play triangle
-    CHECK(litIn(b, 40, x0[0] + 2, 15, x0[0] + 3, 22) == 5 && litIn(b, 40, x0[0] + 4, 15, x0[0] + 5, 22) == 1);   // asymmetric: left column 5 px, right (apex) 1 px
-    CHECK(litIn(b, 40, x0[0] + 3, 15, x0[0] + 4, 22) > litIn(b, 40, x0[0] + 5, 15, x0[0] + 6, 22));
-    CHECK(cellIs(b, x0[1], ouro::kMarkStop) && litIn(b, 40, x0[1], 15, x0[1] + 7, 22) == 25);   // playing, muted: 5x5 stop square
-    CHECK(litIn(b, 40, x0[2], 15, x0[2] + 7, 22) == 9 && litIn(b, 40, x0[2] + 2, 17, x0[2] + 5, 20) == 9);   // empty: centre dot
-    CHECK(litIn(b, 40, x0[3], 15, x0[3] + 7, 22) == 0);                       // recording, blink off
+    CHECK(litIn(b, 40, x0[0] + 2, 12, x0[0] + 3, 19) == 5 && litIn(b, 40, x0[0] + 4, 12, x0[0] + 5, 19) == 1);   // asymmetric: left column 5 px, right (apex) 1 px
+    CHECK(litIn(b, 40, x0[0] + 3, 12, x0[0] + 4, 19) > litIn(b, 40, x0[0] + 5, 12, x0[0] + 6, 19));
+    CHECK(cellIs(b, x0[1], ouro::kMarkStop) && litIn(b, 40, x0[1], 12, x0[1] + 7, 19) == 25);   // playing, muted: 5x5 stop square
+    CHECK(litIn(b, 40, x0[2], 12, x0[2] + 7, 19) == 9 && litIn(b, 40, x0[2] + 2, 14, x0[2] + 5, 17) == 9);   // empty: centre dot
+    CHECK(litIn(b, 40, x0[3], 12, x0[3] + 7, 19) == 0);                       // recording, blink off
     v.blinkOn = true; ouro::renderLoopWidget(v, 40, 37, b);
     CHECK(cellIs(b, x0[3], ouro::kMarkDisc));                                 // recording, blink on: disc
-    CHECK(litIn(b, 40, x0[3], 15, x0[3] + 7, 22) == 21);   // 5x5 disc
+    CHECK(litIn(b, 40, x0[3], 12, x0[3] + 7, 19) == 21);   // 5x5 disc
     for (bool on : { true, false })   // overdubbing: disc regardless of on/off, blinks like recording
     {
         v.state[3] = TrackState::Overdubbing; v.on[3] = on;
         v.blinkOn = false; ouro::renderLoopWidget(v, 40, 37, b);
-        CHECK(litIn(b, 40, x0[3], 15, x0[3] + 7, 22) == 0);
+        CHECK(litIn(b, 40, x0[3], 12, x0[3] + 7, 19) == 0);
         v.blinkOn = true; ouro::renderLoopWidget(v, 40, 37, b);
         CHECK(cellIs(b, x0[3], ouro::kMarkDisc));
     }
@@ -123,10 +123,10 @@ static void ringsAroundSymbols()   // for every state, selected: 7x7 cell border
         auto v = view(); v.selected = sel; v.state[sel] = e.s; v.on[sel] = e.on; v.blinkOn = blink;
         uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
         const int x = x0[sel];
-        CHECK(litIn(b, 40, x - 1, 14, x + 8, 15) == 9 && litIn(b, 40, x - 1, 22, x + 8, 23) == 9);        // frame top/bottom
-        CHECK(litIn(b, 40, x - 1, 15, x, 22) == 7 && litIn(b, 40, x + 7, 15, x + 8, 22) == 7);            // frame left/right
-        CHECK(litIn(b, 40, x, 15, x + 7, 16) == 0 && litIn(b, 40, x, 21, x + 7, 22) == 0);                // gap top/bottom
-        CHECK(litIn(b, 40, x, 16, x + 1, 21) == 0 && litIn(b, 40, x + 6, 16, x + 7, 21) == 0);            // gap left/right
+        CHECK(litIn(b, 40, x - 1, 11, x + 8, 12) == 9 && litIn(b, 40, x - 1, 19, x + 8, 20) == 9);        // frame top/bottom
+        CHECK(litIn(b, 40, x - 1, 12, x, 19) == 7 && litIn(b, 40, x + 7, 12, x + 8, 19) == 7);            // frame left/right
+        CHECK(litIn(b, 40, x, 12, x + 7, 13) == 0 && litIn(b, 40, x, 18, x + 7, 19) == 0);                // gap top/bottom
+        CHECK(litIn(b, 40, x, 13, x + 1, 18) == 0 && litIn(b, 40, x + 6, 13, x + 7, 18) == 0);            // gap left/right
     }
 }
 
@@ -134,11 +134,11 @@ static void stateText()
 {
     auto v = view(); uint8_t a[1024], b[1024];
     ouro::renderLoopWidget(v, 40, 37, a);
-    CHECK(litIn(a, 40, 0, 3, 40, 10) > 0 && litIn(a, 40, 0, 0, 40, 3) == 0 && litIn(a, 40, 0, 10, 40, 14) == 0);
+    CHECK(litIn(a, 40, 0, 2, 40, 9) > 0 && litIn(a, 40, 0, 0, 40, 2) == 0 && litIn(a, 40, 0, 9, 40, 11) == 0);
     v.state[0] = TrackState::Overdubbing; ouro::renderLoopWidget(v, 40, 37, b);
-    CHECK(std::memcmp(a, b, 5 * 13) != 0);
+    CHECK(std::memcmp(a, b, 5 * 11) != 0);
     v.selected = 2; ouro::renderLoopWidget(v, 40, 37, a);
-    CHECK(std::memcmp(a, b, 5 * 13) != 0);       // T3 differs from T1
+    CHECK(std::memcmp(a, b, 5 * 11) != 0);       // T3 differs from T1
 }
 
 static void stateTextNotClipped()
@@ -149,9 +149,9 @@ static void stateTextNotClipped()
     {
         auto v = view(); v.state[0] = e.s; uint8_t b[1024], ref[1024];
         ouro::renderLoopWidget(v, 40, 37, b);
-        std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 64, 0, 3, "T1"); ouro::drawText(ref, 64, 14, 3, e.txt);
+        std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 64, 0, 2, "T1"); ouro::drawText(ref, 64, 14, 2, e.txt);
         bool same = true;
-        for (int y = 0; y < 13; ++y) for (int x = 0; x < 40; ++x) same &= px(b, 40, x, y) == px(ref, 64, x, y);
+        for (int y = 0; y < 11; ++y) for (int x = 0; x < 40; ++x) same &= px(b, 40, x, y) == px(ref, 64, x, y);
         CHECK(same);
     }
 }
@@ -184,7 +184,7 @@ static void shortAreaBarOnly()
 static void layoutRows()
 {
     // rows [y0,y1) lit anywhere in the full-width band
-    const struct { int h, text, frame, bar; } c[] = { {37, 3, 14, 27}, {27, 1, 9, 19} };
+    const struct { int h, text, frame, bar; } c[] = { {37, 2, 11, 28}, {27, 1, 9, 19} };
     for (auto e : c)
     {
         auto v = view(); v.loopLength = 1000; v.position = 500; v.state[0] = TrackState::Playing; uint8_t b[1024];
@@ -196,15 +196,21 @@ static void layoutRows()
         CHECK(litIn(b, 40, 0, e.bar, 40, e.bar + 1) == 40 && litIn(b, 40, 0, e.bar + 6, 40, e.bar + 7) == 40);   // bar rows
         CHECK(litIn(b, 40, 0, e.bar + 7, 40, e.h) == 0);
     }
-    for (int h = 27; h <= 64; ++h)   // every height: blank edges, equal-ish gaps, nothing overlapping
+    // Every height: blank edges, equal-ish gaps, nothing overlapping. From 33 rows the counts (5 rows) sit 1 row under the
+    // frame; below, the layout is the one without them, and a count draws nothing.
+    for (int h = 27; h <= 64; ++h)
     {
-        auto v = view(); v.loopLength = 1000; v.position = 500; v.state[0] = TrackState::Playing; uint8_t b[5 * 64];
+        auto v = view(); v.loopLength = 1000; v.position = 500; v.state[0] = TrackState::Playing; v.layers[0] = 8; uint8_t b[5 * 64];
         ouro::renderLoopWidget(v, 40, h, b);
-        const int free = h - 23, base = free / 4, rem = free % 4;
-        const int g1 = base + (rem > 0), g2 = base + (rem > 1), text = base, frame = text + 7 + g1, bar = frame + 9 + g2;
+        const bool counts = h >= 33;
+        const int free = h - (counts ? 29 : 23), base = free / 4, rem = free % 4;
+        const int g1 = base + (rem > 0), g2 = base + (rem > 1), text = base, frame = text + 7 + g1, bar = frame + (counts ? 15 : 9) + g2;
         CHECK(litIn(b, 40, 0, 0, 40, 1) == 0 && litIn(b, 40, 0, h - 1, 40, h) == 0 && text >= 1 && h - (bar + 7) >= 1);
         CHECK(litIn(b, 40, 0, text, 40, text + 7) > 0 && litIn(b, 40, 0, text + 7, 40, frame) == 0);
-        CHECK(litIn(b, 40, 0, frame, 40, frame + 1) == 9 && litIn(b, 40, 0, frame + 9, 40, bar) == 0);
+        CHECK(litIn(b, 40, 0, frame, 40, frame + 1) == 9);
+        if (counts) CHECK(litIn(b, 40, 0, frame + 9, 40, frame + 10) == 0 && litIn(b, 40, 0, frame + 10, 40, frame + 15) == 13
+                          && litIn(b, 40, 0, frame + 15, 40, bar) == 0);   // an 8: 13 px
+        else CHECK(litIn(b, 40, 0, frame + 9, 40, bar) == 0);
         CHECK(litIn(b, 40, 0, bar, 40, bar + 1) == 40 && litIn(b, 40, 0, bar + 7, 40, h) == 0);
     }
 }
@@ -214,6 +220,7 @@ static void topAndBottomRowsBlank()
     auto v = view(); v.loopLength = 1000; v.position = 500;
     for (int t = 0; t < ouro::kTracks; ++t) v.state[t] = TrackState::Playing;
     v.state[3] = TrackState::Recording; v.blinkOn = true;
+    for (int t = 0; t < ouro::kTracks; ++t) v.layers[t] = 88;
     const struct { int w, h; } sz[] = { {40, 37}, {51, 8}, {40, 25}, {40, 26}, {128, 64} };
     for (auto s : sz)
     {
@@ -227,11 +234,11 @@ static void topAndBottomRowsBlank()
     }
 }
 
-// The text band x 14..39, rows 3..9 matches s drawn alone there.
+// The text band x 14..39, rows 2..8 matches s drawn alone there.
 static bool showsText(const ouro::WidgetView& v, const char* s)
 {
-    uint8_t b[1024], want[1024] = {}; ouro::renderLoopWidget(v, 40, 37, b); ouro::drawText(want, 40, 14, 3, s);
-    for (int y = 3; y < 10; ++y) for (int x = 14; x < 40; ++x) if (px(b, 40, x, y) != px(want, 40, x, y)) return false;
+    uint8_t b[1024], want[1024] = {}; ouro::renderLoopWidget(v, 40, 37, b); ouro::drawText(want, 40, 14, 2, s);
+    for (int y = 2; y < 9; ++y) for (int x = 14; x < 40; ++x) if (px(b, 40, x, y) != px(want, 40, x, y)) return false;
     return true;
 }
 static void stoppedShowsStop()
@@ -244,8 +251,8 @@ static void stoppedShowsStop()
 static void armedShowsArmAndBlinksItsDot()
 {
     auto v = view(); v.armed[0] = true; uint8_t b[1024];
-    v.blinkOn = true;  ouro::renderLoopWidget(v, 40, 37, b); CHECK(showsText(v, "ARM") && litIn(b, 40, 3, 17, 6, 20) == 9);
-    v.blinkOn = false; ouro::renderLoopWidget(v, 40, 37, b); CHECK(showsText(v, "ARM") && litIn(b, 40, 3, 17, 6, 20) == 0);
+    v.blinkOn = true;  ouro::renderLoopWidget(v, 40, 37, b); CHECK(showsText(v, "ARM") && litIn(b, 40, 3, 14, 6, 17) == 9);
+    v.blinkOn = false; ouro::renderLoopWidget(v, 40, 37, b); CHECK(showsText(v, "ARM") && litIn(b, 40, 3, 14, 6, 17) == 0);
 }
 
 // Every character the widget can draw has a glyph (showsText compares against the same font, so it can't catch a gap).
@@ -260,15 +267,76 @@ static void everyWidgetStringHasGlyphs()
             if (lit == 0) std::printf("  no glyph for '%c' in \"%s\"\n", *c, s);
             CHECK(lit > 0);
         }
+    for (int d = 0; d < 10; ++d)   // the 3x5 count digits: each lit, 3 px wide, and unlike the others
+    {
+        int lit = 0; for (int r = 0; r < 5; ++r) { lit += ouro::kDigits3x5[d][r] != 0; CHECK(ouro::kDigits3x5[d][r] < 8); }
+        CHECK(lit > 0);
+        for (int e = 0; e < d; ++e) CHECK(std::memcmp(ouro::kDigits3x5[d], ouro::kDigits3x5[e], 5) != 0);
+    }
+}
+
+// The layer counts at h = 37: 3x5 digits in rows 21..25, centred under each mark (two digits fill its 7 columns 1 px
+// apart, one takes the middle 3); a track at 0 (empty) shows none.
+static void countsUnderTheirMarks()
+{
+    const int x0[4] = { 1, 11, 21, 31 };
+    const uint32_t n[4] = { 3, 12, 0, 7 };
+    auto v = view(); v.blinkOn = true;
+    for (int i = 0; i < 4; ++i) { v.layers[i] = n[i]; v.state[i] = n[i] ? TrackState::Playing : TrackState::Empty; }
+    uint8_t b[1024], ref[1024] = {}; ouro::renderLoopWidget(v, 40, 37, b);
+    for (int i = 0; i < 4; ++i) if (n[i]) ouro::drawCount(ref, 40, x0[i], 21, n[i]);
+    bool same = true;
+    for (int y = 20; y < 28; ++y) for (int x = 0; x < 40; ++x) same &= px(b, 40, x, y) == px(ref, 40, x, y);
+    CHECK(same);
+    const int x = x0[0], y = x0[1];
+    CHECK(litIn(b, 40, x, 21, x + 2, 26) == 0 && litIn(b, 40, x + 2, 21, x + 5, 26) == 11 && litIn(b, 40, x + 5, 21, x + 7, 26) == 0);   // "3"
+    CHECK(litIn(b, 40, y, 21, y + 3, 26) == 8 && litIn(b, 40, y + 3, 21, y + 4, 26) == 0 && litIn(b, 40, y + 4, 21, y + 7, 26) == 11);  // "12"
+    for (int r = 0; r < 5; ++r) for (int c = 0; c < 3; ++c)
+        CHECK(px(b, 40, y + c, 21 + r) == ((ouro::kDigits3x5[1][r] >> (2 - c)) & 1) && px(b, 40, y + 4 + c, 21 + r) == ((ouro::kDigits3x5[2][r] >> (2 - c)) & 1));
+    CHECK(litIn(b, 40, x0[2] - 1, 20, x0[2] + 8, 28) == 0);                    // track 3: 0, nothing
+    CHECK(litIn(b, 40, x0[3] + 2, 21, x0[3] + 5, 26) > 0);
+    CHECK(litIn(b, 40, 0, 20, 40, 21) == 0 && litIn(b, 40, 0, 26, 40, 28) == 0);
+}
+static void countsAbove99Show99()
+{
+    auto v = view(); v.state[0] = TrackState::Playing; uint8_t a[1024], b[1024];
+    v.layers[0] = 150; ouro::renderLoopWidget(v, 40, 37, a);
+    v.layers[0] = 99;  ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(std::memcmp(a, b, 5 * 37) == 0);
+    for (int r = 0; r < 5; ++r) for (int c = 0; c < 3; ++c)
+        CHECK(px(a, 40, 1 + c, 21 + r) == ((ouro::kDigits3x5[9][r] >> (2 - c)) & 1) && px(a, 40, 5 + c, 21 + r) == px(a, 40, 1 + c, 21 + r));
+}
+// h = 37 with everything drawn: text 2..8, frame 11..19, counts 21..25, bar 28..34, and blank rows between.
+static void countRowsDontOverlap()
+{
+    auto v = view(); v.loopLength = 1000; v.position = 500; v.blinkOn = true;
+    for (int t = 0; t < ouro::kTracks; ++t) { v.state[t] = TrackState::Playing; v.layers[t] = 88; }
+    uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
+    const struct { int y0, y1; bool lit; } band[] = { {0, 2, false}, {2, 9, true}, {9, 11, false}, {11, 20, true}, {20, 21, false},
+        {21, 26, true}, {26, 28, false}, {28, 35, true}, {35, 37, false} };
+    for (auto e : band)
+        for (int y = e.y0; y < e.y1; ++y) CHECK((litIn(b, 40, 0, y, 40, y + 1) > 0) == e.lit);
+    CHECK(litIn(b, 40, 0, 21, 40, 26) == 4 * 2 * 13);                          // eight 8s
+}
+// Below 33 rows the counts don't fit: the layout without them, pixel for pixel, whatever the counts.
+static void noCountsWhenShort()
+{
+    for (int h = 20; h <= 33; ++h)
+    {
+        auto v = view(); v.loopLength = 1000; v.position = 500; v.state[0] = TrackState::Playing; uint8_t a[1024], b[1024];
+        ouro::renderLoopWidget(v, 40, h, a);
+        v.layers[0] = 5; ouro::renderLoopWidget(v, 40, h, b);
+        CHECK((std::memcmp(a, b, 5 * h) == 0) == (h < 33));
+    }
 }
 
 static void longTrackBarHasPassTicks()
 {
     auto v = view(); v.state[0] = TrackState::Playing; v.loopLength = 1000; v.trackLength = 3000; uint8_t b[1024];
     v.trackPosition = 0; ouro::renderLoopWidget(v, 40, 37, b);
-    CHECK(px(b, 40, 14, 28) == 1 && px(b, 40, 26, 28) == 1 && px(b, 40, 13, 28) == 0 && px(b, 40, 15, 28) == 0);
+    CHECK(px(b, 40, 14, 29) == 1 && px(b, 40, 26, 29) == 1 && px(b, 40, 13, 29) == 0 && px(b, 40, 15, 29) == 0);
     v.trackPosition = 1500; ouro::renderLoopWidget(v, 40, 37, b);   // half: filled to column 19
-    CHECK(px(b, 40, 14, 28) == 0 && px(b, 40, 13, 28) == 1 && px(b, 40, 26, 28) == 1 && px(b, 40, 25, 28) == 0);
+    CHECK(px(b, 40, 14, 29) == 0 && px(b, 40, 13, 29) == 1 && px(b, 40, 26, 29) == 1 && px(b, 40, 25, 29) == 0);
     int lit = 0; for (int x = 1; x < 39; ++x) lit += px(b, 40, x, 30);
     CHECK(std::abs(lit - 19) <= 1);
 }
@@ -276,15 +344,15 @@ static void crowdedTicksAreLeftOut()                                   // Review
 {
     auto v = view(); v.state[0] = TrackState::Playing; v.loopLength = 100; v.trackLength = 2000; v.trackPosition = 0;
     uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
-    CHECK(litIn(b, 40, 1, 28, 39, 29) == 0);
+    CHECK(litIn(b, 40, 1, 29, 39, 30) == 0);
 }
 static void recordingShowsPassesSoFar()
 {
     auto v = view(); v.state[0] = TrackState::Recording; v.loopLength = 1000; v.position = 0; v.trackPosition = 2500;
     uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
-    CHECK(px(b, 40, 2, 32) == 1 && px(b, 40, 4, 32) == 1 && px(b, 40, 6, 32) == 0);
+    CHECK(px(b, 40, 2, 33) == 1 && px(b, 40, 4, 33) == 1 && px(b, 40, 6, 33) == 0);
     v.position = 500; ouro::renderLoopWidget(v, 40, 37, b);   // filled to column 19: the dots show dark
-    CHECK(px(b, 40, 2, 32) == 0 && px(b, 40, 4, 32) == 0 && px(b, 40, 6, 32) == 1);
+    CHECK(px(b, 40, 2, 33) == 0 && px(b, 40, 4, 33) == 0 && px(b, 40, 6, 33) == 1);
 }
 
 // Dots and ticks stay inside the bar at any size: rows 0 and h-1 blank, nothing written past the bitmap.
@@ -309,7 +377,7 @@ static void passDotsStopAt18()
 {
     auto v = view(); v.state[0] = TrackState::Recording; v.loopLength = 1000; v.trackPosition = 30000;
     uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
-    CHECK(litIn(b, 40, 1, 32, 39, 33) == 18);
+    CHECK(litIn(b, 40, 1, 33, 39, 34) == 18);
 }
 
 // A long track emptied by undoing its only recording keeps its length in the engine (for a redo); the bar shows the
@@ -319,7 +387,7 @@ static void emptyTrackShowsTheLoopNotItsOldLength()
     auto v = view(); v.state[0] = TrackState::Empty; v.loopLength = 1000; v.position = 500;
     v.trackLength = 3000; v.trackPosition = 0;
     uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
-    CHECK(px(b, 40, 14, 28) == 1 && px(b, 40, 26, 28) == 0);         // no inverted ticks in the filled or empty part
+    CHECK(px(b, 40, 14, 29) == 1 && px(b, 40, 26, 29) == 0);         // no inverted ticks in the filled or empty part
     int lit = 0; for (int x = 1; x < 39; ++x) lit += px(b, 40, x, 30);
     CHECK(std::abs(lit - 19) <= 1);                                    // half of the first loop, not 0 of 3000
 }
@@ -329,6 +397,7 @@ int main()
     sizeIsMono1(); barFillsProportionally(); emptyBarWhenNoLoop(); elapsedShownWhileRecording();
     marksReflectTracks(); selectedFrame(); ringsAroundSymbols(); stateText(); stateTextNotClipped(); tallThreshold(); layoutRows(); shortAreaBarOnly(); topAndBottomRowsBlank();
     stoppedShowsStop(); armedShowsArmAndBlinksItsDot(); everyWidgetStringHasGlyphs();
+    countsUnderTheirMarks(); countsAbove99Show99(); countRowsDontOverlap(); noCountsWhenShort();
     longTrackBarHasPassTicks(); crowdedTicksAreLeftOut(); recordingShowsPassesSoFar(); passMarksStayInsideTheBar(); passDotsStopAt18();
     emptyTrackShowsTheLoopNotItsOldLength();
     REPORT();
