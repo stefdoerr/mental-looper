@@ -16,9 +16,9 @@ static LV2_HMI_Addressing A1 = (LV2_HMI_Addressing)0x1, A2 = (LV2_HMI_Addressing
 static const uint32_t kAllCaps = LV2_HMI_AddressingCapability_LED | LV2_HMI_AddressingCapability_Label | LV2_HMI_AddressingCapability_Value;
 
 static ouro::HmiView view(ouro::TrackState s, ouro::NextAction n, bool undo = false, int sel = 0, bool on = true,
-                            ouro::Transport tp = ouro::Transport::Running, bool armed = false)
+                            ouro::Transport tp = ouro::Transport::Running, bool armed = false, bool waiting = false)
 {
-    return { s, n, undo, sel, on, tp, armed };
+    return { s, n, undo, sel, on, tp, armed, waiting };
 }
 static std::string lastLabel(LV2_HMI_Addressing a)
 {
@@ -49,6 +49,26 @@ static void recLabelShowsArmAndStop()
     CHECK(lastLabel(A1) == "PLAY" && lastLed(A1).colour == LV2_HMI_LED_Colour_Off);
     b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, true, 0, true, ouro::Transport::Running));
     CHECK(lastLabel(A1) == "DUB");
+}
+
+static void waitingBlinksFastInTheComingColour()
+{
+    using namespace ouro;
+    gCalls.clear(); HmiBridge b; b.setFeature(&gFake); b.addressed(kHmiRec, A1, kAllCaps);
+    const auto wait = [](TrackState s, NextAction n, Transport tp = Transport::Running, bool armed = false) {
+        return view(s, n, false, 0, true, tp, armed, true); };
+    b.update(wait(TrackState::Empty, NextAction::Rec));          // a recording about to start: red
+    CHECK(lastLabel(A1) == "REC" && lastLed(A1).colour == LV2_HMI_LED_Colour_Red
+          && lastLed(A1).on == LV2_HMI_LED_Blink_Fast && lastLed(A1).off == LV2_HMI_LED_Blink_Fast);
+    b.update(wait(TrackState::Recording, NextAction::Play));     // the first loop about to close and play: green
+    CHECK(lastLabel(A1) == "PLAY" && lastLed(A1).colour == LV2_HMI_LED_Colour_Green
+          && lastLed(A1).on == LV2_HMI_LED_Blink_Fast && lastLed(A1).off == LV2_HMI_LED_Blink_Fast);
+    b.update(wait(TrackState::Playing, NextAction::Dub, Transport::Stopped));   // a restart: green, label PLAY
+    CHECK(lastLabel(A1) == "PLAY" && lastLed(A1).colour == LV2_HMI_LED_Colour_Green && lastLed(A1).on == LV2_HMI_LED_Blink_Fast);
+    b.update(wait(TrackState::Empty, NextAction::Rec, Transport::Running, true));   // a waiting arm: red, fast
+    CHECK(lastLabel(A1) == "ARM" && lastLed(A1).colour == LV2_HMI_LED_Colour_Red && lastLed(A1).on == LV2_HMI_LED_Blink_Fast);
+    b.update(view(TrackState::Recording, NextAction::Play));     // the wait is over: the state colour again
+    CHECK(lastLed(A1).colour == LV2_HMI_LED_Colour_Red && lastLed(A1).on == LV2_HMI_LED_Blink_Mid);
 }
 
 static void labelsSentOnlyOnChange()
@@ -135,7 +155,7 @@ static void noFeatureNoCalls()
 int main()
 {
     labelsSentOnlyOnChange();
-    recLabelShowsArmAndStop();
+    recLabelShowsArmAndStop(); waitingBlinksFastInTheComingColour();
     undoLabelShowsAvailability();
     knobLabelsFollowTrack();
     readdressResends();

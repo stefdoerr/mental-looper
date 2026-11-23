@@ -255,10 +255,20 @@ static void armedShowsArmAndBlinksItsDot()
     v.blinkOn = false; ouro::renderLoopWidget(v, 40, 37, b); CHECK(showsText(v, "ARM") && litIn(b, 40, 3, 14, 6, 17) == 0);
 }
 
+static void waitShowsWaitInPlaceOfTheState()
+{
+    auto v = view(); v.state[0] = TrackState::Playing; v.loopLength = 1000; v.layers[0] = 2; v.blinkOn = true;
+    uint8_t a[1024], b[1024]; ouro::renderLoopWidget(v, 40, 37, a);
+    v.waiting = true; ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(showsText(v, "WAIT"));
+    v.waiting = false; CHECK(showsText(v, "PLAY"));
+    for (int y = 9; y < 37; ++y) for (int x = 0; x < 40; ++x) CHECK(px(a, 40, x, y) == px(b, 40, x, y));   // marks, counts, bar untouched
+}
+
 // Every character the widget can draw has a glyph (showsText compares against the same font, so it can't catch a gap).
 static void everyWidgetStringHasGlyphs()
 {
-    static const char* const strings[] = { "--", "REC", "PLAY", "DUB", "STOP", "ARM", "T1", "T2", "T3", "T4", "0123456789:" };
+    static const char* const strings[] = { "--", "REC", "PLAY", "DUB", "STOP", "ARM", "WAIT", "T1", "T2", "T3", "T4", "0123456789:" };
     for (const char* s : strings)
         for (const char* c = s; *c != '\0'; ++c)
         {
@@ -396,7 +406,7 @@ int main()
 {
     sizeIsMono1(); barFillsProportionally(); emptyBarWhenNoLoop(); elapsedShownWhileRecording();
     marksReflectTracks(); selectedFrame(); ringsAroundSymbols(); stateText(); stateTextNotClipped(); tallThreshold(); layoutRows(); shortAreaBarOnly(); topAndBottomRowsBlank();
-    stoppedShowsStop(); armedShowsArmAndBlinksItsDot(); everyWidgetStringHasGlyphs();
+    stoppedShowsStop(); armedShowsArmAndBlinksItsDot(); everyWidgetStringHasGlyphs(); waitShowsWaitInPlaceOfTheState();
     countsUnderTheirMarks(); countsAbove99Show99(); countRowsDontOverlap(); noCountsWhenShort();
     longTrackBarHasPassTicks(); crowdedTicksAreLeftOut(); recordingShowsPassesSoFar(); passMarksStayInsideTheBar(); passDotsStopAt18();
     emptyTrackShowsTheLoopNotItsOldLength();

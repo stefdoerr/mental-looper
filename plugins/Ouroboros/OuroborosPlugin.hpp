@@ -409,7 +409,7 @@ protected:
         if (fDrawAcc >= 960) { fDrawAcc %= 960; drawWidgets(); }
 
         fHmi.update({fEngine.state(sel), fEngine.nextAction(sel), fEngine.canUndo(sel), sel, fEngine.isOn(sel),
-                     fEngine.transport(), fEngine.armedTrack() == sel});
+                     fEngine.transport(), fEngine.armedTrack() == sel, fEngine.userWaiting(sel)});
     }
 
 private:
@@ -449,6 +449,7 @@ private:
         ouro::WidgetView v = {};
         v.selected = fSel;
         v.transport = fEngine.transport();
+        v.waiting = fEngine.userWaiting(fSel);
         for (int t = 0; t < ouro::kTracks; ++t)
         {
             v.state[t] = fEngine.state(t); v.on[t] = fEngine.isOn(t); v.armed[t] = fEngine.armedTrack() == t;

@@ -294,6 +294,21 @@ static void modStartMidBarWaitsForTheLine() {                            // Revi
     CHECK(r.lp.position() == (p + 128) % 96000 && r.lp.waiting());     // no jump yet
     r.silenceSync(66000 - 128 + 128); CHECK(!r.lp.waiting() && r.lp.position() <= 128);
 }
+// userWaiting: a press on t or a restart is the user's wait; MOD's lone retrigger is not.
+static void userWaitingIsAPressAnArmOrARestartNotARetrigger() {
+    SyncRig r; r.lp.setSync(true); r.toPhase(96000 - 1280);
+    CHECK(!r.lp.userWaiting(0));
+    r.lp.pressRec(0); CHECK(r.lp.userWaiting(0) && !r.lp.userWaiting(1));
+    SyncRig q; q.lp.setSync(true); q.toPhase(0);
+    q.lp.pressRec(0); q.feedSync(sine(220, 0.1f, 96000)); q.lp.pressRec(0); q.silenceSync(10000);
+    q.phase = 30000.0; q.lp.modStarted(false); q.silenceSync(128);
+    CHECK(q.lp.waiting() && !q.lp.userWaiting(0));                     // retrigger alone
+    SyncRig s; s.lp.setSync(true); s.toPhase(0);
+    s.lp.pressRec(0); s.feedSync(sine(220, 0.1f, 96000)); s.lp.pressRec(0); s.silenceSync(20000);
+    s.lp.stop(ouro::StopMode::Instant); s.silenceSync(2000);
+    s.toPhase(48000); s.lp.pressRec(0);
+    CHECK(s.lp.userWaiting(0) && s.lp.userWaiting(2));                 // a restart waits for every track
+}
 static void modStopDuringTheFirstRecordingKeepsWholeBars() {
     SyncRig r; r.lp.setSync(true); r.toPhase(0);
     r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000 + 30000));
@@ -390,6 +405,6 @@ int main() {
     modStartMidBarWaitsForTheLine();
     modStopDuringTheFirstRecordingKeepsWholeBars(); modStartFromStoppedRestarts();
     aRetriggerHearsAPendingUndo(); aRetriggerLeavesTheLoopsAsTheyWere(); aModStartJoinsAWaitingPress();
-    aQueuedRestartPlaysOnModsTimeline();
+    aQueuedRestartPlaysOnModsTimeline(); userWaitingIsAPressAnArmOrARestartNotARetrigger();
     REPORT();
 }

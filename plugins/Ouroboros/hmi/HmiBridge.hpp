@@ -15,7 +15,7 @@ namespace ouro {
 
 enum HmiPort : uint8_t { kHmiRec, kHmiUndo, kHmiOnOff, kHmiVolume, kHmiPortCount };
 
-struct HmiView { TrackState state; NextAction next; bool canUndo; int selected; bool on; Transport transport; bool armed; };
+struct HmiView { TrackState state; NextAction next; bool canUndo; int selected; bool on; Transport transport; bool armed; bool waiting = false; };   // waiting: the user's press, arm or restart waits for the bar line
 
 class HmiBridge {
 public:
@@ -63,7 +63,7 @@ private:
     static int fingerprint(HmiPort p, const HmiView& v)
     {
         switch (p) {
-        case kHmiRec:    return (int(v.state) * 3 + int(v.next)) * 6 + int(v.transport) * 2 + v.armed;
+        case kHmiRec:    return ((int(v.state) * 3 + int(v.next)) * 6 + int(v.transport) * 2 + v.armed) * 2 + v.waiting;
         case kHmiUndo:   return v.canUndo;
         case kHmiOnOff:  return v.selected * 2 + v.on;
         default:         return v.selected;
@@ -85,7 +85,8 @@ private:
                     : v.state == TrackState::Recording ? LV2_HMI_LED_Colour_Red : LV2_HMI_LED_Colour_Green;
                 int t = blink ? LV2_HMI_LED_Blink_Mid : LV2_HMI_LED_Blink_None;
                 LV2_HMI_LED_Colour col = c;
-                if (v.armed) { col = LV2_HMI_LED_Colour_Red; t = LV2_HMI_LED_Blink_Slow; }
+                if (v.waiting) { col = v.next == NextAction::Rec ? LV2_HMI_LED_Colour_Red : LV2_HMI_LED_Colour_Green; t = LV2_HMI_LED_Blink_Fast; }
+                else if (v.armed) { col = LV2_HMI_LED_Colour_Red; t = LV2_HMI_LED_Blink_Slow; }
                 else if (v.transport == Transport::Stopped) { col = LV2_HMI_LED_Colour_Off; t = LV2_HMI_LED_Blink_None; }
                 wc_->set_led_with_blink(wc_->handle, a, col, t, t);
             }

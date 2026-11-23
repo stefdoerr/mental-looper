@@ -11,7 +11,7 @@ namespace ouro {
 struct WidgetView {
     int selected; TrackState state[kTracks]; bool on[kTracks];
     uint32_t loopLength, position, recordedSamples; double sampleRate; bool blinkOn;
-    Transport transport; bool armed[kTracks];
+    Transport transport; bool armed[kTracks]; bool waiting;   // waiting: a user action waits for the bar line
     uint32_t trackLength, trackPosition;   // selected track: length (0 = none or still recording onto the loop), samples since its start
     uint32_t layers[kTracks];              // layers heard per track (Looper::layerCount); 0 draws no count
 };
@@ -53,6 +53,7 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
         if (v.transport == Transport::Stopped) txt = "STOP";
         else if (v.transport == Transport::Stopping) txt = v.blinkOn ? "STOP" : "";
         else if (v.armed[v.selected]) txt = "ARM";
+        if (v.waiting) txt = "WAIT";
         drawText(bits, w, 14, textY, txt);
 
         const int cell = w / kTracks;
