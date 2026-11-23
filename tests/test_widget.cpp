@@ -262,10 +262,34 @@ static void everyWidgetStringHasGlyphs()
         }
 }
 
+static void longTrackBarHasPassTicks()
+{
+    auto v = view(); v.state[0] = TrackState::Playing; v.loopLength = 1000; v.trackLength = 3000; uint8_t b[1024];
+    v.trackPosition = 0; ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(px(b, 40, 14, 28) == 1 && px(b, 40, 26, 28) == 1 && px(b, 40, 13, 28) == 0 && px(b, 40, 15, 28) == 0);
+    v.trackPosition = 1500; ouro::renderLoopWidget(v, 40, 37, b);   // half: filled to column 19
+    CHECK(px(b, 40, 14, 28) == 0 && px(b, 40, 13, 28) == 1 && px(b, 40, 26, 28) == 1 && px(b, 40, 25, 28) == 0);
+    int lit = 0; for (int x = 1; x < 39; ++x) lit += px(b, 40, x, 30);
+    CHECK(std::abs(lit - 19) <= 1);
+}
+static void crowdedTicksAreLeftOut()                                   // Review Focus 5: 20 loops, 1.9 px apart
+{
+    auto v = view(); v.state[0] = TrackState::Playing; v.loopLength = 100; v.trackLength = 2000; v.trackPosition = 0;
+    uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(litIn(b, 40, 1, 28, 39, 29) == 0);
+}
+static void recordingShowsPassesSoFar()
+{
+    auto v = view(); v.state[0] = TrackState::Recording; v.loopLength = 1000; v.position = 0; v.trackPosition = 2500;
+    uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(px(b, 40, 2, 32) == 1 && px(b, 40, 4, 32) == 1 && px(b, 40, 6, 32) == 0);
+}
+
 int main()
 {
     sizeIsMono1(); barFillsProportionally(); emptyBarWhenNoLoop(); elapsedShownWhileRecording();
     marksReflectTracks(); selectedFrame(); ringsAroundSymbols(); stateText(); stateTextNotClipped(); tallThreshold(); layoutRows(); shortAreaBarOnly(); topAndBottomRowsBlank();
     stoppedShowsStop(); armedShowsArmAndBlinksItsDot(); everyWidgetStringHasGlyphs();
+    longTrackBarHasPassTicks(); crowdedTicksAreLeftOut(); recordingShowsPassesSoFar();
     REPORT();
 }

@@ -12,6 +12,7 @@ struct WidgetView {
     int selected; TrackState state[kTracks]; bool on[kTracks];
     uint32_t loopLength, position, recordedSamples; double sampleRate; bool blinkOn;
     Transport transport; bool armed[kTracks];
+    uint32_t trackLength, trackPosition;   // selected track: length (0 = none or still recording onto the loop), samples since its start
 };
 
 // Mono1: rows top->bottom, (w+7)/8 bytes per row, MSB = leftmost pixel, 1 = lit. Returns bytes written.
@@ -82,9 +83,21 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
     if (v.loopLength > 0)
     {
         const uint64_t inner = w > 2 ? w - 2 : 0;
-        uint64_t fill = (inner * v.position + v.loopLength / 2) / v.loopLength;
+        // a long track fills by its own length; otherwise by the loop (or the base phase while recording onto it)
+        const uint64_t len = v.trackLength > 0 ? v.trackLength : v.loopLength;
+        const uint64_t pos = v.trackLength > 0 ? v.trackPosition : v.position;
+        uint64_t fill = (inner * pos + len / 2) / len;
         if (fill > inner) fill = inner;
         if (fill > 0) rect(1, barY + 1, 1 + int(fill), barEnd - 1, true);
+        const uint64_t k = v.trackLength / v.loopLength;
+        if (k > 1 && inner / k >= 3)   // a tick per loop boundary: inverts the top inner row
+            for (uint64_t i = 1; i < k; ++i)
+            {
+                const int x = 1 + int((2 * inner * i + k) / (2 * k));
+                bits[(barY + 1) * ((w + 7) / 8) + x / 8] ^= uint8_t(0x80 >> (x % 8));
+            }
+        if (v.trackLength == 0 && v.state[v.selected] == TrackState::Recording)   // passes so far: dots in the bottom inner row
+            for (uint64_t i = 0, n = v.trackPosition / v.loopLength; i < n && i < 18; ++i) setPixel(bits, w, 2 + 2 * int(i), barEnd - 2);
     }
     return bytes;
 }
