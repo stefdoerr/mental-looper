@@ -33,10 +33,11 @@ inline const uint8_t* glyph(char c)
     return blank;
 }
 
-// 7x7 track-mark glyphs, rows of 7 bits each (bit 6 = leftmost): cassette-player transport symbols.
-static const uint8_t kMarkDisc[7] = { 0x1C, 0x3E, 0x7F, 0x7F, 0x7F, 0x3E, 0x1C };   // record / overdub
-static const uint8_t kMarkPlay[7] = { 0x40, 0x60, 0x70, 0x78, 0x70, 0x60, 0x40 };   // playing, on
-static const uint8_t kMarkStop[7] = { 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F, 0x7F };   // playing, muted
+// Track-mark glyphs: 5x5 symbols centred in the 7x7 mark cell (blank outer ring, so the selection frame never touches them),
+// rows of 7 bits each (bit 6 = leftmost): cassette-player transport symbols.
+static const uint8_t kMarkDisc[7] = { 0x00, 0x1C, 0x3E, 0x3E, 0x3E, 0x1C, 0x00 };   // record / overdub
+static const uint8_t kMarkPlay[7] = { 0x00, 0x10, 0x18, 0x1C, 0x18, 0x10, 0x00 };   // playing, on (3 px wide, centred)
+static const uint8_t kMarkStop[7] = { 0x00, 0x3E, 0x3E, 0x3E, 0x3E, 0x3E, 0x00 };   // playing, muted
 
 // ORs the text into bits (width w) with its top-left at x,y; 6 px per character.
 inline void drawText(uint8_t* bits, uint16_t w, int x, int y, const char* s)

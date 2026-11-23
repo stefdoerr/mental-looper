@@ -70,14 +70,14 @@ static void marksReflectTracks()
     uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
     const int x0[4] = { 1, 11, 21, 31 };    // 7 px marks centred in w/4 = 10 px cells
     CHECK(cellIs(b, x0[0], ouro::kMarkPlay));                                 // playing, on: play triangle
-    CHECK(litIn(b, 40, x0[0], 11, x0[0] + 1, 18) == 7 && litIn(b, 40, x0[0] + 6, 11, x0[0] + 7, 18) == 0);   // asymmetric: left edge full, apex inside
+    CHECK(litIn(b, 40, x0[0] + 2, 11, x0[0] + 3, 18) == 5 && litIn(b, 40, x0[0] + 4, 11, x0[0] + 5, 18) == 1);   // asymmetric: left column 5 px, right (apex) 1 px
     CHECK(litIn(b, 40, x0[0] + 3, 11, x0[0] + 4, 18) > litIn(b, 40, x0[0] + 5, 11, x0[0] + 6, 18));
-    CHECK(cellIs(b, x0[1], ouro::kMarkStop) && litIn(b, 40, x0[1], 11, x0[1] + 7, 18) == 49);   // playing, muted: stop square
+    CHECK(cellIs(b, x0[1], ouro::kMarkStop) && litIn(b, 40, x0[1], 11, x0[1] + 7, 18) == 25);   // playing, muted: 5x5 stop square
     CHECK(litIn(b, 40, x0[2], 11, x0[2] + 7, 18) == 9 && litIn(b, 40, x0[2] + 2, 13, x0[2] + 5, 16) == 9);   // empty: centre dot
     CHECK(litIn(b, 40, x0[3], 11, x0[3] + 7, 18) == 0);                       // recording, blink off
     v.blinkOn = true; ouro::renderLoopWidget(v, 40, 37, b);
     CHECK(cellIs(b, x0[3], ouro::kMarkDisc));                                 // recording, blink on: disc
-    CHECK(litIn(b, 40, x0[3], 11, x0[3] + 7, 18) == 37);
+    CHECK(litIn(b, 40, x0[3], 11, x0[3] + 7, 18) == 21);   // 5x5 disc
     for (bool on : { true, false })   // overdubbing: disc regardless of on/off, blinks like recording
     {
         v.state[3] = TrackState::Overdubbing; v.on[3] = on;
@@ -111,6 +111,23 @@ static void selectedFrame()
             CHECK(litIn(b, 40, 0, 0, 40, 1) == 0 && litIn(b, 40, 0, 26, 40, 27) == 0);
             CHECK(litIn(b, 40, 0, 18, 40, 19) == 9 && litIn(b, 40, 0, 19, 40, 20) == 40);   // frame row 18 vs bar outline row 19: separate rows
         }
+}
+
+static void ringsAroundSymbols()   // for every state, selected: 7x7 cell border blank, 9x9 frame border lit
+{
+    const int x0[4] = { 1, 11, 21, 31 };
+    const struct { TrackState s; bool on; } c[] = { {TrackState::Empty, true}, {TrackState::Recording, true}, {TrackState::Recording, false},
+        {TrackState::Playing, true}, {TrackState::Playing, false}, {TrackState::Overdubbing, true}, {TrackState::Overdubbing, false} };
+    for (auto& e : c) for (int sel = 0; sel < 4; ++sel) for (bool blink : {false, true})
+    {
+        auto v = view(); v.selected = sel; v.state[sel] = e.s; v.on[sel] = e.on; v.blinkOn = blink;
+        uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
+        const int x = x0[sel];
+        CHECK(litIn(b, 40, x - 1, 10, x + 8, 11) == 9 && litIn(b, 40, x - 1, 18, x + 8, 19) == 9);        // frame top/bottom
+        CHECK(litIn(b, 40, x - 1, 11, x, 18) == 7 && litIn(b, 40, x + 7, 11, x + 8, 18) == 7);            // frame left/right
+        CHECK(litIn(b, 40, x, 11, x + 7, 12) == 0 && litIn(b, 40, x, 17, x + 7, 18) == 0);                // gap top/bottom
+        CHECK(litIn(b, 40, x, 12, x + 1, 17) == 0 && litIn(b, 40, x + 6, 12, x + 7, 17) == 0);            // gap left/right
+    }
 }
 
 static void stateText()
@@ -185,6 +202,6 @@ static void topAndBottomRowsBlank()
 int main()
 {
     sizeIsMono1(); barFillsProportionally(); emptyBarWhenNoLoop(); elapsedShownWhileRecording();
-    marksReflectTracks(); selectedFrame(); stateText(); stateTextNotClipped(); tallThreshold(); shortAreaBarOnly(); topAndBottomRowsBlank();
+    marksReflectTracks(); selectedFrame(); ringsAroundSymbols(); stateText(); stateTextNotClipped(); tallThreshold(); shortAreaBarOnly(); topAndBottomRowsBlank();
     REPORT();
 }
