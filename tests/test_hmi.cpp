@@ -72,10 +72,15 @@ static void knobLabelsFollowTrack()
     b.addressed(ouro::kHmiOnOff, A2, kAllCaps);
     b.addressed(ouro::kHmiVolume, A3, kAllCaps);
     b.update(view(ouro::TrackState::Empty, ouro::NextAction::Rec, false, 1, false));
-    CHECK(lastLabel(A2) == "On 2" && lastValue(A2) == "OFF" && lastLabel(A3) == "Vol 2");
+    CHECK(lastLabel(A2) == "OFF 2" && lastValue(A2) == "OFF" && lastLabel(A3) == "Vol 2");
     CHECK(lastValue(A3) == "<none>");
     b.update(view(ouro::TrackState::Empty, ouro::NextAction::Rec, false, 3, true));
-    CHECK(lastLabel(A2) == "On 4" && lastValue(A2) == "ON" && lastLabel(A3) == "Vol 4");
+    CHECK(lastLabel(A2) == "ON 4" && lastValue(A2) == "ON" && lastLabel(A3) == "Vol 4");
+    gCalls.clear();   // toggling on/off on the same track re-sends the label
+    b.update(view(ouro::TrackState::Empty, ouro::NextAction::Rec, false, 3, false));
+    CHECK(count("label") == 1 && lastLabel(A2) == "OFF 4" && lastValue(A2) == "OFF");
+    b.update(view(ouro::TrackState::Empty, ouro::NextAction::Rec, false, 3, true));
+    CHECK(lastLabel(A2) == "ON 4");
 }
 
 static void readdressResends()

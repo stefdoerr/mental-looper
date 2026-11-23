@@ -87,7 +87,7 @@ private:
             }
             break;
         case kHmiUndo:   label = v.canUndo ? "UNDO" : "-"; break;   // ASCII: the Dwarf font has no em dash
-        case kHmiOnOff:  std::snprintf(text, sizeof text, "On %d", v.selected + 1); break;
+        case kHmiOnOff:  std::snprintf(text, sizeof text, "%s %d", v.on ? "ON" : "OFF", v.selected + 1); break;
         default:         std::snprintf(text, sizeof text, "Vol %d", v.selected + 1); break;
         }
         if (caps & LV2_HMI_AddressingCapability_Label) wc_->set_label(wc_->handle, a, label);
