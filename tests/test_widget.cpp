@@ -283,6 +283,8 @@ static void recordingShowsPassesSoFar()
     auto v = view(); v.state[0] = TrackState::Recording; v.loopLength = 1000; v.position = 0; v.trackPosition = 2500;
     uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
     CHECK(px(b, 40, 2, 32) == 1 && px(b, 40, 4, 32) == 1 && px(b, 40, 6, 32) == 0);
+    v.position = 500; ouro::renderLoopWidget(v, 40, 37, b);   // filled to column 19: the dots show dark
+    CHECK(px(b, 40, 2, 32) == 0 && px(b, 40, 4, 32) == 0 && px(b, 40, 6, 32) == 1);
 }
 
 int main()
