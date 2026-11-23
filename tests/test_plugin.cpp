@@ -157,6 +157,15 @@ static void tapWhileStoppedUndoes() {
     fresh(); recordBaseAndDub(); doubleTap(); runN(20); tapC(); runN(114);
     CHECK(eng().undoDepth(0) == 0 && eng().transport() == ouro::Transport::Stopped);
 }
+static void bAfterATapUndoesFirst() {                                 // Ruling R8
+    fresh(); recordBaseAndDub(); tapC(); runN(74);                    // ~200 ms after the release
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(120);         // re-dub: the bad layer goes first
+    CHECK(eng().undoDepth(0) == 0 && eng().state(0) == ouro::TrackState::Overdubbing);
+    fresh(); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(37); // ~100 ms of a first recording
+    tapC(); runN(55);                                                 // abort it, then ~150 ms later...
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(120);         // ...record again
+    CHECK(eng().state(0) == ouro::TrackState::Recording && eng().loopLength() == 0);
+}
 static void tapUndoesTheTrackItWasTappedOn() {                        // Review Focus 5
     fresh(); recordBaseAndDub();
     set(kParamTrack, 2); runN(1); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(20);
@@ -330,6 +339,7 @@ int main()
     doubleTapThenHoldDoesNotClear();
     tapWhileStoppedUndoes();
     tapUndoesTheTrackItWasTappedOn();
+    bAfterATapUndoesFirst();
     doubleTapDuringAShortFirstRecording();
     stopPlayPortToggles();
     stopAndAutoRecSettingsReachTheEngine();

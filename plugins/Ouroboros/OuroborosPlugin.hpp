@@ -329,6 +329,7 @@ protected:
         // Triggers and the footswitch act on rising edges only; a trigger held high from the
         // start (previous value NaN on the first run) counts as a press.
         const auto rising = [&](uint32_t i) { return on(i) && !(fPrev[i] > 0.5f); };
+        if (fTapPending && rising(kParamRec)) { fTapPending = false; fEngine.undo(fTapTrack); }   // B after a tap: the undo first
         if (rising(kParamRec))        fEngine.pressRec(sel);
         if (rising(kParamUndo))       fEngine.undo(sel);
         if (rising(kParamRedo))       fEngine.redo(sel);
