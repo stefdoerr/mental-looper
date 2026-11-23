@@ -48,6 +48,14 @@ static void backDatedTailFoldMatchesAnalytic() {                    // R9: fold 
     }
     CHECK(err < 1e-6f);
 }
+static void firstCloseFadesIn() {                                   // R10: playback starts D past the recording's fade-in
+    for (float ms : {3.0f, 1.0f}) {
+        Rig r; r.lp.setTriggerLatencyMs(ms); auto in = sine(220, 0.3f, 48000);
+        r.feed(slice(in, 0, 4096)); r.lp.pressRec(0); r.feed(slice(in, 4096, 28160)); r.lp.pressRec(0);
+        const size_t from = r.out.size() - 1; r.feed(slice(in, 28160, 28160 + 2000));
+        CHECK(maxStep(slice(r.out, from, r.out.size())) < 2.5f * sineStep(220, 0.3f) + 0.3f / 144.0f * 1.5f);
+    }
+}
 static void tailClampedOnShortLoop() {
     Rig r; r.lp.setTailMs(500); auto in = sine(220, 0.1f, 48000);
     r.lp.pressRec(0); r.feed(slice(in, 0, 7168)); r.lp.pressRec(0); r.feed(slice(in, 7168, 31168));
@@ -80,7 +88,7 @@ static void initFailureIsSafe() {                                   // Review Fo
 
 int main() {
     recordSetsLengthAndPlays(); loopPlaysRecordedAudio(); backDatingKeepsLengthAndShiftsStart();
-    seamIsContinuous(); tailZeroSeamIsContinuous(); backDatedTailFoldMatchesAnalytic(); tailClampedOnShortLoop(); tooShortIsAborted(); undoWhileRecordingAborts();
+    seamIsContinuous(); tailZeroSeamIsContinuous(); backDatedTailFoldMatchesAnalytic(); firstCloseFadesIn(); tailClampedOnShortLoop(); tooShortIsAborted(); undoWhileRecordingAborts();
     elapsedCountsWhileRecording(); maxLengthAutoCloses(); initFailureIsSafe();
     REPORT();
 }

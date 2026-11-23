@@ -415,7 +415,10 @@ private:
         L_ = L;
         pos_ = recD_ % L;                                             // D <= histLen_ == minLoop_ <= L
         tr.state = TrackState::Playing;
-        tr.gain.snap(target(tr));                                     // no ramp: the recording has its fade-in
+        tr.gain.snap(target(tr));                                     // no track ramp: the loops fade in instead
+        // Playback starts D past the recording's own fade-in: the loops fade in over the part it skips, the restart's
+        // kFadeInMs once D reaches it (R10). D = 0 skips nothing.
+        if (recD_) { lg_.v = 0.0f; lg_.start(true, 0, std::min(recD_, fadeIn_)); }
         if (toDub) startDub(tr, recD_, true, false, false);           // Rec->Dub: the tail input splits g / 1-g
         return T > 0;
     }
