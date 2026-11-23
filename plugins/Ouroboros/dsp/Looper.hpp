@@ -103,6 +103,7 @@ public:
         L_ = pos_ = rec_ = recD_ = 0;
         recTrack_ = -1;
         tp_ = Transport::Running;
+        restartQueued_ = false;
         lg_ = LoopGain{};
     }
 
@@ -201,17 +202,39 @@ public:
     }
     void clearAll() { for (int t = 0; t < kTracks; ++t) clearTrack(t); }
 
-    // Closes every writer, then fades the loops out over kRampMs. Stopping never changes the loop: the engine parks
-    // at the top once the fade, every tail and every punch-out fade have ended. EndOfLoop and Fade stop as Instant.
-    void stop(StopMode /*mode*/, float /*fadeMs*/ = 3000.0f) {
+    // Closes every writer, then fades the loops out. Stopping never changes the loop: the engine parks at the top once
+    // the fade, every tail and every punch-out fade have ended. Instant: kRampMs now. EndOfLoop: kRampMs ending at the
+    // top (a shorter rest fades over the rest, ending at the top). Fade: fadeMs now, cubic. A second stop while the loops still
+    // sound cuts to Instant from the current gain.
+    void stop(StopMode mode, float fadeMs = 3000.0f) {
         if (!enabled_ || tp_ == Transport::Stopped) return;
+        if (tp_ == Transport::Stopping) {
+            if (lg_.v > 0.0f) { stopMode_ = StopMode::Instant; restartQueued_ = false; lg_.start(false, 0, ramp_); }
+            return;
+        }
         for (int u = 0; u < kTracks; ++u) if (writing(tracks_[u])) close(u, false);
         if (!L_ || allEmpty()) return;                   // nothing to stop
         tp_ = Transport::Stopping;
-        lg_.start(false, 0, ramp_);
+        stopMode_ = mode;
+        restartQueued_ = false;
+        uint32_t wait = 0, len = ramp_;
+        if (mode == StopMode::EndOfLoop) {
+            const uint32_t r = L_ - pos_;
+            if (r > ramp_) wait = r - ramp_; else len = r;                 // ends at the top: the loop's own seam is then silent
+        } else if (mode == StopMode::Fade) {
+            len = std::min(std::max(msToSamples(fadeMs, sr_), ramp_), msToSamples(10000.0f, sr_));
+        }
+        lg_.start(false, wait, len);
     }
     // Stopped: plays again from the top. The track gains did not move while stopped: they snap, and the loops fade in.
+    // Stopping: a pending End of loop or Fade stop is cancelled (the loops ramp back up); otherwise the restart waits
+    // for the park.
     void restart() {
+        if (tp_ == Transport::Stopping) {
+            if (stopMode_ != StopMode::Instant && !lg_.ended()) { tp_ = Transport::Running; lg_.start(true, 0, ramp_); }
+            else restartQueued_ = true;
+            return;
+        }
         if (tp_ != Transport::Stopped) return;
         tp_ = Transport::Running;
         for (Track& tr : tracks_) tr.gain.snap(target(tr));
@@ -624,6 +647,7 @@ private:
         }
         pos_ = 0;
         tp_ = Transport::Stopped;
+        if (restartQueued_) { restartQueued_ = false; restart(); }
     }
 
     bool fail() { release(); return false; }
@@ -654,6 +678,8 @@ private:
     Ramp dry_;
     LoopGain lg_;                    // multiplies the tracks' output only: the stop's fade-out, the restart's fade-in
     Transport tp_ = Transport::Running;
+    StopMode stopMode_ = StopMode::Instant;
+    bool restartQueued_ = false;     // B during a stop that cannot cancel: restart as soon as the engine parks
     bool recToDub_ = false, enabled_ = false, dryThru_ = false, bypass_ = false;
 };
 
