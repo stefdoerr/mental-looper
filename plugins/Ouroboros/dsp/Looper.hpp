@@ -11,6 +11,8 @@ namespace ouro {
 
 enum class TrackState : uint8_t { Empty, Recording, Playing, Overdubbing };
 enum class NextAction : uint8_t { Rec, Play, Dub };
+enum class Transport : uint8_t { Running, Stopping, Stopped };
+enum class StopMode : uint8_t { Instant, EndOfLoop, Fade };
 
 // A gain that moves linearly to a new target over n samples, from wherever it is.
 struct Ramp {
@@ -22,6 +24,24 @@ struct Ramp {
         return v;
     }
     void snap(float target) { v = to = target; left = 0; }
+};
+
+// The loop gain's schedule: after wait samples it moves from g0 over len samples, linearly up to 1 or down to 0
+// along g0 * (1 - t)^3, t = done / len.
+struct LoopGain {
+    float v = 1.0f, g0 = 1.0f;
+    uint32_t wait = 0, len = 0, done = 0;
+    bool up = true;
+    void start(bool toOne, uint32_t w, uint32_t n) { g0 = v; up = toOne; wait = w; len = n; done = 0; }
+    bool ended() const { return !wait && done == len; }
+    float next() {
+        if (wait) --wait;
+        else if (done < len) {
+            const float t = float(++done) / float(len), u = 1.0f - t;
+            v = up ? 1.0f - (1.0f - g0) * u : g0 * u * u * u;   // exactly 1 or 0 at the end
+        }
+        return v;
+    }
 };
 
 // The output safety net: unchanged below the knee, then bends smoothly towards +-1.
@@ -82,6 +102,8 @@ public:
         }
         L_ = pos_ = rec_ = recD_ = 0;
         recTrack_ = -1;
+        tp_ = Transport::Running;
+        lg_ = LoopGain{};
     }
 
     void process(const float* in, float* out, uint32_t n) {
@@ -90,7 +112,8 @@ public:
         for (uint32_t i = 0; i < n; ++i) {
             const float x = in[i];                       // read first: in and out may alias
             if (recTrack_ >= 0 && rec_ == maxRec_) closeFirst(recToDub_);   // max length: close as if B were pressed
-            if (L_ && idle()) reset();                   // the last track went empty and its ramp ended: L resets
+            // The last track went empty and its ramp ended: L resets. Stopped, the gains don't move: empty is enough.
+            if (L_ && (tp_ == Transport::Stopped ? allEmpty() : idle())) reset();
             const uint32_t h = histW_;
             hist_[h] = x;
             if (++histW_ == histLen_) histW_ = 0;
@@ -98,11 +121,14 @@ public:
             if (recTrack_ >= 0) {                        // first recording: overwrite (reused pages hold old audio)
                 tracks_[recTrack_].buf[rec_] = x * (used = fadeInGain(rec_));   // closeFirst() rewrites the last D
                 ++rec_;
-            } else if (L_) {
-                for (Track& tr : tracks_) y += play(tr); // read before write: the player hears the dry path
+            } else if (L_ && tp_ != Transport::Stopped) {   // stopped: only the dry path, nothing moves
+                float wet = 0.0f;
+                for (Track& tr : tracks_) wet += play(tr);   // read before write: the player hears the dry path
+                y += lg_.next() * wet;
                 for (Track& tr : tracks_) used += writeOut(tr, x);   // tails and fades first: the one track
                 for (Track& tr : tracks_) if (writing(tr)) used += writeIn(tr, x, used);   // recording takes the rest
                 if (++pos_ == L_) pos_ = 0;
+                if (tp_ == Transport::Stopping && lg_.ended() && !overlap()) park();   // tails and fades done too
             }
             histUsed_[h] = used;
             out[i] = softclip(y);
@@ -110,9 +136,10 @@ public:
     }
 
     // Only one track records at a time: a press while another track records or overdubs first closes that one
-    // (to Playing, never Rec->Dub), then does this track's own action.
+    // (to Playing, never Rec->Dub), then does this track's own action. Not running, it only restarts.
     void pressRec(int t) {
         if (!valid(t)) return;
+        if (tp_ != Transport::Running) { restart(); return; }
         bool cont = false, offset = true;                // cont: the new writer complements the closed one's tail or
         for (int u = 0; u < kTracks; ++u)                // fade, at that one's offset (the first recording has none)
             if (u != t && writing(tracks_[u])) {
@@ -174,6 +201,24 @@ public:
     }
     void clearAll() { for (int t = 0; t < kTracks; ++t) clearTrack(t); }
 
+    // Closes every writer, then fades the loops out over kRampMs. Stopping never changes the loop: the engine parks
+    // at the top once the fade, every tail and every punch-out fade have ended. EndOfLoop and Fade stop as Instant.
+    void stop(StopMode /*mode*/, float /*fadeMs*/ = 3000.0f) {
+        if (!enabled_ || tp_ == Transport::Stopped) return;
+        for (int u = 0; u < kTracks; ++u) if (writing(tracks_[u])) close(u, false);
+        if (!L_ || allEmpty()) return;                   // nothing to stop
+        tp_ = Transport::Stopping;
+        lg_.start(false, 0, ramp_);
+    }
+    // Stopped: plays again from the top. The track gains did not move while stopped: they snap, and the loops fade in.
+    void restart() {
+        if (tp_ != Transport::Stopped) return;
+        tp_ = Transport::Running;
+        for (Track& tr : tracks_) tr.gain.snap(target(tr));
+        lg_.v = 0.0f;
+        lg_.start(true, 0, fadeIn_);
+    }
+
     // Playback gains: settings, stored even while disabled; every gain ramps to its target over kRampMs.
     void setOn(int t, bool on) { if (inRange(t)) tracks_[t].on = on; }
     void toggleOn(int t) { if (inRange(t)) tracks_[t].on = !tracks_[t].on; }
@@ -216,17 +261,19 @@ public:
     uint32_t pendingOps(int t) const { return valid(t) ? tracks_[t].nOps : 0; }
     uint32_t loopLength() const { return L_; }
     uint32_t position() const { return pos_; }
+    Transport transport() const { return tp_; }
     uint32_t recordedSamples() const { return recTrack_ >= 0 ? rec_ - recD_ : 0; }   // what L would be if closed now
     double sampleRate() const { return sr_; }
     bool enabled() const { return enabled_; }
 
 private:
     struct Layer { Delta d; uint32_t seq = 0; uint8_t refs = 0; };   // refs: pending ops reading d
-    struct Op {                          // pending undo/redo: adds sign*d at the playhead over one pass
+    struct Op {                          // pending undo/redo: adds sign*d at the playhead over the len positions it owes
         Delta d;                         // a copy of the handle: the blocks are shared with the layer
         DeltaCursor c;
         float sign = 0.0f;
-        uint32_t done = 0, len = 0;      // samples since it started; ramps for ramp_, ends at len
+        uint32_t at = 0;                 // the next position it owes: it applies only when the playhead is there
+        uint32_t done = 0, len = 0;      // positions applied; ramps for ramp_, ends at len (at most one pass)
         int32_t layer = -1;              // its layer while d is in a stack, else -1
         bool owns = false, ramp = false; // owns: releases d when it ends
         bool zero = false;               // a zero op: sets buf = 0 instead (a recording onto the loop)
@@ -244,7 +291,9 @@ private:
         float* buf = nullptr;            // the base, plus every layer still in the undo stack
         Layer* layers = nullptr;         // [0, undoTop) undo stack, [undoTop, redoTop) redo stack, top at undoTop
         uint32_t undoTop = 0, redoTop = 0;
-        Op ops[kMaxPendingOps + 1];      // in start order; the spare slot lets a cancel past the cap go through
+        // In start order, a park's split parts first. The spare slot lets a cancel past the cap go through. x2: a
+        // park can split every op (only ops added since the last restart can wrap; one is added only at nOps <= cap).
+        Op ops[2 * (kMaxPendingOps + 1)];
         uint32_t nOps = 0;
         Writer dub, fade;
         TrackState state = TrackState::Empty;
@@ -262,6 +311,10 @@ private:
     float target(const Track& tr) const { return tr.state != TrackState::Empty && tr.on && !bypass_ ? tr.vol : 0.0f; }
     bool idle() const {                                  // every track empty and ramped out
         for (const Track& tr : tracks_) if (tr.state != TrackState::Empty || tr.gain.v != 0.0f) return false;
+        return true;
+    }
+    bool allEmpty() const {
+        for (const Track& tr : tracks_) if (tr.state != TrackState::Empty) return false;
         return true;
     }
     bool overlap() const {                               // some track still takes a share of the input
@@ -330,7 +383,7 @@ private:
         if (base) {
             const uint32_t z = std::min(back, L_);
             for (uint32_t i = 1; i <= z; ++i) tr.buf[(pos_ + L_ - i) % L_] = 0.0f;
-            if (z < L_) { Op& op = tr.ops[tr.nOps++]; op = Op{}; op.zero = true; op.len = L_ - z; }
+            if (z < L_) { Op& op = tr.ops[tr.nOps++]; op = Op{}; op.zero = true; op.at = pos_; op.len = L_ - z; }
         } else {
             dub.layer = int32_t(tr.undoTop);
             Layer& ly = tr.layers[tr.undoTop];
@@ -379,11 +432,12 @@ private:
         tr.fade.left = fadeOut_;
     }
 
-    // Commits the pending ops at the playhead, then reads it through the track's gain.
+    // Commits the pending ops that owe the playhead, then reads it through the track's gain.
     float play(Track& tr) {
         float adj = 0.0f;                                // holds back the ops' change during their ramp
         for (uint32_t k = 0; k < tr.nOps;) {
             Op& op = tr.ops[k];
+            if (op.at != pos_) { ++k; continue; }        // a split part waiting for its stretch
             if (op.zero) {
                 tr.buf[pos_] = 0.0f;
             } else {
@@ -394,6 +448,7 @@ private:
                     if (op.ramp && op.done < ramp_) adj -= v * (1.0f - float(op.done) / float(ramp_));
                 }
             }
+            if (++op.at == L_) op.at = 0;
             if (++op.done == op.len) endOp(tr, k); else ++k;
         }
         const float g = tr.gain.next(target(tr), ramp_);
@@ -487,7 +542,7 @@ private:
     }
 
     // Layer i left both stacks: release its blocks, or hand them to the newest op still reading them
-    // (every op lasts one pass, so the newest ends last).
+    // (the last in array order ends last: every op owes at most one pass, and a park puts its split parts first).
     void dropLayer(Track& tr, uint32_t i) {
         Layer& ly = tr.layers[i];
         if (ly.refs == 0) { ly.d.release(pool_); return; }
@@ -522,6 +577,7 @@ private:
         op = Op{};
         op.d = d;
         op.sign = sign;
+        op.at = pos_;
         op.len = L_;
         op.layer = layer;
         op.owns = layer < 0;
@@ -535,6 +591,39 @@ private:
         else if (op.layer >= 0) --tr.layers[op.layer].refs;
         std::copy(tr.ops + k + 1, tr.ops + tr.nOps, tr.ops + k);   // keep start order
         --tr.nOps;
+    }
+
+    // The stop's end: the playhead goes to the top. An op whose owed stretch wraps past the top splits there: a new
+    // part A owes [0, wrap end) and the op keeps [at, L), with the delta ownership (it ends last). The A parts go
+    // before every other op, so the last op in array order still ends last (see dropLayer).
+    void park() {
+        for (Track& tr : tracks_) {
+            auto wraps = [&](const Op& o) { return o.at != 0 && o.at + (o.len - o.done) > L_; };
+            uint32_t w = 0;
+            for (uint32_t k = 0; k < tr.nOps; ++k) {
+                tr.ops[k].ramp = false;                  // after a park the playhead only reads applied audio
+                w += wraps(tr.ops[k]);
+            }
+            if (!w) continue;
+            std::copy_backward(tr.ops, tr.ops + tr.nOps, tr.ops + tr.nOps + w);
+            for (uint32_t k = w, a = 0; k < tr.nOps + w; ++k) {
+                Op& o = tr.ops[k];
+                if (!wraps(o)) continue;
+                Op& A = tr.ops[a++];
+                A = o;
+                A.at = 0;
+                A.len = o.at + (o.len - o.done) - L_;
+                A.done = 0;
+                A.owns = false;
+                A.c = DeltaCursor{};
+                if (A.layer >= 0) ++tr.layers[A.layer].refs;
+                o.len = L_ - o.at;
+                o.done = 0;
+            }
+            tr.nOps += w;
+        }
+        pos_ = 0;
+        tp_ = Transport::Stopped;
     }
 
     bool fail() { release(); return false; }
@@ -563,6 +652,8 @@ private:
     int recTrack_ = -1;              // the track making the first recording (L unset), else -1
     float tailMs_ = 50.0f, trigMs_ = 3.0f, advMs_ = 0.0f;
     Ramp dry_;
+    LoopGain lg_;                    // multiplies the tracks' output only: the stop's fade-out, the restart's fade-in
+    Transport tp_ = Transport::Running;
     bool recToDub_ = false, enabled_ = false, dryThru_ = false, bypass_ = false;
 };
 
