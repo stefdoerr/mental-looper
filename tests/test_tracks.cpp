@@ -26,6 +26,16 @@ static void handoverSplitKeepsUnity(float advanceMs) {              // t1 starts
     for (uint32_t i = 0; i < 2400; ++i) err = std::max(err, std::fabs(img[i] - (in[i] * fadeInGain(i) + in[24064 + i])));
     CHECK(err < 1e-5f);
 }
+static void handoverFromRecToDubKeepsUnity() {                     // t1 takes t0's offset (none: Rec->Dub continues)
+    Rig r; r.lp.setRecToDub(true); r.lp.setAdvanceMs(5.0f);
+    const uint32_t L = 24064; auto in = sine(220, 0.1f, 48000);
+    r.lp.pressRec(0); r.feed(slice(in, 0, L)); r.lp.pressRec(0);      // Rec->Dub on t0
+    r.feed(slice(in, L, L + 9600)); r.lp.pressRec(1);                  // t0 -> Playing (5 ms fade), t1 records
+    r.feed(slice(in, L + 9600, L + 14400)); r.lp.pressRec(1);
+    auto img = r.settle(); float err = 0.0f;
+    for (uint32_t p = 0; p < 14400; ++p) err = std::max(err, std::fabs(img[p] - in[p] * fadeInGain(p) - in[L + p]));
+    CHECK(err < 1e-5f);
+}
 static void latencyRaisedMidRecordingKeepsUnity() {                // the first recording's inputs count as used
     Rig r; auto in = sine(220, 0.1f, 48000); const uint32_t L = 24064;   // D = 0 at the start; tail 50 ms
     r.lp.pressRec(0); r.feed(slice(in, 0, L));
@@ -45,9 +55,11 @@ static void handoverTailZeroKeepsBaseSmooth() {                    // tail 0: a 
     CHECK(err < 1e-5f);
     CHECK(maxStep(wrap(soloImage(r, 0))) < 2.5f * sineStep(220, 0.1f));
 }
-static void handoverAtPunchOutKeepsUnity() {                        // t0 overdubbing -> t1, inside t0's 5 ms fade
+static void handoverAtPunchOutKeepsUnity(float advanceMs) {         // t0 overdubbing -> t1, inside t0's 5 ms fade
     Rig r; r.lp.setTailMs(0); recordBase(r, 24064, 0.0f); recordBaseOn(r, 1, 0.0f); r.settle();   // silent loops
-    const uint32_t L = 24064, p0 = r.lp.position(); auto in = sine(330, 0.1f, 9600);
+    r.lp.setAdvanceMs(advanceMs);                                   // t1 keeps t0's offset
+    const uint32_t L = 24064, p0 = r.lp.position() + L - ouro::msToSamples(advanceMs, 48000.0);
+    auto in = sine(330, 0.1f, 9600);
     r.lp.pressRec(0); r.feed(slice(in, 0, 4800)); r.lp.pressRec(1); r.feed(slice(in, 4800, 9600)); r.lp.pressRec(1);
     auto img = r.settle(); float err = 0.0f;
     for (uint32_t i = 144; i < 9600; ++i) err = std::max(err, std::fabs(img[(p0 + i) % L] - in[i]));   // past t0's fade-in
@@ -201,7 +213,8 @@ static void stressRandomPresses(float trigMs, bool recToDub) {     // Review Foc
 
 int main() {
     secondTrackLockedToLoop(); handoverClosesAndStarts(); handoverSplitKeepsUnity(0.0f); handoverSplitKeepsUnity(5.0f);
-    latencyRaisedMidRecordingKeepsUnity(); handoverTailZeroKeepsBaseSmooth(); handoverAtPunchOutKeepsUnity();
+    handoverFromRecToDubKeepsUnity(); latencyRaisedMidRecordingKeepsUnity(); handoverTailZeroKeepsBaseSmooth(); handoverAtPunchOutKeepsUnity(0.0f);
+    handoverAtPunchOutKeepsUnity(5.0f);
     onOffRampsAndResumesInPlace(); volumeIsPlaybackOnly(); softClipOnlyAboveKnee(); dryThruAndBypass();
     clearAllResetsAndOverwrites(); recordOnEmptyTrackZeroesReusedBuffer(); baseUndoRedoAndLengthReset();
     offTrackStillRecords(); disabledEngineOutputsDryOnly();

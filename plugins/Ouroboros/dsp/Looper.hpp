@@ -113,15 +113,18 @@ public:
     // (to Playing, never Rec->Dub), then does this track's own action.
     void pressRec(int t) {
         if (!valid(t)) return;
-        bool cont = false;                               // the new writer complements the closed one's tail/fade
-        const bool afterFirst = recTrack_ >= 0 && recTrack_ != t;   // it continues the first recording: no offset
-        for (int u = 0; u < kTracks; ++u)
-            if (u != t && writing(tracks_[u])) cont = close(u, false);
+        bool cont = false, offset = true;                // cont: the new writer complements the closed one's tail or
+        for (int u = 0; u < kTracks; ++u)                // fade, at that one's offset (the first recording has none)
+            if (u != t && writing(tracks_[u])) {
+                const bool first = recTrack_ == u;
+                cont = close(u, false);
+                offset = !cont || (!first && tracks_[u].fade.offset);
+            }
         Track& tr = tracks_[t];
         const uint32_t D = msToSamples(trigMs_, sr_);
         switch (tr.state) {
-        case TrackState::Empty:   if (L_) startDub(tr, D, cont, true, !afterFirst); else startFirst(t); break;
-        case TrackState::Playing: startDub(tr, D, cont); break;
+        case TrackState::Empty:   if (L_) startDub(tr, D, cont, true, offset); else startFirst(t); break;
+        case TrackState::Playing: startDub(tr, D, cont, false, offset); break;
         default:                  close(t, recToDub_); break;
         }
     }
@@ -235,6 +238,7 @@ private:
         float env = 0.0f, peak = 0.0f;   // last envelope; peak |v| written
         DeltaCursor c;
         bool cont = false, lost = false; // cont: envelope = 1 - what others write (Rec->Dub, handover); lost: pool full
+        bool offset = true;              // written at the Offset behind the playhead (see startDub)
     };
     struct Track {
         float* buf = nullptr;            // the base, plus every layer still in the undo stack
@@ -283,7 +287,7 @@ private:
         if (recTrack_ == u) return closeFirst(toDub);
         const bool base = tr.state == TrackState::Recording;   // a recording onto the loop
         endDub(tr, false);
-        if (base && toDub) startDub(tr, 0, true);        // Rec->Dub: the fade input splits g / 1-g
+        if (base && toDub) startDub(tr, 0, true, false, tr.fade.offset);   // Rec->Dub: the fade input splits g / 1-g
         return tr.fade.left > 0;
     }
 
@@ -312,7 +316,8 @@ private:
     // fades in, capped by the complement of a tail or punch-out fade still writing, so it never steps where it starts.
     // base: a recording onto the loop (L set, track Empty). It becomes the track's base, with no delta. The reused
     // buffer reads as silence: the positions behind the playhead are zeroed now, the rest by a zero op ahead of it.
-    // offset: false for a layer that continues the first recording (Rec->Dub, handover before L), which has none.
+    // offset: written at the Offset. A cont writer takes the offset of the one it complements, so a one-press chain
+    // stays aligned: none after the first recording (Rec->Dub, handover before L), which has no offset.
     // ponytail: the zero op does not ramp; a re-record within kRampMs of a clear or base undo cuts that ramp-out
     void startDub(Track& tr, uint32_t D, bool cont, bool base = false, bool offset = true) {
         const uint32_t back = D + (offset ? msToSamples(advMs_, sr_) : 0);   // the offset writes behind the playhead
@@ -321,6 +326,7 @@ private:
         dub = Writer{};
         dub.w = (pos_ + 2 * L_ - back) % L_;
         dub.cont = cont;
+        dub.offset = offset;
         if (base) {
             const uint32_t z = std::min(back, L_);
             for (uint32_t i = 1; i <= z; ++i) tr.buf[(pos_ + L_ - i) % L_] = 0.0f;
