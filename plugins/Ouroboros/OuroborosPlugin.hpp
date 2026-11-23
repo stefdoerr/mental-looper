@@ -227,7 +227,7 @@ protected:
             {"fade_time",       "Fade Time",          Ms, 0.5f, 10, 3, "s"},
             {"auto_rec",        "Auto Rec",           Bool, 0, 1, 0, ""},
             {"threshold",       "Threshold",          Db, -60, -10, -40, "dB"},
-            {"double_tap",      "Double-Tap",         Ms, 150, 600, 300, "ms"},
+            {"double_tap",      "Double-Tap",         Ms, 150, 600, 400, "ms"},
         };
         const Def& d = defs[index];
         p.symbol = d.symbol;

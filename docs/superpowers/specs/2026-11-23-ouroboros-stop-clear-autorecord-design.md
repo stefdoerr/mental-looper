@@ -51,7 +51,7 @@ it happens.
 | Hold ≥ Hold Time | Redo (unchanged) | — |
 | Hold ≥ 2 × Hold Time | — | **Clear all** (resets L) |
 
-- The double-tap window is a setting, default 300 ms. The tap delay is the price of the double-tap,
+- The double-tap window is a setting, default 400 ms (raised from 300 ms by the user, 2026-11-23). The tap delay is the price of the double-tap,
   and the user accepted it.
 - *Claude's call:* a press counts toward clear-all only if it started while already stopped. A
   double-tap whose second press is held stops, and nothing more happens.

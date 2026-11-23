@@ -85,7 +85,7 @@ static void portSymbolsAreFrozen()
     CHECK(P().getParameterRanges(kParamBudget).min == 16.0f && P().getParameterRanges(kParamBudget).def == 200.0f);
     CHECK(P().getParameterRanges(kParamTriggerLatency).def == 3.0f && P().getParameterRanges(kParamOn1).def == 1.0f);
     CHECK(P().getParameterEnumValues(kParamStopMode).count == 3 && P().getParameterRanges(kParamFadeTime).def == 3.0f);
-    CHECK(P().getParameterRanges(kParamThreshold).def == -40.0f && P().getParameterRanges(kParamDoubleTap).def == 300.0f && P().getParameterRanges(kParamAutoRec).def == 0.0f);
+    CHECK(P().getParameterRanges(kParamThreshold).def == -40.0f && P().getParameterRanges(kParamDoubleTap).def == 400.0f && P().getParameterRanges(kParamAutoRec).def == 0.0f);
 }
 
 static void silentAndMono()
@@ -111,14 +111,14 @@ static void tapUndoHoldRedo()
     fresh();
     recordBaseAndDub();
     CHECK(eng().undoDepth(0) == 1);
-    set(kParamUndoRedo, 1); runN(37); set(kParamUndoRedo, 0); runN(114);    // ~99 ms tap, then the double-tap window
+    set(kParamUndoRedo, 1); runN(37); set(kParamUndoRedo, 0); runN(152);    // ~99 ms tap, then the double-tap window
     CHECK(eng().undoDepth(0) == 0 && eng().canRedo(0));
     set(kParamUndoRedo, 1); runN(190);                                     // ~507 ms held
     CHECK(eng().undoDepth(0) == 1);                                        // redo fired while held
     set(kParamUndoRedo, 0); runN(1); CHECK(eng().undoDepth(0) == 1);       // no undo on release
     // a hold_time of 2000 ms turns the same 507 ms hold into a plain undo on release
     set(kParamHoldTime, 2000); set(kParamUndoRedo, 1); runN(190); CHECK(eng().undoDepth(0) == 1);
-    set(kParamUndoRedo, 0); runN(114); CHECK(eng().undoDepth(0) == 0);
+    set(kParamUndoRedo, 0); runN(152); CHECK(eng().undoDepth(0) == 0);
 }
 
 static void tapC() { set(kParamUndoRedo, 1); runN(20); set(kParamUndoRedo, 0); runN(1); }
@@ -126,8 +126,8 @@ static void doubleTap() { tapC(); runN(29); set(kParamUndoRedo, 1); runN(1); set
 
 static void tapUndoWaitsForTheWindow() {
     fresh(); recordBaseAndDub(); tapC();
-    CHECK(eng().undoDepth(0) == 1); runN(110); CHECK(eng().undoDepth(0) == 1);
-    runN(3); CHECK(eng().undoDepth(0) == 0);                          // 300 ms after the release
+    CHECK(eng().undoDepth(0) == 1); runN(148); CHECK(eng().undoDepth(0) == 1);
+    runN(2); CHECK(eng().undoDepth(0) == 0);                          // 400 ms after the release
 }
 static void doubleTapStops() {
     fresh(); recordBaseAndDub(); tapC(); runN(29);
@@ -141,7 +141,7 @@ static void bRestartsAfterStop() {
     CHECK(eng().transport() == ouro::Transport::Running && eng().state(0) == ouro::TrackState::Playing);
 }
 static void holdWhileStoppedClearsAll() {
-    fresh(); recordBaseAndDub(); tapC(); runN(114); CHECK(eng().canRedo(0));
+    fresh(); recordBaseAndDub(); tapC(); runN(152); CHECK(eng().canRedo(0));
     doubleTap(); runN(20);
     set(kParamUndoRedo, 1); runN(300); set(kParamUndoRedo, 0); runN(120);   // 800 ms: no redo, no undo
     CHECK(eng().undoDepth(0) == 0 && eng().loopLength() > 0 && eng().transport() == ouro::Transport::Stopped);
@@ -154,7 +154,7 @@ static void doubleTapThenHoldDoesNotClear() {
     CHECK(eng().transport() == ouro::Transport::Stopped && eng().loopLength() > 0);
 }
 static void tapWhileStoppedUndoes() {
-    fresh(); recordBaseAndDub(); doubleTap(); runN(20); tapC(); runN(114);
+    fresh(); recordBaseAndDub(); doubleTap(); runN(20); tapC(); runN(152);
     CHECK(eng().undoDepth(0) == 0 && eng().transport() == ouro::Transport::Stopped);
 }
 static void bAfterATapUndoesFirst() {                                 // Ruling R8
@@ -178,7 +178,7 @@ static void doubleTapWhileStoppedResumes() {
     runN(600); set(kParamUndoRedo, 0); runN(120);                       // held past 2x hold time: no clear
     CHECK(eng().undoDepth(0) == 2 && eng().loopLength() > 0 && eng().transport() == ouro::Transport::Running);
     doubleTap(); runN(20);                                              // slow taps while stopped each undo
-    tapC(); runN(114); tapC(); runN(114);
+    tapC(); runN(152); tapC(); runN(152);
     CHECK(eng().undoDepth(0) == 0 && eng().transport() == ouro::Transport::Stopped);
 }
 static void doubleTapBegunWhileStoppingOnlyStops() {                   // first tap during a fade, second after the park
@@ -194,7 +194,7 @@ static void tapUndoesTheTrackItWasTappedOn() {                        // Review 
     fresh(); recordBaseAndDub();
     set(kParamTrack, 2); runN(1); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(20);
     set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40);           // track 2 recorded onto the loop
-    set(kParamTrack, 1); runN(1); tapC(); set(kParamTrack, 2); runN(114);
+    set(kParamTrack, 1); runN(1); tapC(); set(kParamTrack, 2); runN(152);
     CHECK(eng().undoDepth(0) == 0 && eng().state(1) == ouro::TrackState::Playing);
 }
 static void doubleTapDuringAShortFirstRecording() {                   // Review Focus 4
