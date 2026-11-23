@@ -271,7 +271,7 @@ protected:
         fEngine.reset();
         fFirst = true;
         fHold = 0;
-        fHeld = fDone = fTapPending = fStoppedPress = false;
+        fHeld = fDone = fTapPending = fStoppedPress = fTapStopped = false;
         fSinceTap = 0; fTapTrack = 0;
     }
 
@@ -345,9 +345,9 @@ protected:
             request(kParamOn1 + sel, fEngine.isOn(sel) ? 1.0f : 0.0f);
         }
 
-        // C footswitch: a tap undoes once the double-tap window passes, a second tap within it stops,
-        // a hold of hold_time redoes once, and a hold of 2x hold_time while stopped clears all.
-        // Stopped, a second press fires the pending undo and starts afresh: quick taps each undo (R9).
+        // C footswitch: a tap undoes once the double-tap window passes; a second tap within it stops, or,
+        // if the first tap was released while stopped, starts again from the top. A hold of hold_time redoes
+        // once, and a hold of 2x hold_time while stopped clears all.
         // ponytail: timed in whole blocks (<= one block of error); sample-exact if it matters.
         const uint64_t hold = uint64_t(fVal[kParamHoldTime] * 0.001 * getSampleRate());
         const uint64_t window = uint64_t(fVal[kParamDoubleTap] * 0.001 * getSampleRate());
@@ -357,11 +357,10 @@ protected:
             {
                 fHeld = true; fHold = 0; fDone = false;
                 fStoppedPress = fEngine.transport() == ouro::Transport::Stopped;
-                if (fTapPending)
+                if (fTapPending)                         // a double-tap: the pending undo is dropped
                 {
-                    fTapPending = false;
-                    if (fStoppedPress) fEngine.undo(fTapTrack);
-                    else { fDone = true; stopNow(); }
+                    fTapPending = false; fDone = true; fStoppedPress = false;
+                    if (fTapStopped) fEngine.restart(); else stopNow();
                 }
             }
             fHold += frames;
@@ -371,7 +370,11 @@ protected:
         else if (fHeld)
         {
             fHeld = false;
-            if (!fDone && fHold < hold) { fTapPending = true; fSinceTap = 0; fTapTrack = sel; }
+            if (!fDone && fHold < hold)
+            {
+                fTapPending = true; fSinceTap = 0; fTapTrack = sel;
+                fTapStopped = fEngine.transport() == ouro::Transport::Stopped;
+            }
         }
         else if (fTapPending && (fSinceTap += frames) >= window)
         {
@@ -442,6 +445,7 @@ private:
     bool fFirst = true;                     // first run after activate(): apply every value, then snap gains
     uint64_t fHold = 0;                     // samples undo_redo has been held
     bool fHeld = false, fDone = false, fTapPending = false, fStoppedPress = false;
+    bool fTapStopped = false;               // the pending tap was released while stopped: a double-tap resumes
     uint64_t fSinceTap = 0;
     int fTapTrack = 0;
 

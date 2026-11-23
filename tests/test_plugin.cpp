@@ -166,15 +166,29 @@ static void bAfterATapUndoesFirst() {                                 // Ruling 
     set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(120);         // ...record again
     CHECK(eng().state(0) == ouro::TrackState::Recording && eng().loopLength() == 0);
 }
-static void quickTapsWhileStoppedEachUndo() {                         // Ruling R9
+static void doubleTapWhileStoppedResumes() {
     fresh(); recordBaseAndDub();
     set(kParamRec, 1); runN(1); set(kParamRec, 0); run(P(), sine(220, 0.1f, 4800 - 128));
     set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40);           // a second layer
     doubleTap(); runN(20);
     CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 2);
-    set(kParamUndoRedo, 1); runN(2); set(kParamUndoRedo, 0); runN(2);  // two quick taps
-    set(kParamUndoRedo, 1); runN(2); set(kParamUndoRedo, 0); runN(120);
+    set(kParamUndoRedo, 1); runN(2); set(kParamUndoRedo, 0); runN(2);  // two quick taps: resume from the top
+    set(kParamUndoRedo, 1); runN(1);
+    CHECK(eng().transport() == ouro::Transport::Running);              // on the second press
+    runN(600); set(kParamUndoRedo, 0); runN(120);                       // held past 2x hold time: no clear
+    CHECK(eng().undoDepth(0) == 2 && eng().loopLength() > 0 && eng().transport() == ouro::Transport::Running);
+    doubleTap(); runN(20);                                              // slow taps while stopped each undo
+    tapC(); runN(114); tapC(); runN(114);
     CHECK(eng().undoDepth(0) == 0 && eng().transport() == ouro::Transport::Stopped);
+}
+static void doubleTapBegunWhileStoppingOnlyStops() {                   // first tap during a fade, second after the park
+    fresh(); recordBaseAndDub(); set(kParamStopMode, 2); set(kParamFadeTime, 0.5f);
+    set(kParamStopPlay, 1); runN(1); set(kParamStopPlay, 0); runN(170);   // 171 blocks into a 188-block fade
+    set(kParamUndoRedo, 1); runN(2); set(kParamUndoRedo, 0); runN(1);    // released while still stopping
+    CHECK(eng().transport() == ouro::Transport::Stopping);
+    runN(20); CHECK(eng().transport() == ouro::Transport::Stopped);
+    set(kParamUndoRedo, 1); runN(1); set(kParamUndoRedo, 0); runN(120);
+    CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 1);
 }
 static void tapUndoesTheTrackItWasTappedOn() {                        // Review Focus 5
     fresh(); recordBaseAndDub();
@@ -348,7 +362,8 @@ int main()
     holdWhileStoppedClearsAll();
     doubleTapThenHoldDoesNotClear();
     tapWhileStoppedUndoes();
-    quickTapsWhileStoppedEachUndo();
+    doubleTapWhileStoppedResumes();
+    doubleTapBegunWhileStoppingOnlyStops();
     tapUndoesTheTrackItWasTappedOn();
     bAfterATapUndoesFirst();
     doubleTapDuringAShortFirstRecording();

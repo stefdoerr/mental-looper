@@ -47,7 +47,7 @@ it happens.
 | Gesture | Running | Stopped |
 |---|---|---|
 | Tap | Undo, applied when the **double-tap window** runs out without a second press | Undo (same delay) |
-| Double-tap (2nd press inside the window) | **Stop**, on the second press-down | — |
+| Double-tap (2nd press inside the window) | **Stop**, on the second press-down | **Restart** from the top, like B (decided by the user, 2026-11-23); decided by the state when the first tap was released, so a double-tap begun during a stop that is still finishing only stops |
 | Hold ≥ Hold Time | Redo (unchanged) | — |
 | Hold ≥ 2 × Hold Time | — | **Clear all** (resets L) |
 
