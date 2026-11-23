@@ -56,6 +56,7 @@ enum ParamIndex {
     kParamVolume1, kParamVolume2, kParamVolume3, kParamVolume4,
     kParamAfterRec, kParamDryThru, kParamTail, kParamHoldTime, kParamBudget,
     kParamOffset, kParamTriggerLatency,
+    kParamStopPlay, kParamStopMode, kParamFadeTime, kParamAutoRec, kParamThreshold, kParamDoubleTap,
     kParamBypass,
     kNumParams
 };
@@ -221,13 +222,19 @@ protected:
             {"budget",          "Undo Budget",        Ms,  16, 400, 200, "MB"},
             {"offset",          "Overdub earlier by", Ms,   0, 30, 0, "ms"},
             {"trigger_latency", "Trigger Latency",    Ms,   0, 50, 3, "ms"},
+            {"stop_play",       "Stop/Play",          Trig, 0, 1, 0, ""},
+            {"stop_mode",       "Stop Mode",          Enum, 0, 2, 0, ""},
+            {"fade_time",       "Fade Time",          Ms, 0.5f, 10, 3, "s"},
+            {"auto_rec",        "Auto Rec",           Bool, 0, 1, 0, ""},
+            {"threshold",       "Threshold",          Db, -60, -10, -40, "dB"},
+            {"double_tap",      "Double-Tap",         Ms, 150, 600, 300, "ms"},
         };
         const Def& d = defs[index];
         p.symbol = d.symbol;
         p.name = d.name;
         p.unit = d.unit;
         p.ranges.min = d.min; p.ranges.max = d.max; p.ranges.def = d.def;
-        p.groupId = index <= kParamClearAll ? kGroupPerform : index <= kParamVolume4 ? kGroupTracks : kGroupSettings;
+        p.groupId = index <= kParamClearAll || index == kParamStopPlay ? kGroupPerform : index <= kParamVolume4 ? kGroupTracks : kGroupSettings;
         p.hints = kParameterIsAutomatable;
         switch (d.kind)
         {
@@ -236,9 +243,10 @@ protected:
         case Int:  p.hints |= kParameterIsInteger; break;
         case Enum:
         {
-            const uint8_t n = index == kParamTrack ? 4 : 2;
+            const uint8_t n = index == kParamTrack ? 4 : index == kParamStopMode ? 3 : 2;
             static const char* const trackNames[] = {"Track 1", "Track 2", "Track 3", "Track 4"};
             static const char* const afterNames[] = {"Rec > Play", "Rec > Dub"};
+            static const char* const stopNames[] = {"Instant", "End of loop", "Fade"};
             p.hints |= kParameterIsInteger;
             p.enumValues.count = n;
             p.enumValues.restrictedMode = true;
@@ -246,7 +254,7 @@ protected:
             for (uint8_t k = 0; k < n; ++k)
             {
                 p.enumValues.values[k].value = d.min + k;
-                p.enumValues.values[k].label = index == kParamTrack ? trackNames[k] : afterNames[k];
+                p.enumValues.values[k].label = index == kParamTrack ? trackNames[k] : index == kParamStopMode ? stopNames[k] : afterNames[k];
             }
             break;
         }
@@ -263,7 +271,8 @@ protected:
         fEngine.reset();
         fFirst = true;
         fHold = 0;
-        fHeld = fRedone = false;
+        fHeld = fDone = fTapPending = fStoppedPress = false;
+        fSinceTap = 0; fTapTrack = 0;
     }
 
     void sampleRateChanged(double sr) override
@@ -303,6 +312,8 @@ protected:
         if (changed(kParamBudget))        fEngine.setBudgetMb(fVal[kParamBudget]);
         if (changed(kParamOffset))        fEngine.setAdvanceMs(fVal[kParamOffset]);
         if (changed(kParamTriggerLatency)) fEngine.setTriggerLatencyMs(fVal[kParamTriggerLatency]);
+        if (changed(kParamAutoRec))       fEngine.setAutoRec(on(kParamAutoRec));
+        if (changed(kParamThreshold))     fEngine.setThresholdDb(fVal[kParamThreshold]);
         fEngine.setBypass(on(kParamBypass));
 
         // Volume proxy: follows the selected track; a different value written to it goes to that track.
@@ -323,28 +334,42 @@ protected:
         if (rising(kParamRedo))       fEngine.redo(sel);
         if (rising(kParamClearTrack)) fEngine.clearTrack(sel);
         if (rising(kParamClearAll))   fEngine.clearAll();
+        if (rising(kParamStopPlay))
+        {
+            if (fEngine.transport() == ouro::Transport::Running) stopNow(); else fEngine.restart();
+        }
         if (rising(kParamOnOff))
         {
             fEngine.toggleOn(sel);
             request(kParamOn1 + sel, fEngine.isOn(sel) ? 1.0f : 0.0f);
         }
 
-        // Undo/redo footswitch: a tap undoes on release, a hold of hold_time redoes once, while held.
-        // ponytail: the hold is timed in whole blocks (<= one block of error); sample-exact if it matters.
+        // C footswitch: a tap undoes once the double-tap window passes, a second tap within it stops,
+        // a hold of hold_time redoes once, and a hold of 2x hold_time while stopped clears all.
+        // ponytail: timed in whole blocks (<= one block of error); sample-exact if it matters.
+        const uint64_t hold = uint64_t(fVal[kParamHoldTime] * 0.001 * getSampleRate());
+        const uint64_t window = uint64_t(fVal[kParamDoubleTap] * 0.001 * getSampleRate());
         if (on(kParamUndoRedo))
         {
-            if (!fHeld) { fHeld = true; fRedone = false; fHold = 0; }
-            fHold += frames;
-            if (!fRedone && fHold >= uint64_t(fVal[kParamHoldTime] * 0.001 * getSampleRate()))
+            if (!fHeld)
             {
-                fRedone = true;
-                fEngine.redo(sel);
+                fHeld = true; fHold = 0; fDone = false;
+                fStoppedPress = fEngine.transport() == ouro::Transport::Stopped;
+                if (fTapPending) { fTapPending = false; fDone = true; fStoppedPress = false; stopNow(); }
             }
+            fHold += frames;
+            if (!fDone && !fStoppedPress && fHold >= hold) { fDone = true; fEngine.redo(sel); }
+            if (!fDone && fStoppedPress && fHold >= 2 * hold) { fDone = true; fEngine.clearAll(); }
         }
         else if (fHeld)
         {
             fHeld = false;
-            if (!fRedone) fEngine.undo(sel);
+            if (!fDone && fHold < hold) { fTapPending = true; fSinceTap = 0; fTapTrack = sel; }
+        }
+        else if (fTapPending && (fSinceTap += frames) >= window)
+        {
+            fTapPending = false;
+            fEngine.undo(fTapTrack);
         }
 
         for (uint32_t i = 0; i < kParamBypass; ++i) fPrev[i] = fVal[i];
@@ -365,6 +390,12 @@ protected:
     }
 
 private:
+    void stopNow()
+    {
+        const int m = std::min(2, std::max(0, int(std::lround(fVal[kParamStopMode]))));
+        fEngine.stop(ouro::StopMode(m), fVal[kParamFadeTime] * 1000.0f);
+    }
+
     // Renders each shown slot and draws it when the bitmap changed or the handle is new. No allocation: fixed buffers.
     void drawWidgets()
     {
@@ -401,7 +432,9 @@ private:
     int fSel = 0;                           // selected track, 0-3
     bool fFirst = true;                     // first run after activate(): apply every value, then snap gains
     uint64_t fHold = 0;                     // samples undo_redo has been held
-    bool fHeld = false, fRedone = false;
+    bool fHeld = false, fDone = false, fTapPending = false, fStoppedPress = false;
+    uint64_t fSinceTap = 0;
+    int fTapTrack = 0;
 
     ouro::HmiBridge fHmi;                           // labels and LEDs; inert without the host's HMI
     const ALABS_HMI_WidgetDraw* fWidgetDraw = nullptr;  // null: host can't show widgets

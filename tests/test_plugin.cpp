@@ -64,16 +64,17 @@ static void portSymbolsAreFrozen()
     fresh();
     static const char* kSym[] = { "rec","undo_redo","track","onoff","volume","undo","redo","clear_track",
         "clear_all","on_1","on_2","on_3","on_4","volume_1","volume_2","volume_3","volume_4","after_rec",
-        "dry_thru","tail","hold_time","budget","offset","trigger_latency" };
-    for (uint32_t i = 0; i < 24; ++i) CHECK(std::strcmp(P().getParameterSymbol(i), kSym[i]) == 0);
+        "dry_thru","tail","hold_time","budget","offset","trigger_latency",
+        "stop_play","stop_mode","fade_time","auto_rec","threshold","double_tap" };
+    for (uint32_t i = 0; i < 30; ++i) CHECK(std::strcmp(P().getParameterSymbol(i), kSym[i]) == 0);
     CHECK(P().getParameterDesignation(kParamBypass) == kParameterDesignationBypass);
-    CHECK(kParamBypass == 24 && P().getParameterCount() == 25);
+    CHECK(kParamBypass == 30 && P().getParameterCount() == 31);
     CHECK(std::strcmp(P().getLabel(), DISTRHO_PLUGIN_NAME) == 0);
-    // groups: g1_perform 0-8, g2_tracks 9-16, g3_settings 17-23
-    for (uint32_t i = 0; i < 24; ++i)
+    // groups: g1_perform 0-8, g2_tracks 9-16, g3_settings 17-23,25-29; stop_play (24) in perform
+    for (uint32_t i = 0; i < 30; ++i)
     {
         const uint32_t g = P().getParameterGroupId(i);
-        CHECK(g == (i <= 8 ? 0u : i <= 16 ? 1u : 2u));
+        CHECK(g == (i <= 8 || i == 24 ? 0u : i <= 16 ? 1u : 2u));
     }
     CHECK(std::strcmp(P().getPortGroupById(0).symbol, "g1_perform") == 0);
     CHECK(std::strcmp(P().getPortGroupById(1).symbol, "g2_tracks") == 0);
@@ -83,6 +84,8 @@ static void portSymbolsAreFrozen()
     CHECK(P().getParameterRanges(kParamTail).def == 50.0f && P().getParameterRanges(kParamHoldTime).def == 500.0f);
     CHECK(P().getParameterRanges(kParamBudget).min == 16.0f && P().getParameterRanges(kParamBudget).def == 200.0f);
     CHECK(P().getParameterRanges(kParamTriggerLatency).def == 3.0f && P().getParameterRanges(kParamOn1).def == 1.0f);
+    CHECK(P().getParameterEnumValues(kParamStopMode).count == 3 && P().getParameterRanges(kParamFadeTime).def == 3.0f);
+    CHECK(P().getParameterRanges(kParamThreshold).def == -40.0f && P().getParameterRanges(kParamDoubleTap).def == 300.0f && P().getParameterRanges(kParamAutoRec).def == 0.0f);
 }
 
 static void silentAndMono()
@@ -108,14 +111,82 @@ static void tapUndoHoldRedo()
     fresh();
     recordBaseAndDub();
     CHECK(eng().undoDepth(0) == 1);
-    set(kParamUndoRedo, 1); runN(37); set(kParamUndoRedo, 0); runN(1);    // ~99 ms tap
+    set(kParamUndoRedo, 1); runN(37); set(kParamUndoRedo, 0); runN(114);    // ~99 ms tap, then the double-tap window
     CHECK(eng().undoDepth(0) == 0 && eng().canRedo(0));
     set(kParamUndoRedo, 1); runN(190);                                     // ~507 ms held
     CHECK(eng().undoDepth(0) == 1);                                        // redo fired while held
     set(kParamUndoRedo, 0); runN(1); CHECK(eng().undoDepth(0) == 1);       // no undo on release
     // a hold_time of 2000 ms turns the same 507 ms hold into a plain undo on release
     set(kParamHoldTime, 2000); set(kParamUndoRedo, 1); runN(190); CHECK(eng().undoDepth(0) == 1);
-    set(kParamUndoRedo, 0); runN(1); CHECK(eng().undoDepth(0) == 0);
+    set(kParamUndoRedo, 0); runN(114); CHECK(eng().undoDepth(0) == 0);
+}
+
+static void tapC() { set(kParamUndoRedo, 1); runN(20); set(kParamUndoRedo, 0); runN(1); }
+static void doubleTap() { tapC(); runN(29); set(kParamUndoRedo, 1); runN(1); set(kParamUndoRedo, 0); runN(1); }
+
+static void tapUndoWaitsForTheWindow() {
+    fresh(); recordBaseAndDub(); tapC();
+    CHECK(eng().undoDepth(0) == 1); runN(110); CHECK(eng().undoDepth(0) == 1);
+    runN(3); CHECK(eng().undoDepth(0) == 0);                          // 300 ms after the release
+}
+static void doubleTapStops() {
+    fresh(); recordBaseAndDub(); tapC(); runN(29);
+    set(kParamUndoRedo, 1); runN(1); CHECK(eng().transport() == ouro::Transport::Stopping);   // on the press
+    runN(20); set(kParamUndoRedo, 0); runN(200);
+    CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 1 && peak(gOut) == 0.0f);
+}
+static void bRestartsAfterStop() {
+    fresh(); recordBaseAndDub(); doubleTap(); runN(20);
+    set(kParamRec, 1); runN(1); set(kParamRec, 0);
+    CHECK(eng().transport() == ouro::Transport::Running && eng().state(0) == ouro::TrackState::Playing);
+}
+static void holdWhileStoppedClearsAll() {
+    fresh(); recordBaseAndDub(); tapC(); runN(114); CHECK(eng().canRedo(0));
+    doubleTap(); runN(20);
+    set(kParamUndoRedo, 1); runN(300); set(kParamUndoRedo, 0); runN(120);   // 800 ms: no redo, no undo
+    CHECK(eng().undoDepth(0) == 0 && eng().loopLength() > 0 && eng().transport() == ouro::Transport::Stopped);
+    set(kParamUndoRedo, 1); runN(376);                                        // past 1000 ms
+    CHECK(eng().loopLength() == 0 && eng().transport() == ouro::Transport::Running);
+    set(kParamUndoRedo, 0); runN(120); CHECK(eng().state(0) == ouro::TrackState::Empty);
+}
+static void doubleTapThenHoldDoesNotClear() {
+    fresh(); recordBaseAndDub(); tapC(); runN(29); set(kParamUndoRedo, 1); runN(450);
+    CHECK(eng().transport() == ouro::Transport::Stopped && eng().loopLength() > 0);
+}
+static void tapWhileStoppedUndoes() {
+    fresh(); recordBaseAndDub(); doubleTap(); runN(20); tapC(); runN(114);
+    CHECK(eng().undoDepth(0) == 0 && eng().transport() == ouro::Transport::Stopped);
+}
+static void tapUndoesTheTrackItWasTappedOn() {                        // Review Focus 5
+    fresh(); recordBaseAndDub();
+    set(kParamTrack, 2); runN(1); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(20);
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40);           // track 2 recorded onto the loop
+    set(kParamTrack, 1); runN(1); tapC(); set(kParamTrack, 2); runN(114);
+    CHECK(eng().undoDepth(0) == 0 && eng().state(1) == ouro::TrackState::Playing);
+}
+static void doubleTapDuringAShortFirstRecording() {                   // Review Focus 4
+    fresh(); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(5);
+    set(kParamUndoRedo, 1); runN(2); set(kParamUndoRedo, 0); runN(2); set(kParamUndoRedo, 1); runN(1);
+    CHECK(eng().state(0) == ouro::TrackState::Empty && eng().loopLength() == 0
+          && eng().transport() == ouro::Transport::Running);
+    set(kParamUndoRedo, 0); runN(200); CHECK(eng().state(0) == ouro::TrackState::Empty);
+}
+static void stopPlayPortToggles() {
+    fresh(); recordBaseAndDub();
+    set(kParamStopPlay, 1); runN(1); set(kParamStopPlay, 0); CHECK(eng().transport() == ouro::Transport::Stopping);
+    runN(20); CHECK(eng().transport() == ouro::Transport::Stopped);
+    set(kParamStopPlay, 1); runN(1); set(kParamStopPlay, 0); CHECK(eng().transport() == ouro::Transport::Running);
+}
+static void stopAndAutoRecSettingsReachTheEngine() {
+    fresh(); recordBaseAndDub(); set(kParamStopMode, 2); set(kParamFadeTime, 0.5f);
+    set(kParamStopPlay, 1); runN(1); set(kParamStopPlay, 0);
+    runN(90);  CHECK(eng().transport() == ouro::Transport::Stopping);   // 240 ms into a 500 ms fade
+    runN(110); CHECK(eng().transport() == ouro::Transport::Stopped);
+    set(kParamStopPlay, 1); runN(1); set(kParamStopPlay, 0);
+    set(kParamAutoRec, 1); set(kParamThreshold, -10); set(kParamTrack, 2); runN(1);
+    set(kParamRec, 1); runN(5); set(kParamRec, 0);                       // runN's 0.1 sine stays under -10 dB
+    CHECK(eng().armedTrack() == 1 && eng().state(1) == ouro::TrackState::Empty);
+    set(kParamThreshold, -40); runN(1); CHECK(eng().state(1) == ouro::TrackState::Recording);
 }
 
 static void undoRedoClearTriggers()
@@ -252,6 +323,16 @@ int main()
     silentAndMono();
     recActsOnRisingEdgeOnly();
     tapUndoHoldRedo();
+    tapUndoWaitsForTheWindow();
+    doubleTapStops();
+    bRestartsAfterStop();
+    holdWhileStoppedClearsAll();
+    doubleTapThenHoldDoesNotClear();
+    tapWhileStoppedUndoes();
+    tapUndoesTheTrackItWasTappedOn();
+    doubleTapDuringAShortFirstRecording();
+    stopPlayPortToggles();
+    stopAndAutoRecSettingsReachTheEngine();
     undoRedoClearTriggers();
     trackSelectRetargets();
     volumeProxyFollowsSelectedTrack();
