@@ -24,12 +24,18 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
                 if (fill || x == x0 || x == x1 - 1 || y == y0 || y == y1 - 1) setPixel(bits, w, x, y);
     };
 
+    const auto drawMark = [&](int x, const uint8_t* g) {   // 7x7 glyph at rows 11..17
+        for (int r = 0; r < 7; ++r)
+            for (int c = 0; c < 7; ++c)
+                if (g[r] & (0x40 >> c)) setPixel(bits, w, x + c, 11 + r);
+    };
+
     const auto clearPixel = [&](int x, int y) { bits[y * ((w + 7) / 8) + x / 8] &= uint8_t(~(0x80 >> (x % 8))); };
 
-    // Rows 0 and h-1 stay blank (padding). Tall: text row 1.., marks rows 11..17, 7-row bar at rows h-8..h-2.
-    // Below 26 rows the bar (starting at h-8) would overlap the marks (ending at row 17), so use the short layout:
+    // Rows 0 and h-1 stay blank (padding). Tall: text row 1.., marks rows 11..17 (selected one framed, rows 10..18), 7-row bar at rows h-8..h-2.
+    // Below 27 rows the bar (starting at h-8) would touch the frame (ending at row 18), so use the short layout:
     // the bar alone at rows 1..h-2.
-    const bool tall = h >= 26;
+    const bool tall = h >= 27;
     const int barY = tall ? h - 8 : 1, barH = h - 1 - barY;
 
     if (tall)
@@ -44,8 +50,11 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
         {
             const int x = i * cell + (cell - 7) / 2;
             const TrackState s = v.state[i];
+            if (i == v.selected) rect(x - 1, 10, x + 8, 19, false);   // 9x9 frame round the selected mark, always drawn
             if (s == TrackState::Empty) rect(x + 2, 13, x + 5, 16, true);
-            else if (s == TrackState::Playing || v.blinkOn) rect(x, 11, x + 7, 18, v.on[i]);
+            else if (s == TrackState::Playing)   // play triangle = on, stop square = muted
+                drawMark(x, v.on[i] ? kMarkPlay : kMarkStop);
+            else if (v.blinkOn) drawMark(x, kMarkDisc);   // recording / overdubbing: blinking disc
         }
     }
 
