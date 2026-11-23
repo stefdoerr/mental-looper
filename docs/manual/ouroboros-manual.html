@@ -368,6 +368,13 @@ If you run the pedal in series instead, switch <b>Dry thru</b> on and it adds yo
 It shows the selected track and its state (ARM when that track is armed), a mark per track (a blinking dot for an armed track), and a bar that fills once per pass (elapsed time during the first recording). Under each mark a small number counts the layers you hear on that track: the recording plus each overdub still in, so an undo takes one off (it needs an area at least 33 pixels tall). For a long track the bar covers the whole track, with a small tick at each loop (left out when there are too many), and while a track records past the loop, small dots count how many times the loop has come round while it records. It needs an area at least 27 pixels tall for the full layout; a shorter area shows the bar only. While stopped it shows STOP (blinking while a stop is still finishing), and B&rsquo;s label reads PLAY.
 Without the widget everything still works, just without the screen. On stock MOD OS the volume knob can be one step off right after you change track.</p>
 
+<h2>Tempo sync</h2>
+<p>Set <b>Sync</b> to <b>Bars</b> and Ouroboros follows MOD&rsquo;s tempo and transport. With Sync Off nothing changes.</p>
+<p><b>Bar lines.</b> Recording starts on a MOD bar line, and the first loop closes on one, so loops are whole bars. A press up to 150&nbsp;ms after a line counts as on the line; an earlier press waits for the next one. While it waits, B blinks fast (red before a recording, green before the first loop closes or playback restarts) and the screen shows WAIT. Press B again or tap C to cancel. Starting playback with B while MOD plays waits for the next bar line the same way. With Auto Rec, a note just after a bar line starts at that line; an earlier one waits for the next line.</p>
+<p><b>MOD stopped.</b> Your first press sets bar 1.</p>
+<p><b>MOD&rsquo;s play and stop.</b> When MOD starts playing, the loops start from their top on the bar line (if MOD starts mid-bar they wait for the next line, with no WAIT shown). If you are recording or overdubbing, that take closes first and every track jumps to its start with a short crossfade. During the very first recording, MOD&rsquo;s play is ignored. When MOD stops, the loops stop too, following Stop Mode. If MOD stops during the first recording, you keep the whole bars recorded so far; less than one bar is discarded.</p>
+<p><b>Tempo changes.</b> Loops keep their length, so if the tempo changes after you record they drift from the drums.</p>
+
 <h2>Settings</h2>
 <table>
 <tr><th style="width:19%">Setting</th><th style="width:14%">Range</th><th style="width:10%">Default</th><th>What it does</th></tr>
@@ -383,6 +390,7 @@ Without the widget everything still works, just without the screen. On stock MOD
 <tr><td class="ctl">Auto Rec</td><td>off / on</td><td>off</td><td>B on an empty track arms it instead of recording. Recording starts when you play past the Threshold, and keeps the 10&nbsp;ms before it.</td></tr>
 <tr><td class="ctl">Threshold</td><td>&minus;60&hellip;&minus;10&nbsp;dB</td><td>&minus;40&nbsp;dB</td><td>How loud your first note must be to start an armed recording.</td></tr>
 <tr><td class="ctl">Double-Tap</td><td>150&ndash;600&nbsp;ms</td><td>400&nbsp;ms</td><td>The window for a second tap on C. A single tap undoes once it has passed.</td></tr>
+<tr><td class="ctl">Sync</td><td>Off / Bars</td><td>Off</td><td>Bars: recording starts and the first loop closes on MOD&rsquo;s bar lines, and the loops follow MOD&rsquo;s play and stop. See Tempo sync.</td></tr>
 </table>
 
 

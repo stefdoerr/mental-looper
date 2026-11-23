@@ -10,6 +10,7 @@ as much as you like and undo one layer at a time. Built with the
 
 - Rec / Play / Dub on one footswitch; undo (tap), redo (hold) and stop (double-tap) on another.
 - Optional auto-record: arm a track and it starts on your first note.
+- Optional tempo sync: loops start on MOD's bar lines, are whole bars long, and follow MOD's play/stop.
 - Click-free loop point, punch in/out, undo, redo and clear.
 - Tracks can be longer than the first loop: keep playing past the end.
 - Per-track volume and on/off. The Dwarf screen shows a progress bar, track states and layer counts
