@@ -248,10 +248,24 @@ static void armedShowsArmAndBlinksItsDot()
     v.blinkOn = false; ouro::renderLoopWidget(v, 40, 37, b); CHECK(showsText(v, "ARM") && litIn(b, 40, 3, 17, 6, 20) == 0);
 }
 
+// Every character the widget can draw has a glyph (showsText compares against the same font, so it can't catch a gap).
+static void everyWidgetStringHasGlyphs()
+{
+    static const char* const strings[] = { "--", "REC", "PLAY", "DUB", "STOP", "ARM", "T1", "T2", "T3", "T4", "0123456789:" };
+    for (const char* s : strings)
+        for (const char* c = s; *c != '\0'; ++c)
+        {
+            const uint8_t* g = ouro::glyph(*c);
+            int lit = 0; for (int r = 0; r < 7; ++r) lit += g[r] != 0;
+            if (lit == 0) std::printf("  no glyph for '%c' in \"%s\"\n", *c, s);
+            CHECK(lit > 0);
+        }
+}
+
 int main()
 {
     sizeIsMono1(); barFillsProportionally(); emptyBarWhenNoLoop(); elapsedShownWhileRecording();
     marksReflectTracks(); selectedFrame(); ringsAroundSymbols(); stateText(); stateTextNotClipped(); tallThreshold(); layoutRows(); shortAreaBarOnly(); topAndBottomRowsBlank();
-    stoppedShowsStop(); armedShowsArmAndBlinksItsDot();
+    stoppedShowsStop(); armedShowsArmAndBlinksItsDot(); everyWidgetStringHasGlyphs();
     REPORT();
 }
