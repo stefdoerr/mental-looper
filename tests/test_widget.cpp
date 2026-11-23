@@ -227,9 +227,31 @@ static void topAndBottomRowsBlank()
     }
 }
 
+// The text band x 14..39, rows 3..9 matches s drawn alone there.
+static bool showsText(const ouro::WidgetView& v, const char* s)
+{
+    uint8_t b[1024], want[1024] = {}; ouro::renderLoopWidget(v, 40, 37, b); ouro::drawText(want, 40, 14, 3, s);
+    for (int y = 3; y < 10; ++y) for (int x = 14; x < 40; ++x) if (px(b, 40, x, y) != px(want, 40, x, y)) return false;
+    return true;
+}
+static void stoppedShowsStop()
+{
+    auto v = view(); v.state[0] = TrackState::Playing; v.loopLength = 1000; v.transport = ouro::Transport::Stopped;
+    CHECK(showsText(v, "STOP"));
+    v.transport = ouro::Transport::Stopping; v.blinkOn = true;  CHECK(showsText(v, "STOP"));
+    v.blinkOn = false; CHECK(showsText(v, ""));
+}
+static void armedShowsArmAndBlinksItsDot()
+{
+    auto v = view(); v.armed[0] = true; uint8_t b[1024];
+    v.blinkOn = true;  ouro::renderLoopWidget(v, 40, 37, b); CHECK(showsText(v, "ARM") && litIn(b, 40, 3, 17, 6, 20) == 9);
+    v.blinkOn = false; ouro::renderLoopWidget(v, 40, 37, b); CHECK(showsText(v, "ARM") && litIn(b, 40, 3, 17, 6, 20) == 0);
+}
+
 int main()
 {
     sizeIsMono1(); barFillsProportionally(); emptyBarWhenNoLoop(); elapsedShownWhileRecording();
     marksReflectTracks(); selectedFrame(); ringsAroundSymbols(); stateText(); stateTextNotClipped(); tallThreshold(); layoutRows(); shortAreaBarOnly(); topAndBottomRowsBlank();
+    stoppedShowsStop(); armedShowsArmAndBlinksItsDot();
     REPORT();
 }

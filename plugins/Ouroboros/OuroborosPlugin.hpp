@@ -386,7 +386,8 @@ protected:
         fDrawAcc += frames;
         if (fDrawAcc >= 960) { fDrawAcc %= 960; drawWidgets(); }
 
-        fHmi.update({fEngine.state(sel), fEngine.nextAction(sel), fEngine.canUndo(sel), sel, fEngine.isOn(sel)});
+        fHmi.update({fEngine.state(sel), fEngine.nextAction(sel), fEngine.canUndo(sel), sel, fEngine.isOn(sel),
+                     fEngine.transport(), fEngine.armedTrack() == sel});
     }
 
 private:
@@ -402,7 +403,8 @@ private:
         if (fWidgetDraw == nullptr) return;
         ouro::WidgetView v = {};
         v.selected = fSel;
-        for (int t = 0; t < ouro::kTracks; ++t) { v.state[t] = fEngine.state(t); v.on[t] = fEngine.isOn(t); }
+        v.transport = fEngine.transport();
+        for (int t = 0; t < ouro::kTracks; ++t) { v.state[t] = fEngine.state(t); v.on[t] = fEngine.isOn(t); v.armed[t] = fEngine.armedTrack() == t; }
         v.loopLength = fEngine.loopLength(); v.position = fEngine.position();
         v.recordedSamples = fEngine.recordedSamples(); v.sampleRate = fEngine.sampleRate(); v.blinkOn = fBlinkOn;
 

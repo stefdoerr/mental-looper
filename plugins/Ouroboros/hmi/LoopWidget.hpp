@@ -11,6 +11,7 @@ namespace ouro {
 struct WidgetView {
     int selected; TrackState state[kTracks]; bool on[kTracks];
     uint32_t loopLength, position, recordedSamples; double sampleRate; bool blinkOn;
+    Transport transport; bool armed[kTracks];
 };
 
 // Mono1: rows top->bottom, (w+7)/8 bytes per row, MSB = leftmost pixel, 1 = lit. Returns bytes written.
@@ -45,7 +46,11 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
         static const char* const names[] = { "--", "REC", "PLAY", "DUB" };   // by TrackState: Empty, Recording, Playing, Overdubbing
         char t[3] = { 'T', char('1' + v.selected), '\0' };
         drawText(bits, w, 0, textY, t);
-        drawText(bits, w, 14, textY, names[int(v.state[v.selected])]);
+        const char* txt = names[int(v.state[v.selected])];
+        if (v.transport == Transport::Stopped) txt = "STOP";
+        else if (v.transport == Transport::Stopping) txt = v.blinkOn ? "STOP" : "";
+        else if (v.armed[v.selected]) txt = "ARM";
+        drawText(bits, w, 14, textY, txt);
 
         const int cell = w / kTracks;
         for (int i = 0; i < kTracks; ++i)
@@ -53,7 +58,7 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
             const int x = i * cell + (cell - 7) / 2;
             const TrackState s = v.state[i];
             if (i == v.selected) rect(x - 1, frameY, x + 8, frameY + 9, false);   // 9x9 frame round the selected mark, always drawn
-            if (s == TrackState::Empty) rect(x + 2, frameY + 3, x + 5, frameY + 6, true);
+            if (s == TrackState::Empty) { if (!v.armed[i] || v.blinkOn) rect(x + 2, frameY + 3, x + 5, frameY + 6, true); }
             else if (s == TrackState::Playing)   // play triangle = on, stop square = muted
                 drawMark(x, frameY + 1, v.on[i] ? kMarkPlay : kMarkStop);
             else if (v.blinkOn) drawMark(x, frameY + 1, kMarkDisc);   // recording / overdubbing: blinking disc

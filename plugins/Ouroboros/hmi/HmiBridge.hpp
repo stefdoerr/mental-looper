@@ -15,7 +15,7 @@ namespace ouro {
 
 enum HmiPort : uint8_t { kHmiRec, kHmiUndo, kHmiOnOff, kHmiVolume, kHmiPortCount };
 
-struct HmiView { TrackState state; NextAction next; bool canUndo; int selected; bool on; };
+struct HmiView { TrackState state; NextAction next; bool canUndo; int selected; bool on; Transport transport; bool armed; };
 
 class HmiBridge {
 public:
@@ -63,7 +63,7 @@ private:
     static int fingerprint(HmiPort p, const HmiView& v)
     {
         switch (p) {
-        case kHmiRec:    return int(v.state) * 3 + int(v.next);
+        case kHmiRec:    return (int(v.state) * 3 + int(v.next)) * 6 + int(v.transport) * 2 + v.armed;
         case kHmiUndo:   return v.canUndo;
         case kHmiOnOff:  return v.selected * 2 + v.on;
         default:         return v.selected;
@@ -76,14 +76,18 @@ private:
         const char* label = text;
         switch (p) {
         case kHmiRec:
-            label = v.next == NextAction::Rec ? "REC" : v.next == NextAction::Play ? "PLAY" : "DUB";
+            label = v.armed ? "ARM" : v.transport != Transport::Running ? "PLAY"
+                : v.next == NextAction::Rec ? "REC" : v.next == NextAction::Play ? "PLAY" : "DUB";
             if (caps & LV2_HMI_AddressingCapability_LED)
             {
                 const bool blink = v.state == TrackState::Recording || v.state == TrackState::Overdubbing;
                 const LV2_HMI_LED_Colour c = v.state == TrackState::Empty ? LV2_HMI_LED_Colour_White
                     : v.state == TrackState::Recording ? LV2_HMI_LED_Colour_Red : LV2_HMI_LED_Colour_Green;
-                const int t = blink ? LV2_HMI_LED_Blink_Mid : LV2_HMI_LED_Blink_None;
-                wc_->set_led_with_blink(wc_->handle, a, c, t, t);
+                int t = blink ? LV2_HMI_LED_Blink_Mid : LV2_HMI_LED_Blink_None;
+                LV2_HMI_LED_Colour col = c;
+                if (v.armed) { col = LV2_HMI_LED_Colour_Red; t = LV2_HMI_LED_Blink_Slow; }
+                else if (v.transport == Transport::Stopped) { col = LV2_HMI_LED_Colour_Off; t = LV2_HMI_LED_Blink_None; }
+                wc_->set_led_with_blink(wc_->handle, a, col, t, t);
             }
             break;
         case kHmiUndo:   label = v.canUndo ? "UNDO" : "-"; break;   // ASCII: the Dwarf font has no em dash

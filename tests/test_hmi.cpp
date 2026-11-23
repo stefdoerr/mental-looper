@@ -15,9 +15,10 @@ static LV2_HMI_WidgetControl gFake = { nullptr, sizeof(LV2_HMI_WidgetControl), l
 static LV2_HMI_Addressing A1 = (LV2_HMI_Addressing)0x1, A2 = (LV2_HMI_Addressing)0x2, A3 = (LV2_HMI_Addressing)0x3;
 static const uint32_t kAllCaps = LV2_HMI_AddressingCapability_LED | LV2_HMI_AddressingCapability_Label | LV2_HMI_AddressingCapability_Value;
 
-static ouro::HmiView view(ouro::TrackState s, ouro::NextAction n, bool undo = false, int sel = 0, bool on = true)
+static ouro::HmiView view(ouro::TrackState s, ouro::NextAction n, bool undo = false, int sel = 0, bool on = true,
+                            ouro::Transport tp = ouro::Transport::Running, bool armed = false)
 {
-    return { s, n, undo, sel, on };
+    return { s, n, undo, sel, on, tp, armed };
 }
 static std::string lastLabel(LV2_HMI_Addressing a)
 {
@@ -35,6 +36,20 @@ static Call lastLed(LV2_HMI_Addressing a)
     return {"<none>", a, "", -1, -1, -1};
 }
 static size_t count(const char* fn) { size_t n = 0; for (auto& c : gCalls) n += c.fn == fn; return n; }
+
+static void recLabelShowsArmAndStop()
+{
+    gCalls.clear(); ouro::HmiBridge b; b.setFeature(&gFake); b.addressed(ouro::kHmiRec, A1, kAllCaps);
+    b.update(view(ouro::TrackState::Empty, ouro::NextAction::Rec, false, 0, true, ouro::Transport::Running, true));
+    CHECK(lastLabel(A1) == "ARM" && lastLed(A1).colour == LV2_HMI_LED_Colour_Red
+          && lastLed(A1).on == LV2_HMI_LED_Blink_Slow && lastLed(A1).off == LV2_HMI_LED_Blink_Slow);
+    b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, true, 0, true, ouro::Transport::Stopping));
+    CHECK(lastLabel(A1) == "PLAY" && lastLed(A1).colour == LV2_HMI_LED_Colour_Green && lastLed(A1).on == 0);
+    b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, true, 0, true, ouro::Transport::Stopped));
+    CHECK(lastLabel(A1) == "PLAY" && lastLed(A1).colour == LV2_HMI_LED_Colour_Off);
+    b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, true, 0, true, ouro::Transport::Running));
+    CHECK(lastLabel(A1) == "DUB");
+}
 
 static void labelsSentOnlyOnChange()
 {
@@ -120,6 +135,7 @@ static void noFeatureNoCalls()
 int main()
 {
     labelsSentOnlyOnChange();
+    recLabelShowsArmAndStop();
     undoLabelShowsAvailability();
     knobLabelsFollowTrack();
     readdressResends();
