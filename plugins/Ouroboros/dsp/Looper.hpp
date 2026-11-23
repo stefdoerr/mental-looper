@@ -114,8 +114,12 @@ public:
         if (!enabled_) { for (uint32_t i = 0; i < n; ++i) out[i] = dry_.next(dryTo, ramp_) * in[i]; return; }
         for (uint32_t i = 0; i < n; ++i) {
             const float x = in[i];                       // read first: in and out may alias
-            double ph;                                   // a waiting press acts on the line (no grid any more: at once)
-            if (pend_ >= 0 && (!gridPhase(ph) || ph < 1.0)) { const int t = pend_; pend_ = -1; pressRec(t); }
+            if (pend_ >= 0) {                            // a waiting press acts on the line (no grid any more: at once)
+                double ph;                               // Sync off: never waiting, so only this test per sample
+                at_ = i;
+                if (!gridPhase(ph) || ph < 1.0) { const int t = pend_; pend_ = -1; pressRec(t); }
+                at_ = 0;
+            }
             if (armed_ >= 0 && std::fabs(x) >= thr_) {   // the arm fires, back-dated by the pre-roll; x goes in below
                 const int t = armed_;
                 const uint32_t P = msToSamples(kPreRollMs, sr_);
@@ -123,7 +127,7 @@ public:
                 if (L_) startDub(tracks_[t], P, false, true, true, true); else startFirst(t, P);
             }
             // Max length: close as if B were pressed, but at once (with a grid, on the last line passed).
-            if (recTrack_ >= 0 && rec_ == maxRec_) { pend_ = -1; closeFirst(recToDub_); }
+            if (recTrack_ >= 0 && rec_ == maxRec_) { pend_ = -1; at_ = i; closeFirst(recToDub_); at_ = 0; }
             for (int u = 0; u < kTracks; ++u) {          // a recording onto the loop at the most whole loops in 5 min:
                 const Track& tr = tracks_[u];            // close as if B were pressed
                 if (tr.state == TrackState::Recording && tr.len == cap_ && tr.pos == maxRec_ / L_ * L_)
@@ -151,8 +155,8 @@ public:
             }
             histUsed_[h] = used;
             out[i] = softclip(y);
-            if (gValid_ && (modPh_ += 1.0) >= spb_) modPh_ -= spb_;   // MOD's grid moves on with the samples
         }
+        if (gValid_) modPh_ = phaseIn(modPh_ + n, spb_);  // MOD's grid moves on: once per block, never with Sync off
     }
 
     // Only one track records at a time: a press while another track records or overdubs first closes that one
@@ -326,9 +330,9 @@ public:
     // Sync = Bars (off: no grid, everything as before). setGrid comes once per block, before process(): MOD's bar
     // grid at the block start. toNextBar: samples to the next bar line, in [0, samplesPerBar). A bar outside
     // kMinLoopMs..kMaxLoopSeconds is no grid.
-    void setSync(bool on) { sync_ = on; }
+    void setSync(bool on) { sync_ = on; if (!on) gValid_ = false; }   // off: the grid is ignored, nothing kept up
     void setGrid(bool valid, bool playing, double samplesPerBar, double toNextBar) {
-        gValid_ = valid && samplesPerBar >= minLoop_ && samplesPerBar <= maxRec_;   // NaN fails
+        gValid_ = sync_ && valid && samplesPerBar >= minLoop_ && samplesPerBar <= maxRec_;   // NaN fails
         gPlaying_ = playing;
         spb_ = samplesPerBar;
         modPh_ = toNextBar > 0.0 && toNextBar <= spb_ ? spb_ - toNextBar : 0.0;
@@ -453,12 +457,17 @@ private:
     // bars, else (nothing recorded) the press is the line. The first recording counts lines from its start (a line)
     // unless it started on MOD's grid and MOD still plays: a recording started with MOD stopped keeps that grid.
     bool gridPhase(double& ph) const {
-        if (!sync_ || !gValid_) return false;
-        if (recTrack_ >= 0 && (recFree_ || !gPlaying_)) ph = std::fmod(double(rec_), spb_);
-        else if (gPlaying_) ph = modPh_;
-        else if (L_) ph = std::fmod(double(pos_), double(L_) / bars_);
+        if (!gValid_) return false;                      // also false with Sync off (see setSync)
+        if (recTrack_ >= 0 && (recFree_ || !gPlaying_)) ph = phaseIn(rec_, spb_);
+        else if (gPlaying_) ph = phaseIn(modPh_ + at_, spb_);
+        else if (L_) ph = phaseIn(pos_, double(L_) / bars_);
         else ph = 0.0;
         return true;
+    }
+    // p mod bar in [0, bar): a few scalar ops (no fmod), as gridPhase runs per sample while a press waits.
+    static double phaseIn(double p, double bar) {
+        const double r = p - std::floor(p / bar) * bar;
+        return r > 0.0 && r < bar ? r : 0.0;             // rounding past either end: on the line
     }
 
     // Back-date by back (<= histLen_): the last back inputs from the history ring become buf[0..back). Without a grid
@@ -470,7 +479,7 @@ private:
         rec_ = back;
         recD_ = msToSamples(trigMs_, sr_);               // <= minLoop_ <= histLen_ (trigMs_ <= kMinLoopMs)
         recTrack_ = t;
-        recFree_ = sync_ && gValid_ && !gPlaying_;
+        recFree_ = gValid_ && !gPlaying_;
         tracks_[t].state = TrackState::Recording;
     }
 
@@ -546,7 +555,10 @@ private:
         }
         L_ = L;
         bars_ = bars;
-        pos_ = rec_ % L;                                              // D mod L (D can exceed L), or r if rounded up
+        // D mod L (D can exceed L), or r if rounded up. After a tempo change during the recording D is not the
+        // back-date, so the loop's top lands D - back off the close line. Accepted: keeping the recording's timeline
+        // keeps the tail and the seam click-free, and a MOD start re-aligns it (aligning here would click every pass).
+        pos_ = rec_ % L;
         tr.len = L;
         tr.pos = pos_;
         tr.phase = 0;                                                 // laid out by base phase
@@ -902,7 +914,8 @@ private:
     uint32_t bars_ = 1;              // the first loop's bars
     bool sync_ = false, gValid_ = false, gPlaying_ = false;   // Sync = Bars; MOD's grid: usable, transport playing
     bool recFree_ = false;           // the first recording started on the free grid (MOD stopped): it keeps it
-    double spb_ = 0.0, modPh_ = 0.0; // MOD's samples per bar, and samples since its last line at the next sample
+    double spb_ = 0.0, modPh_ = 0.0; // MOD's samples per bar, and samples since its last line at the block start
+    uint32_t at_ = 0;                // the sample process() is at in its block, while it asks gridPhase (else 0)
     float thr_ = 0.01f;              // auto-record threshold, linear (-40 dB)
     bool autoRec_ = false;
     bool recToDub_ = false, enabled_ = false, dryThru_ = false, bypass_ = false;
