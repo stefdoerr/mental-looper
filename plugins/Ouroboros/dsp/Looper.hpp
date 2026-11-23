@@ -101,7 +101,7 @@ public:
             tr.gain.snap(0.0f);
         }
         L_ = pos_ = rec_ = recD_ = 0;
-        recTrack_ = -1;
+        recTrack_ = armed_ = -1;
         tp_ = Transport::Running;
         restartQueued_ = false;
         lg_ = LoopGain{};
@@ -112,9 +112,16 @@ public:
         if (!enabled_) { for (uint32_t i = 0; i < n; ++i) out[i] = dry_.next(dryTo, ramp_) * in[i]; return; }
         for (uint32_t i = 0; i < n; ++i) {
             const float x = in[i];                       // read first: in and out may alias
+            if (armed_ >= 0 && std::fabs(x) >= thr_) {   // the arm fires, back-dated by the pre-roll; x goes in below
+                const int t = armed_;
+                const uint32_t P = msToSamples(kPreRollMs, sr_);
+                armed_ = -1;
+                if (L_) startDub(tracks_[t], P, false, true, true); else startFirst(t, P);
+            }
             if (recTrack_ >= 0 && rec_ == maxRec_) closeFirst(recToDub_);   // max length: close as if B were pressed
             // The last track went empty and its ramp ended: L resets. Stopped, the gains don't move: empty is enough.
-            if (L_ && (tp_ == Transport::Stopped ? allEmpty() : idle())) reset();
+            // An arm stays: it then starts the first loop.
+            if (L_ && (tp_ == Transport::Stopped ? allEmpty() : idle())) { const int a = armed_; reset(); armed_ = a; }
             const uint32_t h = histW_;
             hist_[h] = x;
             if (++histW_ == histLen_) histW_ = 0;
@@ -138,9 +145,15 @@ public:
 
     // Only one track records at a time: a press while another track records or overdubs first closes that one
     // (to Playing, never Rec->Dub), then does this track's own action. Not running, it only restarts.
+    // Auto-record: an empty track arms instead (one at a time). A press cancels the arm; on another track it then acts.
     void pressRec(int t) {
         if (!valid(t)) return;
         if (tp_ != Transport::Running) { restart(); return; }
+        if (armed_ >= 0) {
+            const bool same = armed_ == t;
+            armed_ = -1;
+            if (same) return;
+        }
         bool cont = false, offset = true;                // cont: the new writer complements the closed one's tail or
         for (int u = 0; u < kTracks; ++u)                // fade, at that one's offset (the first recording has none)
             if (u != t && writing(tracks_[u])) {
@@ -149,9 +162,10 @@ public:
                 offset = !cont || (!first && tracks_[u].fade.offset);
             }
         Track& tr = tracks_[t];
+        if (tr.state == TrackState::Empty && autoRec_) { armed_ = t; return; }
         const uint32_t D = msToSamples(trigMs_, sr_);
         switch (tr.state) {
-        case TrackState::Empty:   if (L_) startDub(tr, D, cont, true, offset); else startFirst(t); break;
+        case TrackState::Empty:   if (L_) startDub(tr, D, cont, true, offset); else startFirst(t, D); break;
         case TrackState::Playing: startDub(tr, D, cont, false, offset); break;
         default:                  close(t, recToDub_); break;
         }
@@ -159,6 +173,7 @@ public:
 
     void undo(int t) {
         if (!valid(t)) return;
+        if (armed_ >= 0) { armed_ = -1; return; }       // a tap on C cancels the arm, and only that
         Track& tr = tracks_[t];
         if (tr.state == TrackState::Recording) {         // abort: the track is empty again
             tr.state = TrackState::Empty;
@@ -186,6 +201,7 @@ public:
         if (tr.baseUndone) {
             tr.baseUndone = false;
             tr.state = TrackState::Playing;
+            if (armed_ == t) armed_ = -1;                // an arm is for an empty track only
         } else if (tr.undoTop < tr.redoTop && tr.nOps < kMaxPendingOps) {
             addOp(tr, tr.layers[tr.undoTop].d, 1.0f, true, int32_t(tr.undoTop));
             ++tr.undoTop;
@@ -197,6 +213,7 @@ public:
         if (!valid(t)) return;
         Track& tr = tracks_[t];
         if (recTrack_ == t) recTrack_ = -1;
+        if (armed_ == t) armed_ = -1;
         dropLayers(tr);                                  // an op still reading a layer keeps it: the ramp-out is smooth
         tr.state = TrackState::Empty;
     }
@@ -212,6 +229,7 @@ public:
             if (lg_.v > 0.0f) { stopMode_ = StopMode::Instant; restartQueued_ = false; lg_.start(false, 0, ramp_); }
             return;
         }
+        armed_ = -1;                                     // a stop cancels the arm
         for (int u = 0; u < kTracks; ++u) if (writing(tracks_[u])) close(u, false);
         if (!L_ || allEmpty()) return;                   // nothing to stop
         tp_ = Transport::Stopping;
@@ -263,6 +281,10 @@ public:
     void setTriggerLatencyMs(float ms) { trigMs_ = std::max(0.0f, std::min(ms, kHistoryMs)); }
     void setRecToDub(bool on) { recToDub_ = on; }
     void setAdvanceMs(float ms) { advMs_ = std::max(0.0f, std::min(ms, 30.0f)); }   // earlier only (R7)
+    void setAutoRec(bool on) { autoRec_ = on; }
+    void setThresholdDb(float db) {                      // NaN -> -60
+        thr_ = std::pow(10.0f, std::max(-60.0f, std::min(db, -10.0f)) / 20.0f);
+    }
 
     // Not clamped here (the plugin's parameter range does that); the pool clamps to what it reserved.
     // Lowering it below the current use only takes effect at the next allocation.
@@ -285,7 +307,9 @@ public:
     uint32_t loopLength() const { return L_; }
     uint32_t position() const { return pos_; }
     Transport transport() const { return tp_; }
-    uint32_t recordedSamples() const { return recTrack_ >= 0 ? rec_ - recD_ : 0; }   // what L would be if closed now
+    int armedTrack() const { return armed_; }            // -1: none
+    // What L would be if closed now. An arm's start can be back-dated less than the close: 0 until rec_ passes recD_.
+    uint32_t recordedSamples() const { return recTrack_ >= 0 && rec_ > recD_ ? rec_ - recD_ : 0; }
     double sampleRate() const { return sr_; }
     bool enabled() const { return enabled_; }
 
@@ -345,13 +369,14 @@ private:
         return false;
     }
 
-    // Back-date by D: the last D inputs from the history ring become buf[0..D).
-    void startFirst(int t) {
+    // Back-date by back (<= histLen_): the last back inputs from the history ring become buf[0..back). The close is
+    // back-dated by the trigger latency recD_ whatever back was (a press: the same; an arm: the pre-roll).
+    void startFirst(int t, uint32_t back) {
         float* buf = tracks_[t].buf;
+        for (uint32_t i = 0; i < back; ++i)
+            buf[i] = hist_[(histW_ + histLen_ - back + i) % histLen_] * fadeInGain(i);
+        rec_ = back;
         recD_ = msToSamples(trigMs_, sr_);               // <= histLen_ (trigMs_ <= kHistoryMs)
-        for (uint32_t i = 0; i < recD_; ++i)
-            buf[i] = hist_[(histW_ + histLen_ - recD_ + i) % histLen_] * fadeInGain(i);
-        rec_ = recD_;
         recTrack_ = t;
         tracks_[t].state = TrackState::Recording;
     }
@@ -367,10 +392,11 @@ private:
         return tr.fade.left > 0;
     }
 
-    // The close is back-dated by the same D, so L = r - D and the D samples past it are tail. True if it has a tail.
+    // The close is back-dated by the trigger latency D, so L = r - D and the D samples past it are tail. True if it has
+    // a tail.
     bool closeFirst(bool toDub) {
         Track& tr = tracks_[recTrack_];
-        const uint32_t L = rec_ - recD_;
+        const uint32_t L = recordedSamples();            // rec_ - recD_, never below 0
         recTrack_ = -1;
         if (L < minLoop_) { tr.state = TrackState::Empty; return false; }   // an accidental double press
         const uint32_t T = std::min(std::max(msToSamples(tailMs_, sr_), fadeIn_), L / 2);   // tail 0: a 3 ms crossfade
@@ -680,6 +706,9 @@ private:
     Transport tp_ = Transport::Running;
     StopMode stopMode_ = StopMode::Instant;
     bool restartQueued_ = false;     // B during a stop that cannot cancel: restart as soon as the engine parks
+    int armed_ = -1;                 // the track auto-record starts at the threshold, else -1
+    float thr_ = 0.01f;              // auto-record threshold, linear (-40 dB)
+    bool autoRec_ = false;
     bool recToDub_ = false, enabled_ = false, dryThru_ = false, bypass_ = false;
 };
 
