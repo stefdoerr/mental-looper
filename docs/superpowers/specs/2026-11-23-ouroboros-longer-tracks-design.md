@@ -127,12 +127,14 @@ How the engine keeps tracks in step (Claude's call):
 
 - **Each track gets `len`**, a whole multiple of L (0 while empty), **and `pos`**, its playhead.
   - Every track's `pos` advances each sample and wraps at its `len`.
-  - The shared base phase `pos_` (position within the first loop) stays: every non-empty track has
-    `pos ≡ pos_ (mod L)`.
+  - The shared base phase `pos_` (position within the first loop) stays. A track's musical position, counted
+    from its beginning (the pass start where it started), is always ≡ `pos_` (mod L).
+  - Its buffer is indexed from the start press, not the pass start. Otherwise a recording started late in a long
+    loop could run past the 5-minute buffer. The track stores where its beginning falls in that buffer.
   - Everything that today wraps at `L_` per track wraps at that track's `len` instead: `Writer::w`, delta
     offsets, `Op::at`/`Op::len`, `tailEnd`, the punch-out fade, the park split.
 - **A recording onto the loop writes linearly from the base phase,** without wrapping at L, until it closes.
-  - The track's index while recording is (passes so far × L) + `pos_`.
+  - The track's buffer index while recording is the number of samples since the start press.
   - It closes at k whole loops counted from the start press: `len = k·L`. Indices from `len` on wrap onto the
     track's beginning (the overshoot of a rounded-down close; see below).
 - **A reused buffer must never play stale audio:**
