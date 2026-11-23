@@ -224,7 +224,7 @@ public:
     // kRampMs ending at the top. A rest of kFadeInMs..kRampMs fades at once over the rest, still ending at the top; a
     // shorter rest fades over kFadeInMs, and the park then jumps back to the top. Fade: fadeMs (kRampMs..10 s) now,
     // cubic. A second stop cancels a queued restart and, while the loops still sound, cuts to Instant from the current
-    // gain.
+    // gain. A stop that closes the first recording parks silently in every mode (R7): Instant from loop gain 0.
     void stop(StopMode mode, float fadeMs = 3000.0f) {
         if (!enabled_ || tp_ == Transport::Stopped) return;
         if (tp_ == Transport::Stopping) {
@@ -233,11 +233,13 @@ public:
             return;
         }
         armed_ = -1;
+        const bool first = recTrack_ >= 0;
         for (int u = 0; u < kTracks; ++u) if (writing(tracks_[u])) close(u, false);
         if (!L_ || allEmpty()) return;                   // nothing to stop
         tp_ = Transport::Stopping;
-        stopMode_ = mode;
+        stopMode_ = first ? StopMode::Instant : mode;
         restartQueued_ = false;
+        if (first) { lg_.v = 0.0f; lg_.start(false, 0, ramp_); return; }
         uint32_t wait = 0, len = ramp_;
         if (mode == StopMode::EndOfLoop) {
             // ponytail: started while the loop gain still rises (within kFadeInMs of a restart or kRampMs of a cancel;

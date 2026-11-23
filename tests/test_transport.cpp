@@ -191,6 +191,22 @@ static void bDuringInstantWindowRestartsAfterPark() {
     CHECK(r.lp.transport() == Transport::Running && r.lp.state(0) == ouro::TrackState::Playing);
 }
 
+static void stopDuringAFirstRecordingIsSilent() {                 // Ruling R7: every mode parks silently
+    auto in = sine(220, 0.3f, 96000); const uint32_t s = 4096, n = 48000, after = 2400 + 128;   // tail 50 ms + a block
+    auto record = [&](Rig& r) {
+        r.lp.setTriggerLatencyMs(3.0f); r.feed(slice(in, 0, s)); r.lp.pressRec(0); r.feed(slice(in, s, s + n));
+    };
+    Rig ref; record(ref); ref.lp.pressRec(0); ref.feed(slice(in, s + n, s + n + after));
+    const auto img = ref.loopImage();
+    for (StopMode m : {StopMode::Instant, StopMode::EndOfLoop, StopMode::Fade}) {
+        Rig r; record(r); r.lp.stop(m, 3000.0f); const size_t from = r.out.size();
+        r.feed(slice(in, s + n, s + n + after));
+        CHECK(r.lp.transport() == Transport::Stopped && peak(slice(r.out, from, r.out.size())) == 0.0f);
+        r.lp.restart(); auto o = r.capture(r.lp.loopLength());
+        CHECK(maxAbsDiff(slice(o, 144, o.size()), slice(img, 144, img.size())) < 1e-6f);   // from the top, after the fade-in
+    }
+}
+
 int main() {
     instantStopFadesOutAndParks(); restartPlaysFromTheTop(); pendingUndoSurvivesStopAndRestart();
     zeroOpSurvivesStopAndRestart(); tailFinishesBeforeParking(); stopRestartTwiceWithinAPass();
@@ -199,6 +215,6 @@ int main() {
     stopClosesWritersAndNeedsALoop();
     endOfLoopStopsAtTheTop(); endOfLoopKeepsAPendingUndoWhole(); endOfLoopLateStopIsClickFree(); secondStopClearsAQueuedRestart();
     fadeFollowsTheCurve(); secondStopCutsAPendingFade(); bDuringAFadeCancelsIt(); bDuringInstantWindowRestartsAfterPark();
-    fadeTimeIsClamped();
+    fadeTimeIsClamped(); stopDuringAFirstRecordingIsSilent();
     REPORT();
 }
