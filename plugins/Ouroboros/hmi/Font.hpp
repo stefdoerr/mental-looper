@@ -1,4 +1,4 @@
-// 5x7 bitmap font for the loop widget: 0-9 : - T R E C D U B P L A Y S O M and space.
+// 5x7 bitmap font for the loop widget: 0-9 : - T R E C D U B P L A Y S O M and space; 3x5 digits for the counts.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +39,26 @@ inline const uint8_t* glyph(char c)
 static const uint8_t kMarkDisc[7] = { 0x00, 0x1C, 0x3E, 0x3E, 0x3E, 0x1C, 0x00 };   // record / overdub
 static const uint8_t kMarkPlay[7] = { 0x00, 0x10, 0x18, 0x1C, 0x18, 0x10, 0x00 };   // playing, on (3 px wide, centred)
 static const uint8_t kMarkStop[7] = { 0x00, 0x3E, 0x3E, 0x3E, 0x3E, 0x3E, 0x00 };   // playing, muted
+
+// 3x5 digits for the per-track layer counts: rows of 3 bits each (bit 2 = leftmost).
+static const uint8_t kDigits3x5[10][5] = {
+    {7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7}, {5, 5, 7, 1, 1},
+    {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 1, 1, 1}, {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7},
+};
+
+// ORs n in 3x5 digits centred in the 7 px wide cell at x, top at y: two digits 1 px apart fill it, one takes the middle
+// 3 columns. Above 99 draws 99.
+inline void drawCount(uint8_t* bits, uint16_t w, int x, int y, uint32_t n)
+{
+    if (n > 99) n = 99;
+    const auto digit = [&](int dx, uint32_t d) {
+        for (int r = 0; r < 5; ++r)
+            for (int c = 0; c < 3; ++c)
+                if (kDigits3x5[d][r] & (0x4 >> c)) setPixel(bits, w, x + dx + c, y + r);
+    };
+    if (n < 10) digit(2, n);
+    else { digit(0, n / 10); digit(4, n % 10); }
+}
 
 // ORs the text into bits (width w) with its top-left at x,y; 6 px per character.
 inline void drawText(uint8_t* bits, uint16_t w, int x, int y, const char* s)

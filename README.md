@@ -12,7 +12,7 @@ as much as you like and undo one layer at a time. Built with the
 - Optional auto-record: arm a track and it starts on your first note.
 - Click-free loop point, punch in/out, undo, redo and clear.
 - Tracks can be longer than the first loop: keep playing past the end.
-- Per-track volume and on/off. The Dwarf screen shows a progress bar and track states
+- Per-track volume and on/off. The Dwarf screen shows a progress bar, track states and layer counts
   (Starless 19 or later).
 - The output is only the loops: wire your dry signal around it, or turn on **Dry thru**.
 

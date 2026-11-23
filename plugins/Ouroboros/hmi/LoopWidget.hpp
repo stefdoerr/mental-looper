@@ -1,4 +1,4 @@
-// Renders the loop widget (state text, track marks, progress bar / elapsed time) as a Mono1 bitmap.
+// Renders the loop widget (state text, track marks and layer counts, progress bar / elapsed time) as a Mono1 bitmap.
 #pragma once
 #include "Font.hpp"
 #include "../dsp/Looper.hpp"
@@ -13,6 +13,7 @@ struct WidgetView {
     uint32_t loopLength, position, recordedSamples; double sampleRate; bool blinkOn;
     Transport transport; bool armed[kTracks];
     uint32_t trackLength, trackPosition;   // selected track: length (0 = none or still recording onto the loop), samples since its start
+    uint32_t layers[kTracks];              // layers heard per track (Looper::layerCount); 0 draws no count
 };
 
 // Mono1: rows top->bottom, (w+7)/8 bytes per row, MSB = leftmost pixel, 1 = lit. Returns bytes written.
@@ -36,10 +37,11 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
 
     // Rows 0 and h-1 stay blank. Tall: text (7 rows), marks band (9-row frame, 7x7 marks inside) and 7-row bar, with the
     // free rows split into 4 gaps (top, text->marks, marks->bar, bottom): remainder to the two middle gaps first, then the bottom.
+    // From 33 rows the layer counts (5 rows) sit 1 row under the frame and the marks->bar gap follows them; below, no counts.
     // Below 27 rows the four gaps would drop under 1 row, so use the short layout: the bar alone at rows 1..h-2.
-    const bool tall = h >= 27;
-    const int freeRows = h - 23, gap = freeRows / 4, extra = freeRows % 4;
-    const int textY = gap, frameY = textY + 7 + gap + (extra > 0), tallBarY = frameY + 9 + gap + (extra > 1);
+    const bool tall = h >= 27, counts = h >= 33;
+    const int freeRows = h - (counts ? 29 : 23), gap = freeRows / 4, extra = freeRows % 4;
+    const int textY = gap, frameY = textY + 7 + gap + (extra > 0), tallBarY = frameY + (counts ? 15 : 9) + gap + (extra > 1);
     const int barY = tall ? tallBarY : 1, barEnd = tall ? barY + 7 : h - 1, barH = barEnd - barY;
 
     if (tall)
@@ -63,6 +65,7 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
             else if (s == TrackState::Playing)   // play triangle = on, stop square = muted
                 drawMark(x, frameY + 1, v.on[i] ? kMarkPlay : kMarkStop);
             else if (v.blinkOn) drawMark(x, frameY + 1, kMarkDisc);   // recording / overdubbing: blinking disc
+            if (counts && v.layers[i]) drawCount(bits, w, x, frameY + 10, v.layers[i]);
         }
     }
 

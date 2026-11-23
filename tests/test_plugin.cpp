@@ -346,6 +346,31 @@ static void disabledEngineStillPassesDry()                        // Review Focu
     set(kParamDryThru, 0); P().deactivate(); P().activate(); run(P(), s); CHECK(peak(gOut) == 0.0f);
 }
 
+// The loop widget shows each track's layer count from the engine: a count change alone changes the bitmap, so it redraws.
+static std::vector<uint8_t> gBits;
+static void drawStub(ALABS_HMI_WidgetDraw_Handle, ALABS_HMI_Widget, uint16_t, uint16_t, uint16_t w, uint16_t h, const uint8_t* bits)
+{
+    gBits.assign(bits, bits + (w + 7) / 8 * h);
+}
+static bool countRowShows(uint32_t n)   // 40x37: track 1's count at x 1..7, rows 21..25 (0: none)
+{
+    uint8_t ref[5 * 37] = {}; if (n) ouro::drawCount(ref, 40, 1, 21, n);
+    return gBits.size() == sizeof ref && std::memcmp(gBits.data() + 5 * 20, ref + 5 * 20, 5 * 7) == 0;
+}
+static void widgetShowsLayerCounts()
+{
+    static ALABS_HMI_WidgetDraw draw = { sizeof(ALABS_HMI_WidgetDraw), nullptr, drawStub };
+    static const LV2_Feature feature = { ALABS_HMI__WidgetDraw, &draw };
+    static const LV2_Feature* const features[] = { &feature, nullptr };
+    d_nextLv2Features = features; fresh(); d_nextLv2Features = nullptr;
+    const ALABS_HMI_WidgetArea area = { sizeof(area), 40, 37, ALABS_HMI_PixelFormat_Mono1 };
+    static_cast<OuroborosPlugin*>(P().getInstancePointer())->widgetShown("loop", (ALABS_HMI_Widget)0x1, &area);
+    runN(8); CHECK(countRowShows(0));                                   // empty: no count
+    recordBaseAndDub(); CHECK(eng().layerCount(0) == 2 && countRowShows(2));
+    set(kParamUndo, 1); runN(8); set(kParamUndo, 0); runN(1);
+    CHECK(eng().layerCount(0) == 1 && countRowShows(1));
+}
+
 int main()
 {
     d_nextBufferSize = 128;
@@ -378,5 +403,6 @@ int main()
     savedValuesSnapOnLoad();
     reactivateResets();
     disabledEngineStillPassesDry();
+    widgetShowsLayerCounts();
     REPORT();
 }
