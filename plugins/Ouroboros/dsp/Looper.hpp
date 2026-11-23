@@ -103,7 +103,8 @@ public:
             tr.len = tr.pos = tr.phase = 0;
         }
         L_ = pos_ = rec_ = recD_ = 0;
-        recTrack_ = armed_ = pend_ = -1;
+        recTrack_ = armed_ = -1;
+        pend_ = {};
         tp_ = Transport::Running;
         restartQueued_ = false;
         lg_ = LoopGain{};
@@ -114,34 +115,48 @@ public:
         if (!enabled_) { for (uint32_t i = 0; i < n; ++i) out[i] = dry_.next(dryTo, ramp_) * in[i]; return; }
         for (uint32_t i = 0; i < n; ++i) {
             const float x = in[i];                       // read first: in and out may alias
-            if (pend_ >= 0) {                            // a waiting press acts on the line (no grid any more: at once)
+            if (pend_.kind) {                            // the waiting action acts on the line (no grid now: at once)
                 double ph;                               // Sync off: never waiting, so only this test per sample
                 at_ = i;
-                if (!gridPhase(ph) || ph < 1.0) { const int t = pend_; pend_ = -1; pressRec(t); }
+                if (!gridPhase(ph) || ph < 1.0) {
+                    const Pending p = pend_;
+                    pend_ = {};
+                    if (p.kind == Pending::Press) pressRec(p.t);
+                    else if (p.kind == Pending::Arm) fireArm(p.t);
+                    else restart();
+                }
                 at_ = 0;
             }
-            if (armed_ >= 0 && std::fabs(x) >= thr_) {   // the arm fires, back-dated by the pre-roll; x goes in below
+            if (armed_ >= 0 && std::fabs(x) >= thr_) {   // the arm fires; x goes in below
                 const int t = armed_;
-                const uint32_t P = msToSamples(kPreRollMs, sr_);
                 armed_ = -1;
-                if (L_) startDub(tracks_[t], P, false, true, true, true); else startFirst(t, P);
+                at_ = i; fireArm(t); at_ = 0;
             }
-            // Max length: close as if B were pressed, but at once (with a grid, on the last line passed).
-            if (recTrack_ >= 0 && rec_ == maxRec_) { pend_ = -1; at_ = i; closeFirst(recToDub_); at_ = 0; }
+            // Max length: close as if B were pressed, but at once (with a grid, on the last line passed). A press
+            // waiting to close it goes; one waiting on another track starts that track on the next line.
+            if (recTrack_ >= 0 && rec_ == maxRec_) {
+                if (pend_.t == recTrack_) pend_ = {};
+                at_ = i; closeFirst(recToDub_); at_ = 0;
+            }
             for (int u = 0; u < kTracks; ++u) {          // a recording onto the loop at the most whole loops in 5 min:
                 const Track& tr = tracks_[u];            // close as if B were pressed
                 if (tr.state == TrackState::Recording && tr.len == cap_ && tr.pos == maxRec_ / L_ * L_)
                     close(u, recToDub_);
             }
             // The last track went empty and its ramp ended: L resets. Stopped, the gains don't move: empty is enough.
-            // An arm stays: it then starts the first loop.
-            if (L_ && (tp_ == Transport::Stopped ? allEmpty() : idle())) { const int a = armed_; reset(); armed_ = a; }
+            // An arm stays, and so does a track's waiting action: it then starts the first loop.
+            if (L_ && (tp_ == Transport::Stopped ? allEmpty() : idle())) {
+                const int a = armed_; const Pending p = pend_;
+                reset();
+                armed_ = a; if (p.t >= 0) pend_ = p;
+            }
             const uint32_t h = histW_;
             hist_[h] = x;
             if (++histW_ == histLen_) histW_ = 0;
             float y = dry_.next(dryTo, ramp_) * x, used = 0.0f;
             if (recTrack_ >= 0) {                        // first recording: overwrite (reused pages hold old audio)
-                tracks_[recTrack_].buf[rec_] = x * (used = fadeInGain(rec_));   // closeFirst() rewrites the last D
+                // closeFirst() rewrites the last D. After a lead-in (startFirst) the fade-in is done.
+                tracks_[recTrack_].buf[rec_] = x * (used = fadeInGain(rec_ + recLead_));
                 ++rec_;
             } else if (L_ && tp_ != Transport::Stopped) {   // stopped: only the dry path, nothing moves
                 float wet = 0.0f;
@@ -151,7 +166,8 @@ public:
                 for (Track& tr : tracks_) if (writing(tr)) used += writeIn(tr, x, used);   // recording takes the rest
                 if (++pos_ == L_) pos_ = 0;
                 for (Track& tr : tracks_) if (tr.len && ++tr.pos == tr.len) tr.pos = 0;   // every playhead in step
-                if (tp_ == Transport::Stopping && lg_.ended() && !overlap()) park();   // tails and fades done too
+                // Tails and fades done too. A queued restart then asks the grid at this sample.
+                if (tp_ == Transport::Stopping && lg_.ended() && !overlap()) { at_ = i; park(); at_ = 0; }
             }
             histUsed_[h] = used;
             out[i] = softclip(y);
@@ -162,14 +178,16 @@ public:
     // Only one track records at a time: a press while another track records or overdubs first closes that one
     // (to Playing, never Rec->Dub), then does this track's own action. Not running, it only restarts.
     // Auto-record: an empty track arms instead (one at a time). A press cancels the arm; on another track it then acts.
-    // Sync, with a grid: a press that starts or closes the first recording goes on a bar line. Up to kSyncGraceMs after
-    // a line it acts now, back-dated to the line instead of by the trigger latency; earlier, it waits for the next line
-    // (one at a time, like the arm: a press cancels it, and on another track then acts).
+    // Sync, with a grid: a press that starts a recording (first or onto the loop) or closes the first one goes on a bar
+    // line. Up to kSyncGraceMs after a line it acts now, back-dated to the line instead of by the trigger latency;
+    // earlier, it waits for the next line. One action waits at a time, like the arm: a press cancels it, and on another
+    // track then acts (a waiting restart, any press only cancels). An arm's start and a restart go on a line too (see
+    // fireArm() and restart()).
     void pressRec(int t) {
         if (!valid(t)) return;
-        if (pend_ >= 0) {
-            const bool same = pend_ == t;
-            pend_ = -1;
+        if (pend_.kind) {
+            const bool same = pend_.t == t || pend_.kind == Pending::Restart;
+            pend_ = {};
             if (same) return;
         }
         if (tp_ != Transport::Running) { restart(); return; }
@@ -179,10 +197,9 @@ public:
             if (same) return;
         }
         double ph;
-        const bool snap = (recTrack_ >= 0 || (tracks_[t].state == TrackState::Empty && !L_ && !autoRec_))
-                          && gridPhase(ph);
+        const bool snap = (recTrack_ >= 0 || (tracks_[t].state == TrackState::Empty && !autoRec_)) && gridPhase(ph);
         const uint32_t since = snap ? uint32_t(ph) : 0;
-        if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = t; return; }
+        if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = {Pending::Press, t}; return; }
         bool cont = false, offset = true, trim = false;  // cont: the new writer complements the closed one's tail or
         for (int u = 0; u < kTracks; ++u)                // fade, at that one's offset (the first recording has none);
             if (u != t && writing(tracks_[u])) {         // trim: a first loop closed off this press's back-date (a
@@ -204,7 +221,7 @@ public:
     void undo(int t) {
         if (!valid(t)) return;
         if (armed_ >= 0) { armed_ = -1; return; }       // a tap on C cancels the arm, and only that
-        if (pend_ >= 0) { pend_ = -1; return; }         // likewise a press waiting for the line
+        if (pend_.kind) { pend_ = {}; return; }         // likewise an action waiting for the line
         Track& tr = tracks_[t];
         if (tr.state == TrackState::Recording) {         // abort: the track is empty again
             tr.state = TrackState::Empty;
@@ -232,7 +249,8 @@ public:
         if (tr.baseUndone) {
             tr.baseUndone = false;
             tr.state = TrackState::Playing;
-            if (armed_ == t) armed_ = -1;                // an arm is for an empty track only
+            if (armed_ == t) armed_ = -1;                // an arm is for an empty track only, and so is an action
+            if (pend_.t == t) pend_ = {};                // waiting for the line on it
         } else if (tr.undoTop < tr.redoTop && tr.nOps < kMaxPendingOps) {
             addOp(tr, tr.layers[tr.undoTop].d, 1.0f, true, int32_t(tr.undoTop));
             ++tr.undoTop;
@@ -245,28 +263,30 @@ public:
         Track& tr = tracks_[t];
         if (recTrack_ == t) recTrack_ = -1;
         if (armed_ == t) armed_ = -1;
-        if (pend_ == t) pend_ = -1;
+        if (pend_.t == t) pend_ = {};
         dropLayers(tr);                                  // an op still reading a layer keeps it: the ramp-out is smooth
         tr.state = TrackState::Empty;
     }
     void clearAll() { for (int t = 0; t < kTracks; ++t) clearTrack(t); }
 
-    // Closes every writer and cancels an arm or a waiting press, then fades the loops out. Stopping never changes the
-    // loop: the engine parks (see park()) once the fade, every tail and every punch-out fade have ended. Instant:
-    // kRampMs now.
+    // Closes every writer and cancels an arm or a waiting action, then fades the loops out (stopped: it only cancels a
+    // waiting restart). Stopping never changes the loop: the engine parks (see park()) once the fade, every tail and
+    // every punch-out fade have ended. Instant: kRampMs now.
     // EndOfLoop: kRampMs ending where the longest track's pass ends (measured after the closes). A rest of
     // kFadeInMs..kRampMs fades at once over the rest, still ending there; a shorter rest fades over kFadeInMs, and the
     // park then jumps back to the longest track's beginning. Fade: fadeMs (kRampMs..10 s) now,
     // cubic. A second stop cancels a queued restart and, while the loops still sound, cuts to Instant from the current
     // gain. A stop that closes the first recording parks silently in every mode (R7): Instant from loop gain 0.
     void stop(StopMode mode, float fadeMs = 3000.0f) {
-        if (!enabled_ || tp_ == Transport::Stopped) return;
+        if (!enabled_) return;
+        pend_ = {};
+        if (tp_ == Transport::Stopped) return;
         if (tp_ == Transport::Stopping) {
             restartQueued_ = false;
             if (lg_.v > 0.0f) { stopMode_ = StopMode::Instant; lg_.start(false, 0, ramp_); }
             return;
         }
-        armed_ = pend_ = -1;
+        armed_ = -1;
         const bool first = recTrack_ >= 0;
         for (int u = 0; u < kTracks; ++u) if (writing(tracks_[u])) close(u, false);
         if (!L_ || allEmpty()) return;                   // nothing to stop
@@ -287,6 +307,8 @@ public:
         lg_.start(false, wait, len);
     }
     // Stopped: plays again from the top. The track gains did not move while stopped: they snap, and the loops fade in.
+    // With a grid it goes on a line: while MOD plays it waits for the next one (it can't be back-dated, so no grace);
+    // MOD stopped, the loop's own grid is at its top, so at once. Again while it waits: cancelled.
     // Stopping: a pending End of loop or Fade stop is cancelled (the loops ramp back up); otherwise the restart waits
     // for the park.
     void restart() {
@@ -296,6 +318,9 @@ public:
             return;
         }
         if (tp_ != Transport::Stopped) return;
+        if (pend_.kind == Pending::Restart) { pend_ = {}; return; }
+        double ph;
+        if (gridPhase(ph) && ph >= 1.0) { pend_ = {Pending::Restart, -1}; return; }
         tp_ = Transport::Running;
         for (Track& tr : tracks_) tr.gain.snap(target(tr));
         lg_.v = 0.0f;
@@ -324,7 +349,10 @@ public:
     void setTriggerLatencyMs(float ms) { trigMs_ = std::max(0.0f, std::min(ms, kMinLoopMs)); }
     void setRecToDub(bool on) { recToDub_ = on; }
     void setAdvanceMs(float ms) { advMs_ = std::max(0.0f, std::min(ms, 30.0f)); }   // earlier only (R7)
-    void setAutoRec(bool on) { autoRec_ = on; if (!on) armed_ = -1; }   // off: nothing starts by itself
+    void setAutoRec(bool on) {                           // off: nothing starts by itself
+        autoRec_ = on;
+        if (!on) { armed_ = -1; if (pend_.kind == Pending::Arm) pend_ = {}; }
+    }
     void setThresholdDb(float db) {                      // NaN -> -60
         thr_ = std::pow(10.0f, std::max(-60.0f, std::min(db, -10.0f)) / 20.0f);
     }
@@ -372,8 +400,8 @@ public:
     }
     Transport transport() const { return tp_; }
     int armedTrack() const { return armed_; }            // -1: none
-    bool waiting() const { return pend_ >= 0; }          // a press waits for the next bar line
-    int waitingTrack() const { return pend_; }           // its track; -1: none
+    bool waiting() const { return pend_.kind; }          // an action waits for the next bar line
+    int waitingTrack() const { return pend_.t; }         // its track; -1: none, or a restart
     uint32_t bars() const { return L_ ? bars_ : 0; }     // the first loop's bars (1 if recorded without a grid)
     // What L would be if closed now (with a grid: before the rounding to bars). An arm's start can be back-dated less
     // than the close: 0 until rec_ passes recD_.
@@ -471,13 +499,31 @@ private:
         return r > 0.0 && r < bar ? r : 0.0;             // rounding past either end: on the line
     }
 
+    // An arm fires (its threshold crossing, or the line it waited for), back-dated by the pre-roll. With a grid it goes
+    // on a line as a press does: up to kSyncGraceMs after one it starts there, the pre-roll a lead-in just before it;
+    // earlier, it waits for the next line (it is then the waiting action).
+    void fireArm(int t) {
+        const uint32_t P = msToSamples(kPreRollMs, sr_);
+        double ph;
+        const bool grid = gridPhase(ph);
+        const uint32_t since = grid ? uint32_t(ph) : 0;
+        if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = {Pending::Arm, t}; return; }
+        if (L_) startDub(tracks_[t], since + P, false, true, true, true); else startFirst(t, since + P, grid ? P : 0);
+    }
+
     // Back-date by back (<= histLen_): the last back inputs from the history ring become buf[0..back). Without a grid
     // the close is back-dated by the trigger latency recD_ whatever back was (a press: the same; an arm: the pre-roll).
-    void startFirst(int t, uint32_t back) {
+    // lead: the first lead of them are a lead-in before the start line (an arm's pre-roll on a grid). They go aside to
+    // the buffer's end, so buf[0] is the line, and closeFirst() adds them just before the loop's end. The fade-in is
+    // theirs.
+    void startFirst(int t, uint32_t back, uint32_t lead = 0) {
         float* buf = tracks_[t].buf;
-        for (uint32_t i = 0; i < back; ++i)
-            buf[i] = hist_[(histW_ + histLen_ - back + i) % histLen_] * fadeInGain(i);
-        rec_ = back;
+        for (uint32_t i = 0; i < back; ++i) {
+            const float v = hist_[(histW_ + histLen_ - back + i) % histLen_] * fadeInGain(i);
+            buf[i < lead ? cap_ - lead + i : i - lead] = v;
+        }
+        rec_ = back - lead;
+        recLead_ = lead;
         recD_ = msToSamples(trigMs_, sr_);               // <= minLoop_ <= histLen_ (trigMs_ <= kMinLoopMs)
         recTrack_ = t;
         recFree_ = gValid_ && !gPlaying_;
@@ -524,9 +570,10 @@ private:
     // passed (a press past the grace window waited for the next): L is whole bars of the bar length now, counted from
     // the start line, and under one bar (a double press, a stop before the first line) drops the recording. Either way
     // the D samples recorded past L are its tail and playback goes on from r: D is the back-date unless the tempo
-    // changed during the recording. Rounded up past r, there is no tail and the rest plays silence. True if a writer
-    // back-dated as the press was takes exactly the rest (cont); false if dropped, or if the tempo changed: D is then
-    // not that back-date, and the writer has to fade in under the rest instead (trim).
+    // changed during the recording. Rounded up past r, there is no tail and the rest plays silence. A lead-in (see
+    // startFirst) goes just before the loop's end. True if a writer back-dated as the press was takes exactly the rest
+    // (cont); false if dropped, or if the tempo changed: D is then not that back-date, and the writer has to fade in
+    // under the rest instead (trim).
     bool closeFirst(bool toDub) {
         Track& tr = tracks_[recTrack_];
         uint32_t L = recordedSamples(), bars = 1;        // rec_ - recD_, never below 0
@@ -553,14 +600,17 @@ private:
             histUsed_[(histW_ + histLen_ - n + i) % histLen_] = k < T ? float(T - k) / float(T) : 0.0f;
         }
         tr.tailEnd = rec_ >= L && D < T ? T : 0;                      // the rest goes straight in while playing
+        const uint32_t lead = recLead_, z = std::max(rec_, L - lead); // a lead-in covers [L - lead, L)
         if (rec_ < L) {                                 // rounded up: fade out, shares too; a zero op clears the rest
             for (uint32_t i = 0; i < std::min(fadeIn_, rec_); ++i) {
                 const float g = float(i) / float(fadeIn_);
                 tr.buf[rec_ - 1 - i] *= g;
                 histUsed_[(histW_ + histLen_ - 1 - i) % histLen_] *= g;   // fadeIn_ <= histLen_
             }
-            addRaw(tr, rec_, L - rec_, false);                        // (no ops are left on a track while L is unset)
+            std::fill(tr.buf + z, tr.buf + L, 0.0f);                  // [z, L) now, under the lead-in; [r, z) later
+            addRaw(tr, rec_, z - rec_, false);                        // (no ops are left on a track while L is unset)
         }
+        for (uint32_t i = 0; i < lead; ++i) tr.buf[L - lead + i] += tr.buf[cap_ - lead + i];   // just before the top
         L_ = L;
         bars_ = bars;
         // D mod L (D can exceed L), or r if rounded up. After a tempo change during the recording D is not the
@@ -571,7 +621,8 @@ private:
         tr.pos = pos_;
         tr.phase = 0;                                                 // laid out by base phase
         tr.state = TrackState::Playing;
-        tr.gain.snap(target(tr));                                     // no track ramp: the loops fade in instead
+        // No track ramp: the loops fade in instead. Rounded up onto the lead-in's middle, though, the track ramps in.
+        tr.gain.snap(rec_ < L && rec_ + lead > L ? 0.0f : target(tr));
         // Playback starts D past the recording's own fade-in: the loops fade in over the part it skips, the restart's
         // kFadeInMs once D reaches it (R10). D = 0 skips nothing.
         if (D) { lg_.v = 0.0f; lg_.start(true, 0, std::min(D, fadeIn_)); }
@@ -922,7 +973,12 @@ private:
     StopMode stopMode_ = StopMode::Instant;
     bool restartQueued_ = false;     // B during a stop that cannot cancel: restart as soon as the engine parks
     int armed_ = -1;                 // the track auto-record starts at the threshold, else -1
-    int pend_ = -1;                  // Sync: the track whose press waits for the next bar line, else -1
+    struct Pending {                 // Sync: the action waiting for the next bar line: a press or an arm firing on
+        enum Kind : uint8_t { None, Press, Arm, Restart } kind = None;   // track t, or a restart (t -1)
+        int t = -1;
+    };
+    Pending pend_;
+    uint32_t recLead_ = 0;           // first recording: its lead-in before buf[0], kept aside at the buffer's end
     uint32_t bars_ = 1;              // the first loop's bars
     bool sync_ = false, gValid_ = false, gPlaying_ = false;   // Sync = Bars; MOD's grid: usable, transport playing
     bool recFree_ = false;           // the first recording started on the free grid (MOD stopped): it keeps it

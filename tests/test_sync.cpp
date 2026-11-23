@@ -151,11 +151,98 @@ static void theNextWriterFadesInAfterATempoChange() {
     CHECK(peak(slice(mix, 156000, 157280)) < 0.101f);                    // the handed-over stretch is not taken twice
 }
 
+static void recordingOntoTheLoopStartsOnALine() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(std::vector<float>(96000, 0.0f)); r.lp.pressRec(0);   // a silent 1-bar loop
+    r.toPhase(96000 - 1280); r.lp.pressRec(1); CHECK(r.lp.waiting() && r.lp.waitingTrack() == 1);
+    r.silenceSync(1280 + 128); CHECK(r.lp.state(1) == TrackState::Recording && r.lp.trackPosition(1) <= 128);
+    r.feedSync(sine(220, 0.1f, 50000)); r.lp.pressRec(1);                // the close stays immediate
+    CHECK(r.lp.state(1) == TrackState::Playing && r.lp.trackLength(1) == 96000);
+}
+static void autoRecordStartsOnALine() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(std::vector<float>(96000, 0.0f)); r.lp.pressRec(0);
+    r.lp.setAutoRec(true); r.lp.pressRec(1); r.toPhase(1280);
+    r.feedSync(sine(220, 0.2f, 1000));                                   // crosses ~27 ms after the line
+    CHECK(r.lp.state(1) == TrackState::Recording && r.lp.trackPosition(1) >= 1280 && r.lp.trackPosition(1) < 1280 + 1000 + 128);
+}
+static void restartWaitsForTheLineWhileModPlays() {
+    SyncRig r; r.lp.setSync(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(20000);
+    r.lp.stop(ouro::StopMode::Instant); r.silenceSync(2000); CHECK(r.lp.transport() == ouro::Transport::Stopped);
+    r.toPhase(48000); r.lp.pressRec(0);
+    CHECK(r.lp.waiting() && r.lp.transport() == ouro::Transport::Stopped);
+    r.silenceSync(48000 + 128); CHECK(r.lp.transport() == ouro::Transport::Running);
+    r.playing = false; r.lp.stop(ouro::StopMode::Instant); r.silenceSync(2000);
+    r.lp.pressRec(0); CHECK(!r.lp.waiting() && r.lp.transport() == ouro::Transport::Running);   // MOD stopped: at once
+}
+static void syncTurnedOnOverAFreeLoop() {                                // Review Focus 1
+    SyncRig r; r.lp.setTailMs(0); r.playing = false;
+    r.lp.pressRec(0); r.feedSync(std::vector<float>(30000, 0.0f)); r.lp.pressRec(0);   // free, 30000 samples
+    r.lp.setSync(true); r.silenceSync(1280);
+    CHECK(r.lp.bars() == 1 && r.lp.loopLength() == 30000);              // no jump, one bar
+    r.silenceSync((30000 - r.lp.position()) % 30000 + 10000);           // 208 ms into the loop: past the grace
+    r.lp.pressRec(1); CHECK(r.lp.waiting());
+    r.silenceSync(30000 - 10000 + 128); CHECK(r.lp.state(1) == TrackState::Recording);   // at the loop top
+}
+
+// Beyond the brief: auto-record's first loop on MOD's grid. An early crossing waits for the line (the arm becomes the
+// waiting action); the pre-roll is a lead-in: the loop's top is on the line, the pre-roll wraps to its end, no step.
+static void autoRecordFirstLoopKeepsThePreRollAsALeadIn() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.lp.setAutoRec(true); r.silenceSync(128);
+    r.lp.pressRec(0); CHECK(r.lp.armedTrack() == 0);
+    const auto burst = sine(240, 0.1f, 400);                            // two cycles; the line falls on a trough
+    r.toPhase(96000 - 150); r.feedSync(slice(burst, 0, 100));           // crosses 146 samples before the line
+    CHECK(r.lp.waiting() && r.lp.waitingTrack() == 0 && r.lp.armedTrack() == -1 && r.lp.state(0) == TrackState::Empty);
+    r.feedSync(slice(burst, 100, 400)); CHECK(!r.lp.waiting() && r.lp.state(0) == TrackState::Recording);
+    r.silenceSync(96000 - 250 + 640); r.lp.pressRec(0);                 // 13 ms after the next line
+    CHECK(r.lp.loopLength() == 96000 && r.lp.bars() == 1);
+    const auto img = r.loopImage();
+    CHECK(maxAbsDiff(slice(img, 96000 - 150, 96000), slice(burst, 0, 150)) < 1e-6f);   // the pre-roll, at the end
+    CHECK(maxAbsDiff(slice(img, 0, 250), slice(burst, 150, 400)) < 1e-6f);             // from the line, not faded in
+    CHECK(maxStep(wrap(img)) < 1.01f * sineStep(240, 0.1f));
+}
+// Beyond the brief: an arm onto the loop that crosses within the grace keeps everything from the line on, and the
+// pre-roll before it (the brief's test above passes either way).
+static void autoRecordOntoTheLoopKeepsFromTheLine() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(std::vector<float>(96000, 0.0f)); r.lp.pressRec(0);   // a silent 1-bar loop
+    r.lp.setAutoRec(true); r.lp.pressRec(1); r.toPhase(96000 - 480);
+    const auto quiet = sine(240, 0.005f, 480 + 1280);                   // under the threshold: pre-roll and bar start
+    r.feedSync(quiet); r.feedSync(std::vector<float>(1000, 0.2f)); r.lp.pressRec(1);   // crosses 1280 after the line
+    const auto img = r.loopImage();
+    CHECK(maxAbsDiff(slice(img, 96000 - 480 + 144, 96000), slice(quiet, 144, 480)) < 1e-7f);   // past its fade-in
+    CHECK(maxAbsDiff(slice(img, 0, 1280), slice(quiet, 480, 1760)) < 1e-7f);
+}
+// Beyond the brief: B during an Instant stop restarts at the park, which (MOD playing) then waits for the line.
+static void aQueuedRestartWaitsForTheLine() {
+    SyncRig r; r.lp.setSync(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(20000);
+    r.lp.stop(ouro::StopMode::Instant); r.lp.pressRec(0); r.silenceSync(2000);
+    CHECK(r.lp.transport() == ouro::Transport::Stopped && r.lp.waiting() && r.lp.waitingTrack() == -1);
+    r.silenceSync(96000 - 22000 + 128); CHECK(r.lp.transport() == ouro::Transport::Running);
+}
+// Beyond the brief (Task 1's parked finding): the max length closes the first loop on the last line passed; a press
+// waiting on another track survives it and starts that track on the next line.
+static void maxLengthKeepsAPressWaitingOnAnotherTrack() {
+    SyncRig r(1000.0); r.spb = 960.0; r.lp.setSync(true); r.silenceSync(960);   // 1 kHz: max length 300000
+    r.lp.pressRec(0); r.silenceSync(299700);                            // 180 samples past line 312: past the grace
+    r.lp.pressRec(1); CHECK(r.lp.waiting() && r.lp.waitingTrack() == 1);
+    r.silenceSync(600);                                                 // the max length, then 180 short of line 313
+    CHECK(r.lp.loopLength() == 312 * 960 && r.lp.waiting());
+    r.silenceSync(300); CHECK(!r.lp.waiting() && r.lp.state(1) == TrackState::Recording);
+}
+
 int main() {
     earlyPressWaitsForTheLine(); latePressIsBackDatedToTheLine(); pressPastTheGraceWaitsForTheNextLine();
     firstLoopIsWholeBars(); tempoChangeDuringTheFirstRecording(); cancelAWaitingPress(); noGridActsAtOnce();
     syncOffIsUnchanged(); freeGridStartsAtTheFirstPress();
     aFreeGridRecordingKeepsItsGrid(); stopClosesOnTheLastLine(); roundedUpPastTheRecordingIsSilence();
     fractionalBarsKeepTheSeam(); theNextWriterFadesInAfterATempoChange();
+    recordingOntoTheLoopStartsOnALine(); autoRecordStartsOnALine(); restartWaitsForTheLineWhileModPlays();
+    syncTurnedOnOverAFreeLoop();
+    autoRecordFirstLoopKeepsThePreRollAsALeadIn(); autoRecordOntoTheLoopKeepsFromTheLine();
+    aQueuedRestartWaitsForTheLine();
+    maxLengthKeepsAPressWaitingOnAnotherTrack();
     REPORT();
 }
