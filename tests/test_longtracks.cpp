@@ -147,6 +147,35 @@ static void longTrackSeamIsContinuous() {                              // the ov
     CHECK(maxStep(wrap(trackImage(r, 1))) < 2.5f * 2.0f * sineStep(220, 0.1f));
 }
 
+// R7: a close whose playhead lands on recorded audio mid-wave ramps the track in, no step. Block 1: the press lands
+// exactly. The base is silent and the input stops at the close, so the output is the track alone.
+static float stepAround(const Rig& r, size_t at) { return maxStep(slice(r.out, at - 1, at + 2000)); }
+static void aCloseLandingMidWaveRampsIn() {
+    const float bound = 2.5f * sineStep(220, 0.1f);
+    for (int closer : {1, 2}) {                                        // B, a handover: 1.17 loops rounds down
+        Rig r(48000.0, 1); silentBase(r); toPos(r, 6000);
+        r.lp.pressRec(1); r.feed(sine(220, 0.1f, 28000)); r.lp.pressRec(closer);
+        const size_t at = r.out.size(); r.silence(2000);
+        CHECK(r.lp.trackLength(1) == L); CHECK(stepAround(r, at) < bound);
+    }
+    {                                                                  // rounded up into the lead-in: 72 samples before
+        Rig r(48000.0, 1); silentBase(r); r.lp.setTriggerLatencyMs(3.0f);   // two loops, the lead-in is 144
+        auto x = sine(220, 0.1f, 1000 + 2 * L - 72);
+        toPos(r, 6000 - 1000); r.feed(slice(x, 0, 1000));
+        r.lp.pressRec(1); r.feed(slice(x, 1000, x.size())); r.lp.pressRec(1);
+        const size_t at = r.out.size(); r.silence(2000);
+        CHECK(r.lp.trackLength(1) == 2 * L); CHECK(stepAround(r, at) < bound);
+    }
+    {                                                                  // the maximum, 8 kHz: 342 loops of 7000, onto index 0
+        Rig r(8000.0, 1); r.lp.setTailMs(0); recordBase(r, 7000, 0.0f); r.lp.setTriggerLatencyMs(3.0f);
+        const uint32_t pre = 1009, max = 342 * 7000;                   // the press on a crest; the lead-in fades in before it
+        auto x = sine(220, 0.1f, pre + max, 8000.0);
+        r.feed(slice(x, 0, pre)); r.lp.pressRec(1); r.feed(slice(x, pre, x.size()));
+        const size_t at = r.out.size(); r.silence(2000);
+        CHECK(r.lp.trackLength(1) == max); CHECK(stepAround(r, at) < 2.5f * sineStep(220, 0.1f, 8000.0));
+    }
+}
+
 // Track t recorded from base phase `phase`, exactly k loops of a sine (frequency hz, 0.1).
 static void recordLoops(Rig& r, int t, uint32_t phase, uint32_t k, double hz) {
     toPos(r, phase); r.lp.pressRec(t); r.feed(sine(hz, 0.1f, k * L)); r.lp.pressRec(t); r.silence(500);
@@ -243,7 +272,7 @@ int main() {
     roundingCountsFromTheStartPress(); bStopsAtThePress(); handoverAndStopCloseWithTheRule(); maximumClosesAtWholeLoops();
     reusedBufferNeverPlaysOldAudio(); leadInSitsBeforeTheStartOrWrapsToTheEnd(); leadInLongerThanTheLoopWrapsAround();
     autoRecordCanMakeALongTrack();
-    recToDubAfterALongCloseUndoesExactly(); longTrackSeamIsContinuous();
+    recToDubAfterALongCloseUndoesExactly(); longTrackSeamIsContinuous(); aCloseLandingMidWaveRampsIn();
     overdubUndoRedoOnALongTrack(); pendingUndoOnALongTrackSurvivesStop(); parkPutsTheLongestOnItsBeginning();
     endOfLoopWaitsForTheLongest(); twoLongTracksKeepTheirAlignment(); baseUndoRedoOfALongTrackKeepsAlignment();
     tiedLongestKeepTheirOffset(); endOfLoopWaitsForATrackTheStopCloses(); manyOpsThroughShiftingParks();

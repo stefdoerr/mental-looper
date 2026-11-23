@@ -450,6 +450,7 @@ private:
         tr.pos = n % len;
         tr.dub.w = (n + len - a) % len;                 // index n - a, wrapped
         const uint32_t from = len - std::min(b, len);   // the lead-in covers [from, len): all of it if b > len
+        if (n >= from) tr.gain.snap(0.0f);              // the playhead lands on recorded audio, mid-wave: ramp in (R7)
         if (n < len) {                                  // rounded up: [n, len) was never recorded
             const uint32_t z = std::max(n, from);
             std::fill(tr.buf + z, tr.buf + len, 0.0f);  // [z, len) now, under the lead-in; [n, z) on the way
