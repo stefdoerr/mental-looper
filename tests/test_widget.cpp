@@ -287,11 +287,36 @@ static void recordingShowsPassesSoFar()
     CHECK(px(b, 40, 2, 32) == 0 && px(b, 40, 4, 32) == 0 && px(b, 40, 6, 32) == 1);
 }
 
+// Dots and ticks stay inside the bar at any size: rows 0 and h-1 blank, nothing written past the bitmap.
+static void passMarksStayInsideTheBar()
+{
+    const struct { int w, h; } sz[] = { {16, 8}, {8, 8}, {40, 3} };
+    for (auto s : sz)
+        for (bool recording : {true, false})
+        {
+            auto v = view(); v.loopLength = 1000;
+            if (recording) { v.state[0] = TrackState::Recording; v.trackPosition = 30000; }   // 30 passes: dots
+            else { v.state[0] = TrackState::Playing; v.trackLength = 3000; }                   // 3 loops: ticks
+            const size_t bytes = size_t((s.w + 7) / 8) * s.h;
+            uint8_t b[64]; std::memset(b, 0xA5, sizeof b);
+            ouro::renderLoopWidget(v, s.w, s.h, b);
+            bool canary = true; for (size_t i = bytes; i < sizeof b; ++i) canary &= b[i] == 0xA5;
+            CHECK(canary);
+            CHECK(litIn(b, s.w, 0, 0, s.w, 1) == 0 && litIn(b, s.w, 0, s.h - 1, s.w, s.h) == 0);
+        }
+}
+static void passDotsStopAt18()
+{
+    auto v = view(); v.state[0] = TrackState::Recording; v.loopLength = 1000; v.trackPosition = 30000;
+    uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(litIn(b, 40, 1, 32, 39, 33) == 18);
+}
+
 int main()
 {
     sizeIsMono1(); barFillsProportionally(); emptyBarWhenNoLoop(); elapsedShownWhileRecording();
     marksReflectTracks(); selectedFrame(); ringsAroundSymbols(); stateText(); stateTextNotClipped(); tallThreshold(); layoutRows(); shortAreaBarOnly(); topAndBottomRowsBlank();
     stoppedShowsStop(); armedShowsArmAndBlinksItsDot(); everyWidgetStringHasGlyphs();
-    longTrackBarHasPassTicks(); crowdedTicksAreLeftOut(); recordingShowsPassesSoFar();
+    longTrackBarHasPassTicks(); crowdedTicksAreLeftOut(); recordingShowsPassesSoFar(); passMarksStayInsideTheBar(); passDotsStopAt18();
     REPORT();
 }

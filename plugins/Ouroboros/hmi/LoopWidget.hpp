@@ -90,14 +90,15 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
         if (fill > inner) fill = inner;
         if (fill > 0) rect(1, barY + 1, 1 + int(fill), barEnd - 1, true);
         const uint64_t k = v.trackLength / v.loopLength;
-        if (k > 1 && inner / k >= 3)   // a tick per loop boundary: inverts the top inner row
+        // Ticks and dots need an inner row (barH >= 3). Ticks stay in the inner columns by construction (inner / k >= 3).
+        if (k > 1 && inner / k >= 3 && barH >= 3)   // a tick per loop boundary: inverts the top inner row
             for (uint64_t i = 1; i < k; ++i)
             {
                 const int x = 1 + int((2 * inner * i + k) / (2 * k));
                 bits[(barY + 1) * ((w + 7) / 8) + x / 8] ^= uint8_t(0x80 >> (x % 8));
             }
-        if (v.trackLength == 0 && v.state[v.selected] == TrackState::Recording)   // passes so far: inverting dots in the bottom inner row
-            for (uint64_t i = 0, n = v.trackPosition / v.loopLength; i < n && i < 18; ++i)
+        if (v.trackLength == 0 && v.state[v.selected] == TrackState::Recording && barH >= 3)   // passes so far: inverting dots in the bottom inner row
+            for (uint64_t i = 0, n = v.trackPosition / v.loopLength; i < n && i < 18 && 2 + 2 * int(i) < w - 1; ++i)   // inner columns only
             {
                 const int x = 2 + 2 * int(i);
                 bits[(barEnd - 2) * ((w + 7) / 8) + x / 8] ^= uint8_t(0x80 >> (x % 8));
