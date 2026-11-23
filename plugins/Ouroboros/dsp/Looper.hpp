@@ -99,6 +99,7 @@ public:
             wipe(tr);
             tr.state = TrackState::Empty;
             tr.gain.snap(0.0f);
+            tr.len = tr.pos = 0;
         }
         L_ = pos_ = rec_ = recD_ = 0;
         recTrack_ = armed_ = -1;
@@ -136,6 +137,7 @@ public:
                 for (Track& tr : tracks_) used += writeOut(tr, x);   // tails and fades first: the one track
                 for (Track& tr : tracks_) if (writing(tr)) used += writeIn(tr, x, used);   // recording takes the rest
                 if (++pos_ == L_) pos_ = 0;
+                for (Track& tr : tracks_) if (tr.len && ++tr.pos == tr.len) tr.pos = 0;   // every playhead in step
                 if (tp_ == Transport::Stopping && lg_.ended() && !overlap()) park();   // tails and fades done too
             }
             histUsed_[h] = used;
@@ -313,6 +315,12 @@ public:
     uint32_t pendingOps(int t) const { return valid(t) ? tracks_[t].nOps : 0; }
     uint32_t loopLength() const { return L_; }
     uint32_t position() const { return pos_; }
+    // A whole number of loops; 0 once the track is empty with no base kept for redo.
+    uint32_t trackLength(int t) const {
+        return valid(t) && (tracks_[t].state != TrackState::Empty || tracks_[t].baseUndone) ? tracks_[t].len : 0;
+    }
+    // Samples since the track's beginning, the pass start where it started: buffers are laid out by base phase.
+    uint32_t trackPosition(int t) const { return trackLength(t) ? tracks_[t].pos : 0; }
     Transport transport() const { return tp_; }
     int armedTrack() const { return armed_; }            // -1: none
     // What L would be if closed now. An arm's start can be back-dated less than the close: 0 until rec_ passes recD_.
@@ -351,6 +359,9 @@ private:
         uint32_t nOps = 0;
         Writer dub, fade;
         TrackState state = TrackState::Empty;
+        // The track's cycle (a whole number of loops, 0 = none) and playhead in buf. It outlives a clear or an abort
+        // until the next recording or reset(): the ramp-out and the pending ops still read it.
+        uint32_t len = 0, pos = 0;
         uint32_t tailEnd = 0;            // > 0: the input still blends into [pos, tailEnd) on the pass after the close
         Ramp gain;                       // output gain, towards target()
         float volDb = 0.0f, vol = 1.0f;  // volume in dB and linear
@@ -372,7 +383,7 @@ private:
         return true;
     }
     bool overlap() const {                               // some track still takes a share of the input
-        for (const Track& tr : tracks_) if (pos_ < tr.tailEnd || tr.fade.left) return true;
+        for (const Track& tr : tracks_) if (tr.pos < tr.tailEnd || tr.fade.left) return true;
         return false;
     }
 
@@ -414,6 +425,8 @@ private:
         tr.tailEnd = recD_ < T ? T : 0;                               // the rest goes straight in while playing
         L_ = L;
         pos_ = recD_ % L;                                             // D <= histLen_ == minLoop_ <= L
+        tr.len = L;
+        tr.pos = pos_;
         tr.state = TrackState::Playing;
         tr.gain.snap(target(tr));                                     // no track ramp: the loops fade in instead
         // Playback starts D past the recording's own fade-in: the loops fade in over the part it skips, the restart's
@@ -437,16 +450,18 @@ private:
     // that part of its pre-roll (not reachable by foot); take the shares back out on a cancel if that is hit
     void startDub(Track& tr, uint32_t D, bool cont, bool base = false, bool offset = true, bool trim = false) {
         const uint32_t back = D + (offset ? msToSamples(advMs_, sr_) : 0);   // the offset writes behind the playhead
-        if (base) wipe(tr); else clearRedo(tr);          // a stale base or its pending ops never come back
+        if (base) { wipe(tr); tr.len = L_; tr.pos = pos_; }   // a stale base or its pending ops never come back
+        else clearRedo(tr);
+        const uint32_t len = tr.len, p = tr.pos;
         Writer& dub = tr.dub;
         dub = Writer{};
-        dub.w = (pos_ + 2 * L_ - back) % L_;
+        dub.w = (p + 2 * len - back) % len;
         dub.cont = cont;
         dub.offset = offset;
         if (base) {
-            const uint32_t z = std::min(back, L_);
-            for (uint32_t i = 1; i <= z; ++i) tr.buf[(pos_ + L_ - i) % L_] = 0.0f;
-            if (z < L_) { Op& op = tr.ops[tr.nOps++]; op = Op{}; op.zero = true; op.at = pos_; op.len = L_ - z; }
+            const uint32_t z = std::min(back, len);
+            for (uint32_t i = 1; i <= z; ++i) tr.buf[(p + len - i) % len] = 0.0f;
+            if (z < len) { Op& op = tr.ops[tr.nOps++]; op = Op{}; op.zero = true; op.at = p; op.len = len - z; }
         } else {
             dub.layer = int32_t(tr.undoTop);
             Layer& ly = tr.layers[tr.undoTop];
@@ -501,31 +516,31 @@ private:
         float adj = 0.0f;                                // holds back the ops' change during their ramp
         for (uint32_t k = 0; k < tr.nOps;) {
             Op& op = tr.ops[k];
-            if (op.at != pos_) { ++k; continue; }        // a split part waiting for its stretch
+            if (op.at != tr.pos) { ++k; continue; }      // a split part waiting for its stretch
             if (op.zero) {
-                tr.buf[pos_] = 0.0f;
+                tr.buf[tr.pos] = 0.0f;
             } else {
-                const uint32_t off = (pos_ + L_ - op.d.start()) % L_;
+                const uint32_t off = (tr.pos + tr.len - op.d.start()) % tr.len;
                 if (off < op.d.length()) {
                     const float v = op.sign * op.d.read(pool_, op.c, off);
-                    tr.buf[pos_] += v;
+                    tr.buf[tr.pos] += v;
                     if (op.ramp && op.done < ramp_) adj -= v * (1.0f - float(op.done) / float(ramp_));
                 }
             }
-            if (++op.at == L_) op.at = 0;
+            if (++op.at == tr.len) op.at = 0;
             if (++op.done == op.len) endOp(tr, k); else ++k;
         }
         const float g = tr.gain.next(target(tr), ramp_);
-        return g != 0.0f ? g * (tr.buf[pos_] + adj) : 0.0f;
+        return g != 0.0f ? g * (tr.buf[tr.pos] + adj) : 0.0f;
     }
 
     // The outgoing shares of the input: the first recording's tail and the punch-out fade; returns their sum.
     float writeOut(Track& tr, float x) {
         float used = 0.0f;
-        if (pos_ < tr.tailEnd) {                         // tail of the first recording, g: 1 -> 0 over T = tailEnd
-            tr.buf[pos_] += x * float(tr.tailEnd - pos_) / float(tr.tailEnd);
-            used += float(tr.tailEnd - pos_) / float(tr.tailEnd);
-            if (pos_ + 1 == tr.tailEnd) tr.tailEnd = 0;
+        if (tr.pos < tr.tailEnd) {                       // tail of the first recording, g: 1 -> 0 over T = tailEnd
+            tr.buf[tr.pos] += x * float(tr.tailEnd - tr.pos) / float(tr.tailEnd);
+            used += float(tr.tailEnd - tr.pos) / float(tr.tailEnd);
+            if (tr.pos + 1 == tr.tailEnd) tr.tailEnd = 0;
         }
         if (tr.fade.left) {                              // punch-out fade: env -> 0
             const float e = tr.fade.env * float(tr.fade.left) / float(fadeOut_);
@@ -549,7 +564,7 @@ private:
         tr.buf[wr.w] += v;
         if (wr.layer >= 0 && !wr.lost) store(tr, wr, v);
         wr.peak = std::max(wr.peak, std::fabs(v));
-        if (++wr.w == L_) wr.w = 0;
+        if (++wr.w == tr.len) wr.w = 0;
         ++wr.n;
     }
 
@@ -559,7 +574,7 @@ private:
     // ponytail: a punch-out fade that hits a full pool keeps a truncated delta (undo leaves <= 5 ms of fade)
     void store(Track& tr, Writer& wr, float v) {
         // evict() moves layer slots: re-resolve the delta by index after each one
-        if (wr.n >= L_) tr.layers[wr.layer].d.accumulate(pool_, wr.c, wr.n % L_, v);
+        if (wr.n >= tr.len) tr.layers[wr.layer].d.accumulate(pool_, wr.c, wr.n % tr.len, v);
         else {
             while (!tr.layers[wr.layer].d.append(pool_, v))
                 if (!evict()) { wr.lost = true; break; }
@@ -641,8 +656,8 @@ private:
         op = Op{};
         op.d = d;
         op.sign = sign;
-        op.at = pos_;
-        op.len = L_;
+        op.at = tr.pos;
+        op.len = tr.len;
         op.layer = layer;
         op.owns = layer < 0;
         op.ramp = ramp;
@@ -662,7 +677,7 @@ private:
     // before every other op, so the last op in array order still ends last (see dropLayer).
     void park() {
         for (Track& tr : tracks_) {
-            auto wraps = [&](const Op& o) { return o.at != 0 && o.at + (o.len - o.done) > L_; };
+            auto wraps = [&](const Op& o) { return o.at != 0 && o.at + (o.len - o.done) > tr.len; };
             uint32_t w = 0;
             for (uint32_t k = 0; k < tr.nOps; ++k) {
                 tr.ops[k].ramp = false;                  // after a park the playhead only reads applied audio
@@ -676,17 +691,18 @@ private:
                 Op& A = tr.ops[a++];
                 A = o;
                 A.at = 0;
-                A.len = o.at + (o.len - o.done) - L_;
+                A.len = o.at + (o.len - o.done) - tr.len;
                 A.done = 0;
                 A.owns = false;
                 A.c = DeltaCursor{};
                 if (A.layer >= 0) ++tr.layers[A.layer].refs;
-                o.len = L_ - o.at;
+                o.len = tr.len - o.at;
                 o.done = 0;
             }
             tr.nOps += w;
         }
         pos_ = 0;
+        for (Track& tr : tracks_) tr.pos = 0;            // every beginning is at the top
         tp_ = Transport::Stopped;
         if (restartQueued_) { restartQueued_ = false; restart(); }
     }
@@ -711,7 +727,7 @@ private:
     uint32_t histLen_ = 0, histW_ = 0;
     double sr_ = 48000.0;
     uint32_t maxRec_ = 0, minLoop_ = 0, fadeIn_ = 0, fadeOut_ = 0, ramp_ = 0;
-    uint32_t L_ = 0, pos_ = 0;       // shared loop length (0 = unset) and playhead
+    uint32_t L_ = 0, pos_ = 0;       // shared loop length (0 = unset) and base phase (position in the first loop)
     uint32_t rec_ = 0, recD_ = 0;    // first recording: write index and its back-date D
     uint32_t seq_ = 0;               // global layer sequence number (oldest first, across tracks)
     int recTrack_ = -1;              // the track making the first recording (L unset), else -1
