@@ -207,6 +207,20 @@ static void stopDuringAFirstRecordingIsSilent() {                 // Ruling R7: 
     }
 }
 
+static void restartSnapsAMutedTrack() {                           // muted while stopped: no blip at the restart
+    Rig r; baseAndLayer(r); r.lp.stop(StopMode::Instant); r.silence(1000);
+    r.lp.setOn(0, false); r.lp.restart();
+    CHECK(peak(r.capture(4800)) == 0.0f);
+}
+static void bCancelsAnEndOfLoopWait() {
+    Rig r; baseAndLayer(r); auto img = r.loopImage(); toPosition(r, 6000);
+    const uint32_t L = r.lp.loopLength(); const size_t from = r.out.size();
+    r.lp.stop(StopMode::EndOfLoop); r.silence(2000);
+    r.lp.pressRec(0); CHECK(r.lp.transport() == Transport::Running && r.lp.state(0) == ouro::TrackState::Playing);
+    r.silence(4000);
+    CHECK(errFrom(r, from, img, 6000, 6000) < 1e-6f && r.lp.position() == (6000 + 6000) % L);
+}
+
 int main() {
     instantStopFadesOutAndParks(); restartPlaysFromTheTop(); pendingUndoSurvivesStopAndRestart();
     zeroOpSurvivesStopAndRestart(); tailFinishesBeforeParking(); stopRestartTwiceWithinAPass();
@@ -215,6 +229,6 @@ int main() {
     stopClosesWritersAndNeedsALoop();
     endOfLoopStopsAtTheTop(); endOfLoopKeepsAPendingUndoWhole(); endOfLoopLateStopIsClickFree(); secondStopClearsAQueuedRestart();
     fadeFollowsTheCurve(); secondStopCutsAPendingFade(); bDuringAFadeCancelsIt(); bDuringInstantWindowRestartsAfterPark();
-    fadeTimeIsClamped(); stopDuringAFirstRecordingIsSilent();
+    fadeTimeIsClamped(); stopDuringAFirstRecordingIsSilent(); restartSnapsAMutedTrack(); bCancelsAnEndOfLoopWait();
     REPORT();
 }
