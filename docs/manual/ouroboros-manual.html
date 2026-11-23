@@ -335,6 +335,10 @@ B on another track cancels the arm and then does that track&rsquo;s own action.<
 The light shows the track&rsquo;s state: white empty, blinking red recording, blinking green overdubbing, green playing, slowly blinking red armed, and off while stopped.</p>
 <p><b>One-press handover.</b> Press B on another track while one is recording: the running one closes and the new one starts, in the same press.
 This is how you set the loop length from track 1 and start track 2 without a gap.</p>
+<p><b>Long tracks.</b> Record a track over an existing loop and keep playing past the loop end: it becomes 2, 3 or more loops long, up to 5 minutes.
+Press B to stop recording. The length rounds to whole loops, counted from when you started that track. Press within a quarter loop after a whole number of loops and it rounds down: what you played past that point lands on top of the track&rsquo;s beginning, where it falls in time. Press later and it rounds up, and the rest of the last loop is silent. Less than one loop gives one loop.
+A long track stays locked to the first loop. Overdub, undo and redo, on/off, volume and clear work over its whole length.
+Restart (B, or a double-tap on C while stopped) begins the longest track from its start, and every other track keeps its alignment.</p>
 </div>
 <div>
 <h2>Footswitch C (UNDO)</h2>
@@ -361,7 +365,7 @@ If you run the pedal in series instead, switch <b>Dry thru</b> on and it adds yo
 
 <h2>On the Dwarf screen (Starless 19 and later)</h2>
 <p>Ouroboros offers a <b>Loop</b> display widget. In Starless&rsquo; <b>Display</b> dialog, put it in the column above knob 1; it replaces knob 1&rsquo;s own text and keeps the footswitch labels visible.
-It shows the selected track and its state (ARM when that track is armed), a mark per track (a blinking dot for an armed track), and a bar that fills once per pass (elapsed time during the first recording). It needs an area at least 24 pixels tall for the full layout; a shorter area shows the bar only. While stopped it shows STOP (blinking while a stop is still finishing), and B&rsquo;s label reads PLAY.
+It shows the selected track and its state (ARM when that track is armed), a mark per track (a blinking dot for an armed track), and a bar that fills once per pass (elapsed time during the first recording). For a long track the bar covers the whole track, with a small tick at each loop (left out when there are too many), and while a track records past the loop, small dots show how many loops are recorded so far. It needs an area at least 24 pixels tall for the full layout; a shorter area shows the bar only. While stopped it shows STOP (blinking while a stop is still finishing), and B&rsquo;s label reads PLAY.
 Without the widget everything still works, just without the screen. On stock MOD OS the volume knob can be one step off right after you change track.</p>
 
 <h2>Settings</h2>
@@ -374,7 +378,7 @@ Without the widget everything still works, just without the screen. On stock MOD
 <tr><td class="ctl">Undo Budget</td><td>16&ndash;400&nbsp;MB</td><td>200&nbsp;MB</td><td>Memory for undo history. When it runs out the oldest layers stay in the loop but can no longer be undone.</td></tr>
 <tr><td class="ctl">Overdub earlier by</td><td>0&ndash;30&nbsp;ms</td><td>0&nbsp;ms</td><td>Writes overdubs a little earlier. Raise it if your overdubs land slightly late.</td></tr>
 <tr><td class="ctl">Trigger Latency</td><td>0&ndash;50&nbsp;ms</td><td>3&nbsp;ms</td><td>Backs the start of a recording up to make up for the late footswitch press, so the first attack is kept.</td></tr>
-<tr><td class="ctl">Stop Mode</td><td>Instant / End of loop / Fade</td><td>Instant</td><td>How a double-tap on C stops: at once, at the end of the pass, or with a fade. A second double-tap during End of loop or Fade stops at once. B during one of these cancels the stop.</td></tr>
+<tr><td class="ctl">Stop Mode</td><td>Instant / End of loop / Fade</td><td>Instant</td><td>How a double-tap on C stops: at once, at the end of the pass (End of loop waits for the longest track to finish its pass, which can take a while; STOP blinks meanwhile), or with a fade. A second double-tap during End of loop or Fade stops at once. B during one of these cancels the stop.</td></tr>
 <tr><td class="ctl">Fade Time</td><td>0.5&ndash;10&nbsp;s</td><td>3&nbsp;s</td><td>How long the Fade stop takes.</td></tr>
 <tr><td class="ctl">Auto Rec</td><td>off / on</td><td>off</td><td>B on an empty track arms it instead of recording. Recording starts when you play past the Threshold, and keeps the 10&nbsp;ms before it.</td></tr>
 <tr><td class="ctl">Threshold</td><td>&minus;60&hellip;&minus;10&nbsp;dB</td><td>&minus;40&nbsp;dB</td><td>How loud your first note must be to start an armed recording.</td></tr>

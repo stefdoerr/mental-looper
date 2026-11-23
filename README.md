@@ -11,6 +11,7 @@ as much as you like and undo one layer at a time. Built with the
 - Rec / Play / Dub on one footswitch; undo (tap), redo (hold) and stop (double-tap) on another.
 - Optional auto-record: arm a track and it starts on your first note.
 - Click-free loop point, punch in/out, undo, redo and clear.
+- Tracks can be longer than the first loop: keep playing past the end.
 - Per-track volume and on/off. The Dwarf screen shows a progress bar and track states
   (Starless 19 or later).
 - The output is only the loops: wire your dry signal around it, or turn on **Dry thru**.
