@@ -329,9 +329,10 @@ p { margin: 0 0 5px 0; }
 <tr><td>Stopped</td><td>starts every track again from the top</td><td>PLAY</td></tr>
 <tr><td>Auto Rec on, track empty</td><td>arms it: recording starts on your first note</td><td>ARM</td></tr>
 </table>
-<p>B or a tap on C cancels an armed track.</p>
+<p>An arm is cancelled by B on the armed track, a tap on C, a stop, Clear on the armed track, Clear All, or turning Auto Rec off.
+B on another track cancels the arm and then does that track&rsquo;s own action.</p>
 <p>Set <b>After Rec</b> to <i>Rec &gt; Dub</i> to go from recording straight into overdubbing.
-The light shows the track&rsquo;s state: white empty, blinking red recording, blinking green overdubbing, green playing.</p>
+The light shows the track&rsquo;s state: white empty, blinking red recording, blinking green overdubbing, green playing, slowly blinking red armed, and off while stopped.</p>
 <p><b>One-press handover.</b> Press B on another track while one is recording: the running one closes and the new one starts, in the same press.
 This is how you set the loop length from track 1 and start track 2 without a gap.</p>
 </div>
@@ -339,12 +340,13 @@ This is how you set the loop length from track 1 and start track 2 without a gap
 <h2>Footswitch C (UNDO)</h2>
 <table>
 <tr><th>Gesture</th><th>Effect</th></tr>
-<tr><td>Tap</td><td>Undo the newest layer, a moment after you lift your foot (the double-tap window). The label reads <code>-</code> when there is nothing to undo. Keep tapping to peel layers down to the first recording; undoing that empties the track.</td></tr>
+<tr><td>Tap</td><td>Undo the newest layer, a moment after you lift your foot (the double-tap window). The label reads <code>-</code> when there is nothing to undo. Keep tapping to peel layers down to the first recording; undoing that empties the track. Tapping works while stopped too, and there each quick tap undoes one layer.</td></tr>
 <tr><td>Hold</td><td>Redo the layer you just undid. It fires as soon as you pass the hold time, with your foot still down.</td></tr>
-<tr><td>Double-tap</td><td>Stops every track (see Stop Mode). Press B to start again from the top.</td></tr>
-<tr><td>Hold while stopped (twice the hold time)</td><td>Clears everything, including the loop length.</td></tr>
+<tr><td>Double-tap</td><td>Stops every track (see Stop Mode). Press B to start again from the top. This works only while playing.</td></tr>
+<tr><td>Hold while stopped</td><td>Does not redo. Keep holding to twice the hold time to clear everything, including the loop length. You cannot undo this.</td></tr>
 <tr><td>Undo while overdubbing</td><td>Cancels the overdub and plays on.</td></tr>
 <tr><td>Undo during the first recording</td><td>Aborts it. The track is empty again.</td></tr>
+<tr><td>Double-tap during the first recording</td><td>Keeps it as the loop, but stops silently, whatever the Stop Mode. Press B to hear it from the top.</td></tr>
 </table>
 <p>One overdub is one layer, however many passes it ran. Overdubs where you played nothing are dropped, so they cost no undo step.
 Recording or overdubbing again forgets what you could still redo.</p>
@@ -359,7 +361,7 @@ If you run the pedal in series instead, switch <b>Dry thru</b> on and it adds yo
 
 <h2>On the Dwarf screen (Starless 19 and later)</h2>
 <p>Ouroboros offers a <b>Loop</b> display widget. In Starless&rsquo; <b>Display</b> dialog, put it in the column above knob 1; it replaces knob 1&rsquo;s own text and keeps the footswitch labels visible.
-It shows the selected track and its state, a mark per track (ARM for an armed track), and a bar that fills once per pass (elapsed time during the first recording). It needs an area at least 24 pixels tall for the full layout; a shorter area shows the bar only. While stopped it shows STOP (blinking while a stop is still finishing), and B&rsquo;s label reads PLAY.
+It shows the selected track and its state (ARM when that track is armed), a mark per track (a blinking dot for an armed track), and a bar that fills once per pass (elapsed time during the first recording). It needs an area at least 24 pixels tall for the full layout; a shorter area shows the bar only. While stopped it shows STOP (blinking while a stop is still finishing), and B&rsquo;s label reads PLAY.
 Without the widget everything still works, just without the screen. On stock MOD OS the volume knob can be one step off right after you change track.</p>
 
 <h2>Settings</h2>
