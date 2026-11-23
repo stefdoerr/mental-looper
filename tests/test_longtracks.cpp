@@ -147,6 +147,14 @@ static void longTrackSeamIsContinuous() {                              // the ov
     CHECK(maxStep(wrap(trackImage(r, 1))) < 2.5f * 2.0f * sineStep(220, 0.1f));
 }
 
+static void roundedUpSeamFades() {                                     // 1.6 loops, the input goes on past B
+    Rig r; silentBase(r); toPos(r, 6000);
+    auto x = sine(220, 0.1f, 38455 + 2000);                            // B on a crest: a cut there would step
+    r.lp.pressRec(1); r.feed(slice(x, 0, 38455)); r.lp.pressRec(1); r.feed(slice(x, 38455, x.size()));
+    auto img = trackImage(r, 1);                                       // the rest is silent: the recorded ends fade
+    CHECK(r.lp.trackLength(1) == 2 * L && peak(img) > 0.09f && maxStep(wrap(img)) < 2.5f * sineStep(220, 0.1f));
+}
+
 // R7: a close whose playhead lands on recorded audio mid-wave ramps the track in, no step. Block 1: the press lands
 // exactly. The base is silent and the input stops at the close, so the output is the track alone.
 static float stepAround(const Rig& r, size_t at) { return maxStep(slice(r.out, at - 1, at + 2000)); }
@@ -248,7 +256,11 @@ static void manyOpsThroughShiftingParks() {                            // 2 loop
     Rig r; silentBase(r); recordLoops(r, 1, 6000, 2, 220); recordLoops(r, 2, 15000, 3, 330);
     auto img0 = trackImage(r, 1);
     for (int i = 0; i < 25; ++i) { r.lp.pressRec(1); r.feed(sine(550, 0.1f, 1000)); r.lp.undo(1); }   // 25 cancel ops
-    for (int i = 0; i < 4; ++i) { r.silence(3000); r.lp.stop(StopMode::Instant); r.silence(1000); r.lp.restart(); }
+    for (int i = 0; i < 4; ++i) {
+        r.silence(3000); r.lp.stop(StopMode::Instant); r.silence(1000);
+        CHECK(r.lp.pendingOps(1) <= 2 * (ouro::kMaxPendingOps + 1));      // the split parts fit the op slots
+        r.lp.restart();
+    }
     r.lp.pressRec(0); r.feed(sine(330, 0.1f, 2 * L)); r.lp.pressRec(0);   // reuses the blocks the cancels freed
     r.silence(4 * L);
     CHECK(maxAbsDiff(trackImage(r, 1), img0) < 1e-5f && r.lp.pendingOps(1) == 0);
@@ -260,10 +272,30 @@ static void anOwnerEndingFirstHandsItsDeltaOn() {
     auto img0 = trackImage(r, 1);
     r.silence((5 * L - 3860 - r.lp.trackPosition(2)) % (3 * L));
     r.lp.pressRec(1); r.feed(sine(550, 0.1f, 1000)); r.lp.undo(1);     // a cancel op, owning its delta
-    for (int i = 0; i < 2; ++i) { r.silence(5000); r.lp.stop(StopMode::Instant); r.silence(1000); r.lp.restart(); }
+    const uint32_t ops0 = r.lp.pendingOps(1);
+    for (int i = 0; i < 2; ++i) {
+        r.silence(5000); r.lp.stop(StopMode::Instant); r.silence(1000);
+        if (i == 0) CHECK(r.lp.pendingOps(1) > ops0);                 // park 1 split the op: the hand-off is reached
+        r.lp.restart();
+    }
     r.silence(L + 100); r.lp.pressRec(0); r.feed(sine(330, 0.1f, 4096)); r.lp.pressRec(0);   // takes a freed block
     r.silence(2 * L);
     CHECK(maxAbsDiff(trackImage(r, 1), img0) < 1e-5f);
+}
+
+// A one-loop track from 0.9 L closed at 1.2 L: its fold op owes [0, 0.2 L). Stopped at once, the park lands it at
+// 0.1 L (base phase 0) and splits the fold there: the first pass after the restart already hears every sample final.
+static void aFoldSplitByAParkIsHeardFinal() {
+    auto record = [](Rig& r) { silentBase(r); toPos(r, 21600); r.lp.pressRec(1); r.feed(sine(220, 0.1f, 28800)); r.lp.pressRec(1); };
+    Rig a; record(a); a.silence(2 * L); auto want = trackImage(a, 1);   // no stop
+    Rig r; record(r); CHECK(r.lp.trackLength(1) == L && r.lp.pendingOps(1) == 1);
+    r.lp.stop(StopMode::Instant); r.silence(1000);
+    CHECK(r.lp.transport() == Transport::Stopped && r.lp.pendingOps(1) == 2);
+    r.lp.restart(); const uint32_t p0 = r.lp.trackPosition(1);
+    auto heard = r.capture(L);
+    float e = 0.0f;
+    for (uint32_t i = 200; i < L; ++i) e = std::max(e, std::fabs(heard[i] - want[(p0 + i) % L]));   // past the fade-in
+    CHECK(e < 1e-6f && r.lp.pendingOps(1) == 0 && maxAbsDiff(trackImage(r, 1), want) < 1e-6f);
 }
 
 int main() {
@@ -272,10 +304,10 @@ int main() {
     roundingCountsFromTheStartPress(); bStopsAtThePress(); handoverAndStopCloseWithTheRule(); maximumClosesAtWholeLoops();
     reusedBufferNeverPlaysOldAudio(); leadInSitsBeforeTheStartOrWrapsToTheEnd(); leadInLongerThanTheLoopWrapsAround();
     autoRecordCanMakeALongTrack();
-    recToDubAfterALongCloseUndoesExactly(); longTrackSeamIsContinuous(); aCloseLandingMidWaveRampsIn();
+    recToDubAfterALongCloseUndoesExactly(); longTrackSeamIsContinuous(); roundedUpSeamFades(); aCloseLandingMidWaveRampsIn();
     overdubUndoRedoOnALongTrack(); pendingUndoOnALongTrackSurvivesStop(); parkPutsTheLongestOnItsBeginning();
     endOfLoopWaitsForTheLongest(); twoLongTracksKeepTheirAlignment(); baseUndoRedoOfALongTrackKeepsAlignment();
     tiedLongestKeepTheirOffset(); endOfLoopWaitsForATrackTheStopCloses(); manyOpsThroughShiftingParks();
-    anOwnerEndingFirstHandsItsDeltaOn();
+    anOwnerEndingFirstHandsItsDeltaOn(); aFoldSplitByAParkIsHeardFinal();
     REPORT();
 }
