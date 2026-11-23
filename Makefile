@@ -122,6 +122,11 @@ ttl: plugin dpf/utils/lv2_ttl_generator
 	@for sym in undo_redo; do \
 		sed -i "/lv2:symbol \"$$sym\" ;/a\        lv2:portProperty mod:preferMomentaryOnByDefault ;" "$(BUNDLE)/$(BUNDLE_NAME).ttl"; \
 	done
+	@# rangeSteps 133 on the volume ports: MOD's default knob step count, giving a
+	@# 0.5 dB grid from -60 that includes 0 dB. Exact symbol match (volume != volume_1).
+	@for sym in volume volume_1 volume_2 volume_3 volume_4; do \
+		sed -i "/lv2:symbol \"$$sym\" ;/a\        <http://lv2plug.in/ns/ext/port-props#rangeSteps> 133 ;" "$(BUNDLE)/$(BUNDLE_NAME).ttl"; \
+	done
 	@# HMI / widget declarations DPF can't emit (generate-ttl.sh rewrites the
 	@# TTL fresh each build, so this never stacks).
 	sed 's|@PLUGIN_URI@|$(PLUGIN_URI)|' $(PLUGIN_DIR)/hmi.ttl.in >> $(BUNDLE)/$(BUNDLE_NAME).ttl

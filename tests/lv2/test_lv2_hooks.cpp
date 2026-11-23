@@ -218,6 +218,24 @@ static int portIndex(const std::string& ttlPath, const std::string& symbol)
     return -1;
 }
 
+// MOD uses rangeSteps as the knob's default step count: 133 gives a 0.5 dB grid through 0 dB on the volume ports.
+static void onlyVolumePortsHaveRangeSteps(const std::string& ttlPath)
+{
+    std::ifstream ttl(ttlPath);
+    std::string tok, sym, withSteps;
+    while (ttl >> tok)
+    {
+        if (tok == "lv2:symbol") ttl >> sym;
+        else if (tok == "<http://lv2plug.in/ns/ext/port-props#rangeSteps>")
+        {
+            int n = 0;
+            ttl >> n;
+            withSteps += sym + "=" + std::to_string(n) + " ";
+        }
+    }
+    CHECK(withSteps == "\"volume\"=133 \"volume_1\"=133 \"volume_2\"=133 \"volume_3\"=133 \"volume_4\"=133 ");
+}
+
 static void addressedRecGetsLabel(const LV2_Descriptor* d, const std::string& ttlPath)
 {
     gHmiCalls.clear();
@@ -263,5 +281,6 @@ int main(int argc, char** argv)
     widgetShownWithoutDrawFeature(d);
     addressedRecGetsLabel(d, so.substr(0, so.size() - 3) + ".ttl");
     widgetRedrawsWhenProgressMoves(d, so.substr(0, so.size() - 3) + ".ttl");
+    onlyVolumePortsHaveRangeSteps(so.substr(0, so.size() - 3) + ".ttl");
     REPORT();
 }
