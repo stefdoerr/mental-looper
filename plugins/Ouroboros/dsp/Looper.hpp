@@ -116,7 +116,7 @@ public:
                 const int t = armed_;
                 const uint32_t P = msToSamples(kPreRollMs, sr_);
                 armed_ = -1;
-                if (L_) startDub(tracks_[t], P, false, true, true); else startFirst(t, P);
+                if (L_) startDub(tracks_[t], P, false, true, true, true); else startFirst(t, P);
             }
             if (recTrack_ >= 0 && rec_ == maxRec_) closeFirst(recToDub_);   // max length: close as if B were pressed
             // The last track went empty and its ramp ended: L resets. Stopped, the gains don't move: empty is enough.
@@ -425,8 +425,12 @@ private:
     // buffer reads as silence: the positions behind the playhead are zeroed now, the rest by a zero op ahead of it.
     // offset: written at the Offset. A cont writer takes the offset of the one it complements, so a one-press chain
     // stays aligned: none after the first recording (Rec->Dub, handover before L), which has no offset.
+    // trim: an arm's pre-roll. Its start is apart from the press that closed the last writer, so it always takes only
+    // the history's remaining share: it never re-records input that writer took, whether or not its tail still runs.
     // ponytail: the zero op does not ramp; a re-record within kRampMs of a clear or base undo cuts that ramp-out
-    void startDub(Track& tr, uint32_t D, bool cont, bool base = false, bool offset = true) {
+    // ponytail: a cancel or abort leaves its shares in the history; an arm firing within the pre-roll after one trims
+    // that part of its pre-roll (not reachable by foot); take the shares back out on a cancel if that is hit
+    void startDub(Track& tr, uint32_t D, bool cont, bool base = false, bool offset = true, bool trim = false) {
         const uint32_t back = D + (offset ? msToSamples(advMs_, sr_) : 0);   // the offset writes behind the playhead
         if (base) wipe(tr); else clearRedo(tr);          // a stale base or its pending ops never come back
         Writer& dub = tr.dub;
@@ -446,10 +450,11 @@ private:
             ly.refs = 0;
         }
         tr.state = base ? TrackState::Recording : TrackState::Overdubbing;   // first: evict() counts the new slot
-        const bool split = overlap();                    // else the history's shares are stale
-        // ponytail: with D > 5 ms (the punch-out fade), a DUB after the last fade ended but within D of its PLAY
-        // back-dates inputs the closed layer already took in full (split is false): they double. Not reachable by
-        // foot at the 3 ms default (MIDI/automation only); fix by back-dating only the trailing zero-share inputs.
+        const bool split = trim || overlap();            // a press: else the history's shares may be stale (a cancel)
+        // ponytail: a press within D of a close whose tail or punch-out fade has already ended (D > 5 ms, or Tail <= D
+        // on the first loop) back-dates inputs the closed writer already took (split is false): they double. Not
+        // reachable by foot at the 3 ms default (MIDI/automation only); fix by trimming presses as well, once a cancel
+        // takes its shares back out of the history. An arm always trims.
         for (uint32_t i = 0; i < D; ++i) {
             const uint32_t k = (histW_ + histLen_ - D + i) % histLen_;
             const float rest = std::max(0.0f, 1.0f - histUsed_[k]);

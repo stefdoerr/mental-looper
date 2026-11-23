@@ -76,9 +76,32 @@ static void armEdgeCases() {
     { Rig r; r.lp.setAutoRec(true); r.lp.pressRec(0); r.lp.setAutoRec(false);           // Auto Rec off: the arm goes
       CHECK(r.lp.armedTrack() == -1); r.feed(quietThenCos(0, 2400)); CHECK(r.lp.state(0) == TrackState::Empty); }
 }
+// R6: a fire right after a close must not re-record what the closed writer took. DC 0.2, trigger 3 ms, tail 0 (none
+// runs past the close). One loud sample fires the arm, then silence: the seam must read the base's 0.2 alone.
+static void armAfterAFirstLoopCloseKeepsTheSeamFlat() {
+    Rig r; r.lp.setTailMs(0); r.lp.setTriggerLatencyMs(3.0f);
+    r.lp.pressRec(0); r.feed(std::vector<float>(24064, 0.2f));
+    r.lp.setAutoRec(true); r.lp.pressRec(1);                         // closes track 0, arms track 1
+    std::vector<float> x(4800, 0.0f); x[0] = 0.2f; r.feed(x);         // fires on the next sample
+    r.lp.pressRec(1); auto img = r.settle(); const uint32_t L = r.lp.loopLength();
+    float e = 0.0f; for (uint32_t i = L - 600; i < L + 144; ++i) e = std::max(e, std::fabs(img[i % L] - 0.2f));
+    CHECK(e < 1e-5f);                                                 // doubled: 0.40 at L-100
+}
+static void armAfterAnOverdubCloseKeepsTheSeamFlat() {
+    Rig r; r.lp.setTailMs(0); r.lp.setTriggerLatencyMs(3.0f); recordBase(r, 24064, 0.0f);
+    const uint32_t L = r.lp.loopLength();
+    r.lp.pressRec(0); r.feed(std::vector<float>(4800, 0.2f)); const uint32_t c = r.lp.position();
+    r.lp.setAutoRec(true); r.lp.pressRec(1);                         // closes the overdub at c, arms track 1
+    std::vector<float> x(4800, 0.0f); std::fill(x.begin(), x.begin() + 330, 0.005f); x[330] = 0.2f;
+    r.feed(x);                                                        // fires 6.9 ms after the press, past the fade
+    r.lp.pressRec(1); auto img = r.settle();
+    float e = 0.0f; for (uint32_t i = 1; i <= 1000; ++i) e = std::max(e, std::fabs(img[(c + L - i) % L] - 0.2f));
+    CHECK(e < 1e-5f);                                                 // doubled: 0.39 at c-10
+}
 int main() {
     armsInsteadOfRecording(); startsAtTheCrossingWithPreRoll(); closeStaysBackDatedByTriggerLatency();
     armsAnEmptyTrackOnTheLoop(); cancelPaths(); armingClosesARunningOverdub(); armingHandsOverAFirstRecording();
     thresholdIsASetting(); armEdgeCases();
+    armAfterAFirstLoopCloseKeepsTheSeamFlat(); armAfterAnOverdubCloseKeepsTheSeamFlat();
     REPORT();
 }
