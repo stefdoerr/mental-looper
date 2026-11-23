@@ -118,11 +118,44 @@ static void fractionalBarsKeepTheSeam() {                                // L is
     CHECK(*std::min_element(img.begin(), img.end()) > 0.099f);          // no dip at the seam
 }
 
+// After a tempo change the close does not match the next writer's back-date: that writer fades in under what is left,
+// with no step, whether it is another track's recording or the Rec->Dub layer. DC in, so any step is a click.
+static std::vector<float> afterTempoChange(double spb2, uint32_t late, bool handover, bool toDub, bool alone = true) {
+    SyncRig r; r.lp.setSync(true); r.lp.setRecToDub(toDub);
+    const std::vector<float> dc(300000, 0.1f);
+    r.lp.pressRec(0); r.feedSync(slice(dc, 0, 96000));
+    if (spb2 != 96000.0) { r.spb = spb2; r.phase = 0.0; }               // the tempo changes on a line
+    r.feedSync(slice(dc, 0, uint32_t(spb2) + late)); r.lp.pressRec(handover ? 1 : 0);   // close, 'late' after the line
+    const uint32_t L = r.lp.loopLength();
+    r.feedSync(slice(dc, 0, L / 2));
+    if (handover || toDub) r.lp.pressRec(handover ? 1 : 0);             // close the new writer
+    r.feedSync(slice(dc, 0, 2000));                                     // the input goes on: its punch-out fades it
+    if (handover && alone) r.lp.setOn(0, false);                        // track 1 alone
+    r.silenceSync(L + 20000);
+    return r.loopImage();
+}
+static void theNextWriterFadesInAfterATempoChange() {
+    const float smooth = 0.002f;                                         // DC 0.1 over a 3 ms fade: 0.0007 a sample
+    for (uint32_t late : {0u, 1280u}) {
+        CHECK(maxStep(wrap(afterTempoChange(96000.0, late, true, false))) < smooth);   // control: no tempo change
+        CHECK(maxStep(wrap(afterTempoChange(80000.0, late, true, false))) < smooth);   // rounded down: 2 bars
+        CHECK(maxStep(wrap(afterTempoChange(60000.0, late, true, false))) < smooth);   // rounded up: 3 bars
+        for (double spb2 : {80000.0, 60000.0}) {                        // the Rec->Dub layer alone
+            const auto a = afterTempoChange(spb2, late, false, true), b = afterTempoChange(spb2, late, false, false);
+            std::vector<float> layer(a.size());
+            for (size_t i = 0; i < a.size(); ++i) layer[i] = a[i] - b[i];
+            CHECK(peak(layer) > 0.09f && maxStep(wrap(layer)) < smooth);
+        }
+    }
+    const auto mix = afterTempoChange(60000.0, 1280, true, false, false);   // rounded up, track 0 still on
+    CHECK(peak(slice(mix, 156000, 157280)) < 0.101f);                    // the handed-over stretch is not taken twice
+}
+
 int main() {
     earlyPressWaitsForTheLine(); latePressIsBackDatedToTheLine(); pressPastTheGraceWaitsForTheNextLine();
     firstLoopIsWholeBars(); tempoChangeDuringTheFirstRecording(); cancelAWaitingPress(); noGridActsAtOnce();
     syncOffIsUnchanged(); freeGridStartsAtTheFirstPress();
     aFreeGridRecordingKeepsItsGrid(); stopClosesOnTheLastLine(); roundedUpPastTheRecordingIsSilence();
-    fractionalBarsKeepTheSeam();
+    fractionalBarsKeepTheSeam(); theNextWriterFadesInAfterATempoChange();
     REPORT();
 }

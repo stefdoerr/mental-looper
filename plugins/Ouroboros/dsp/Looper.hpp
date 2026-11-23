@@ -183,18 +183,19 @@ public:
                           && gridPhase(ph);
         const uint32_t since = snap ? uint32_t(ph) : 0;
         if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = t; return; }
-        bool cont = false, offset = true;                // cont: the new writer complements the closed one's tail or
-        for (int u = 0; u < kTracks; ++u)                // fade, at that one's offset (the first recording has none)
-            if (u != t && writing(tracks_[u])) {
-                const bool first = recTrack_ == u;
+        bool cont = false, offset = true, trim = false;  // cont: the new writer complements the closed one's tail or
+        for (int u = 0; u < kTracks; ++u)                // fade, at that one's offset (the first recording has none);
+            if (u != t && writing(tracks_[u])) {         // trim: a first loop closed off this press's back-date (a
+                const bool first = recTrack_ == u;       // tempo change, see closeFirst): it fades in under the rest
                 cont = close(u, false);
-                offset = !cont || (!first && tracks_[u].fade.offset);
+                offset = !first && (!cont || tracks_[u].fade.offset);
+                trim = first && !cont;
             }
         Track& tr = tracks_[t];
         if (tr.state == TrackState::Empty && autoRec_) { armed_ = t; return; }
         const uint32_t D = snap ? since : msToSamples(trigMs_, sr_);
         switch (tr.state) {
-        case TrackState::Empty:   if (L_) startDub(tr, D, cont, true, offset); else startFirst(t, D); break;
+        case TrackState::Empty:   if (L_) startDub(tr, D, cont, true, offset, trim); else startFirst(t, D); break;
         case TrackState::Playing: startDub(tr, D, cont, false, offset); break;
         default:                  close(t, recToDub_); break;
         }
@@ -523,11 +524,13 @@ private:
     // passed (a press past the grace window waited for the next): L is whole bars of the bar length now, counted from
     // the start line, and under one bar (a double press, a stop before the first line) drops the recording. Either way
     // the D samples recorded past L are its tail and playback goes on from r: D is the back-date unless the tempo
-    // changed during the recording. Rounded up past r, there is no tail and the rest plays silence. True if it has a
-    // tail.
+    // changed during the recording. Rounded up past r, there is no tail and the rest plays silence. True if a writer
+    // back-dated as the press was takes exactly the rest (cont); false if dropped, or if the tempo changed: D is then
+    // not that back-date, and the writer has to fade in under the rest instead (trim).
     bool closeFirst(bool toDub) {
         Track& tr = tracks_[recTrack_];
         uint32_t L = recordedSamples(), bars = 1;        // rec_ - recD_, never below 0
+        bool exact = true;                               // D is the press's back-date
         double ph;
         if (gridPhase(ph)) {
             const uint32_t span = rec_ - std::min(rec_, uint32_t(ph));   // up to the last line
@@ -537,6 +540,7 @@ private:
             // held): round(bars x spb) can be a sample past a waited close, which would leave no tail, only a dip
             const double b = bars * spb_;
             L = span < minLoop_ ? 0 : std::fabs(span - b) < 2.0 ? span : uint32_t(std::lround(b));
+            exact = L == span;
         }
         recTrack_ = -1;
         if (L < minLoop_) { tr.state = TrackState::Empty; return false; }   // an accidental double press
@@ -549,8 +553,12 @@ private:
             histUsed_[(histW_ + histLen_ - n + i) % histLen_] = k < T ? float(T - k) / float(T) : 0.0f;
         }
         tr.tailEnd = rec_ >= L && D < T ? T : 0;                      // the rest goes straight in while playing
-        if (rec_ < L) {                                               // rounded up: fade out, a zero op clears the rest
-            for (uint32_t i = 0; i < std::min(fadeIn_, rec_); ++i) tr.buf[rec_ - 1 - i] *= float(i) / float(fadeIn_);
+        if (rec_ < L) {                                 // rounded up: fade out, shares too; a zero op clears the rest
+            for (uint32_t i = 0; i < std::min(fadeIn_, rec_); ++i) {
+                const float g = float(i) / float(fadeIn_);
+                tr.buf[rec_ - 1 - i] *= g;
+                histUsed_[(histW_ + histLen_ - 1 - i) % histLen_] *= g;   // fadeIn_ <= histLen_
+            }
             addRaw(tr, rec_, L - rec_, false);                        // (no ops are left on a track while L is unset)
         }
         L_ = L;
@@ -567,8 +575,11 @@ private:
         // Playback starts D past the recording's own fade-in: the loops fade in over the part it skips, the restart's
         // kFadeInMs once D reaches it (R10). D = 0 skips nothing.
         if (D) { lg_.v = 0.0f; lg_.start(true, 0, std::min(D, fadeIn_)); }
-        if (toDub) startDub(tr, n, true, false, false);               // Rec->Dub: the tail input splits g / 1-g
-        return T > 0;
+        // Rec->Dub: back-dated over the inputs whose share histUsed_ now holds, D (rounded up: the fade-out's length).
+        // Within the history it takes exactly the rest (the tail input splits g / 1-g); past it, it fades in (trim).
+        const uint32_t b = rec_ < L ? std::min(fadeIn_, rec_) : D;
+        if (toDub) startDub(tr, std::min(b, histLen_), b <= histLen_, false, false, b > histLen_);
+        return T > 0 && exact;
     }
 
     // Punch-in, back-dated by D: the last D inputs go to the D positions before the write position.
@@ -581,6 +592,7 @@ private:
     // stays aligned: none after the first recording (Rec->Dub, handover before L), which has no offset.
     // trim: an arm's pre-roll. Its start is apart from the press that closed the last writer, so it always takes only
     // the history's remaining share: it never re-records input that writer took, whether or not its tail still runs.
+    // Likewise a writer after a first loop whose close did not match its back-date (closeFirst): it fades in under it.
     // ponytail: the zeroing does not ramp; a re-record within kRampMs of a clear or base undo cuts that ramp-out
     // ponytail: a cancel or abort leaves its shares in the history; an arm firing within the pre-roll after one trims
     // that part of its pre-roll (not reachable by foot); take the shares back out on a cancel if that is hit
