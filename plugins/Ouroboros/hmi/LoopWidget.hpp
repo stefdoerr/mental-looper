@@ -24,37 +24,39 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
                 if (fill || x == x0 || x == x1 - 1 || y == y0 || y == y1 - 1) setPixel(bits, w, x, y);
     };
 
-    const auto drawMark = [&](int x, const uint8_t* g) {   // 7x7 glyph at rows 11..17
+    const auto drawMark = [&](int x, int y, const uint8_t* g) {   // 7x7 glyph, one row below the frame top
         for (int r = 0; r < 7; ++r)
             for (int c = 0; c < 7; ++c)
-                if (g[r] & (0x40 >> c)) setPixel(bits, w, x + c, 11 + r);
+                if (g[r] & (0x40 >> c)) setPixel(bits, w, x + c, y + r);
     };
 
     const auto clearPixel = [&](int x, int y) { bits[y * ((w + 7) / 8) + x / 8] &= uint8_t(~(0x80 >> (x % 8))); };
 
-    // Rows 0 and h-1 stay blank (padding). Tall: text row 1.., marks rows 11..17 (selected one framed, rows 10..18), 7-row bar at rows h-8..h-2.
-    // Below 27 rows the bar (starting at h-8) would touch the frame (ending at row 18), so use the short layout:
-    // the bar alone at rows 1..h-2.
+    // Rows 0 and h-1 stay blank. Tall: text (7 rows), marks band (9-row frame, 7x7 marks inside) and 7-row bar, with the
+    // free rows split into 4 gaps (top, text->marks, marks->bar, bottom): remainder to the two middle gaps first, then the bottom.
+    // Below 27 rows the four gaps would drop under 1 row, so use the short layout: the bar alone at rows 1..h-2.
     const bool tall = h >= 27;
-    const int barY = tall ? h - 8 : 1, barH = h - 1 - barY;
+    const int freeRows = h - 23, gap = freeRows / 4, extra = freeRows % 4;
+    const int textY = gap, frameY = textY + 7 + gap + (extra > 0), tallBarY = frameY + 9 + gap + (extra > 1);
+    const int barY = tall ? tallBarY : 1, barEnd = tall ? barY + 7 : h - 1, barH = barEnd - barY;
 
     if (tall)
     {
         static const char* const names[] = { "--", "REC", "PLAY", "DUB" };   // by TrackState: Empty, Recording, Playing, Overdubbing
         char t[3] = { 'T', char('1' + v.selected), '\0' };
-        drawText(bits, w, 0, 1, t);
-        drawText(bits, w, 14, 1, names[int(v.state[v.selected])]);
+        drawText(bits, w, 0, textY, t);
+        drawText(bits, w, 14, textY, names[int(v.state[v.selected])]);
 
         const int cell = w / kTracks;
         for (int i = 0; i < kTracks; ++i)
         {
             const int x = i * cell + (cell - 7) / 2;
             const TrackState s = v.state[i];
-            if (i == v.selected) rect(x - 1, 10, x + 8, 19, false);   // 9x9 frame round the selected mark, always drawn
-            if (s == TrackState::Empty) rect(x + 2, 13, x + 5, 16, true);
+            if (i == v.selected) rect(x - 1, frameY, x + 8, frameY + 9, false);   // 9x9 frame round the selected mark, always drawn
+            if (s == TrackState::Empty) rect(x + 2, frameY + 3, x + 5, frameY + 6, true);
             else if (s == TrackState::Playing)   // play triangle = on, stop square = muted
-                drawMark(x, v.on[i] ? kMarkPlay : kMarkStop);
-            else if (v.blinkOn) drawMark(x, kMarkDisc);   // recording / overdubbing: blinking disc
+                drawMark(x, frameY + 1, v.on[i] ? kMarkPlay : kMarkStop);
+            else if (v.blinkOn) drawMark(x, frameY + 1, kMarkDisc);   // recording / overdubbing: blinking disc
         }
     }
 
@@ -71,13 +73,13 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
         for (int x = 0; x < w; ++x) { clearPixel(x, 0); clearPixel(x, h - 1); }
         return bytes;
     }
-    rect(0, barY, w, h - 1, false);
+    rect(0, barY, w, barEnd, false);
     if (v.loopLength > 0)
     {
         const uint64_t inner = w > 2 ? w - 2 : 0;
         uint64_t fill = (inner * v.position + v.loopLength / 2) / v.loopLength;
         if (fill > inner) fill = inner;
-        if (fill > 0) rect(1, barY + 1, 1 + int(fill), h - 2, true);
+        if (fill > 0) rect(1, barY + 1, 1 + int(fill), barEnd - 1, true);
     }
     return bytes;
 }
