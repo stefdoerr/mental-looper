@@ -131,9 +131,18 @@ static void endOfLoopKeepsAPendingUndoWhole() {
     r.lp.restart(); CHECK(maxAbsDiff(r.settle(), base) < 1e-5f);
 }
 static void endOfLoopLateStopIsClickFree() {
-    Rig r; baseAndLayer(r); toPosition(r, r.lp.loopLength() - 50);   // 50 samples before the top
+    Rig r; auto in = sine(220, 0.1f, 48000);                          // smooth seam: the default tail folds the real continuation
+    r.lp.pressRec(0); r.feed(slice(in, 0, 24064)); r.lp.pressRec(0);
+    r.feed(slice(in, 24064, 24064 + 4800)); r.settle();
+    toPosition(r, r.lp.loopLength() - 10);                            // 10 samples before the top
     const size_t from = r.out.size() - 1; r.lp.stop(StopMode::EndOfLoop); r.silence(4800);
-    CHECK(r.lp.transport() == Transport::Stopped && maxStep(slice(r.out, from, r.out.size())) < kBound);
+    CHECK(r.lp.transport() == Transport::Stopped);
+    CHECK(maxStep(slice(r.out, from, r.out.size())) < 2.5f * sineStep(220, 0.1f) + 3.0f * 0.1f / 144.0f);
+}
+static void secondStopClearsAQueuedRestart() {
+    Rig r; baseAndLayer(r); r.lp.stop(StopMode::Fade, 3000.0f); r.lp.restart();   // cancels (not queued)
+    r.lp.stop(StopMode::Instant); r.lp.restart(); r.lp.stop(StopMode::Instant);   // queued, then cleared
+    r.silence(4800); CHECK(r.lp.transport() == Transport::Stopped);
 }
 // Track 0 holds a constant 0.5, settled. Tail 0 is a 144-sample crossfade: feeding 0.5 through it keeps the start flat.
 static void constantLoop(Rig& r) {
@@ -178,7 +187,7 @@ int main() {
     restartAfterASplitIsClickFree();
     undoWhileStoppedAppliesFromTheTop(); clearedWhileStoppedResets(); bWhileStoppedOnlyRestarts();
     stopClosesWritersAndNeedsALoop();
-    endOfLoopStopsAtTheTop(); endOfLoopKeepsAPendingUndoWhole(); endOfLoopLateStopIsClickFree();
+    endOfLoopStopsAtTheTop(); endOfLoopKeepsAPendingUndoWhole(); endOfLoopLateStopIsClickFree(); secondStopClearsAQueuedRestart();
     fadeFollowsTheCurve(); secondStopCutsAPendingFade(); bDuringAFadeCancelsIt(); bDuringInstantWindowRestartsAfterPark();
     REPORT();
 }

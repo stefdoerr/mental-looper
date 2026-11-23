@@ -204,7 +204,7 @@ public:
 
     // Closes every writer, then fades the loops out. Stopping never changes the loop: the engine parks at the top once
     // the fade, every tail and every punch-out fade have ended. Instant: kRampMs now. EndOfLoop: kRampMs ending at the
-    // top (a shorter rest fades over the rest, ending at the top). Fade: fadeMs now, cubic. A second stop while the loops still
+    // top (a shorter rest fades at once over max(rest, kFadeInMs); the park then jumps back to the top). Fade: fadeMs now, cubic. A second stop while the loops still
     // sound cuts to Instant from the current gain.
     void stop(StopMode mode, float fadeMs = 3000.0f) {
         if (!enabled_ || tp_ == Transport::Stopped) return;
@@ -220,7 +220,7 @@ public:
         uint32_t wait = 0, len = ramp_;
         if (mode == StopMode::EndOfLoop) {
             const uint32_t r = L_ - pos_;
-            if (r > ramp_) wait = r - ramp_; else len = r;                 // ends at the top: the loop's own seam is then silent
+            if (r > ramp_) wait = r - ramp_; else len = std::max(r, fadeIn_);
         } else if (mode == StopMode::Fade) {
             len = std::min(std::max(msToSamples(fadeMs, sr_), ramp_), msToSamples(10000.0f, sr_));
         }
