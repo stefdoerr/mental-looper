@@ -65,6 +65,8 @@ static void waitingBlinksFastInTheComingColour()
           && lastLed(A1).on == LV2_HMI_LED_Blink_Fast && lastLed(A1).off == LV2_HMI_LED_Blink_Fast);
     b.update(wait(TrackState::Playing, NextAction::Dub, Transport::Stopped));   // a restart: green, label PLAY
     CHECK(lastLabel(A1) == "PLAY" && lastLed(A1).colour == LV2_HMI_LED_Colour_Green && lastLed(A1).on == LV2_HMI_LED_Blink_Fast);
+    b.update(wait(TrackState::Empty, NextAction::Rec, Transport::Stopped));   // a restart over an empty selected track: green
+    CHECK(lastLabel(A1) == "PLAY" && lastLed(A1).colour == LV2_HMI_LED_Colour_Green && lastLed(A1).on == LV2_HMI_LED_Blink_Fast);
     b.update(wait(TrackState::Empty, NextAction::Rec, Transport::Running, true));   // a waiting arm: red, fast
     CHECK(lastLabel(A1) == "ARM" && lastLed(A1).colour == LV2_HMI_LED_Colour_Red && lastLed(A1).on == LV2_HMI_LED_Blink_Fast);
     b.update(view(TrackState::Recording, NextAction::Play));     // the wait is over: the state colour again

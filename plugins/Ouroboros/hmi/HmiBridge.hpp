@@ -85,7 +85,7 @@ private:
                     : v.state == TrackState::Recording ? LV2_HMI_LED_Colour_Red : LV2_HMI_LED_Colour_Green;
                 int t = blink ? LV2_HMI_LED_Blink_Mid : LV2_HMI_LED_Blink_None;
                 LV2_HMI_LED_Colour col = c;
-                if (v.waiting) { col = v.next == NextAction::Rec ? LV2_HMI_LED_Colour_Red : LV2_HMI_LED_Colour_Green; t = LV2_HMI_LED_Blink_Fast; }
+                if (v.waiting) { col = v.next == NextAction::Rec && v.transport == Transport::Running ? LV2_HMI_LED_Colour_Red : LV2_HMI_LED_Colour_Green; t = LV2_HMI_LED_Blink_Fast; }
                 else if (v.armed) { col = LV2_HMI_LED_Colour_Red; t = LV2_HMI_LED_Blink_Slow; }
                 else if (v.transport == Transport::Stopped) { col = LV2_HMI_LED_Colour_Off; t = LV2_HMI_LED_Blink_None; }
                 wc_->set_led_with_blink(wc_->handle, a, col, t, t);

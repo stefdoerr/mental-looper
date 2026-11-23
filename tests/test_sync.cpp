@@ -309,6 +309,17 @@ static void userWaitingIsAPressAnArmOrARestartNotARetrigger() {
     s.toPhase(48000); s.lp.pressRec(0);
     CHECK(s.lp.userWaiting(0) && s.lp.userWaiting(2));                 // a restart waits for every track
 }
+static void aWaitingArmIsUserWaiting() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(std::vector<float>(96000, 0.0f)); r.lp.pressRec(0);
+    r.lp.setAutoRec(true); r.lp.pressRec(1); r.toPhase(7680);            // 160 ms after the line: past the grace
+    r.feedSync(sine(220, 0.2f, 128));                                    // crosses the threshold
+    CHECK(r.lp.waiting() && r.lp.userWaiting(1) && !r.lp.userWaiting(0) && r.lp.state(1) == TrackState::Empty);
+    SyncRig q; q.lp.setSync(true); q.toPhase(0);                         // a lone retrigger while running
+    q.lp.pressRec(0); q.feedSync(sine(220, 0.1f, 96000)); q.lp.pressRec(0); q.silenceSync(10000);
+    q.phase = 30000.0; q.lp.modStarted(false); q.silenceSync(128);
+    CHECK(q.lp.waiting() && !q.lp.userWaiting(0) && !q.lp.userWaiting(1));
+}
 static void modStopDuringTheFirstRecordingKeepsWholeBars() {
     SyncRig r; r.lp.setSync(true); r.toPhase(0);
     r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000 + 30000));
@@ -406,5 +417,6 @@ int main() {
     modStopDuringTheFirstRecordingKeepsWholeBars(); modStartFromStoppedRestarts();
     aRetriggerHearsAPendingUndo(); aRetriggerLeavesTheLoopsAsTheyWere(); aModStartJoinsAWaitingPress();
     aQueuedRestartPlaysOnModsTimeline(); userWaitingIsAPressAnArmOrARestartNotARetrigger();
+    aWaitingArmIsUserWaiting();
     REPORT();
 }
