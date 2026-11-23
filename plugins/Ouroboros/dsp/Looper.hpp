@@ -438,7 +438,7 @@ private:
         tr.len = len;
         tr.pos = n % len;
         tr.dub.w = (n + len - a) % len;                 // index n - a, wrapped
-        const uint32_t from = len - std::min(b, len);   // [from, len) gets the lead-in
+        const uint32_t from = len - std::min(b, len);   // the lead-in covers [from, len): all of it if b > len
         if (n < len) {                                  // rounded up: [n, len) was never recorded
             const uint32_t z = std::max(n, from);
             std::fill(tr.buf + z, tr.buf + len, 0.0f);  // [z, len) now, under the lead-in; [n, z) on the way
@@ -446,7 +446,7 @@ private:
         } else if (n > len + a) {
             addRaw(tr, 0, n - a - len, true);           // [len, n - a) onto [0, n - a - len)
         }
-        for (uint32_t i = 0; i < b; ++i) tr.buf[(from + i) % len] += tr.buf[cap_ - b + i];
+        for (uint32_t i = 0; i < b; ++i) tr.buf[(i + len - b % len) % len] += tr.buf[cap_ - b + i];   // index i - b
     }
 
     // The close is back-dated by the trigger latency D, so L = r - D and the D samples past it are tail. True if it has

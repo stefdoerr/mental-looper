@@ -113,6 +113,19 @@ static void leadInSitsBeforeTheStartOrWrapsToTheEnd() {                // Review
         CHECK(r.lp.trackLength(1) == 2 * L && e < 1e-6f);
     }
 }
+static void leadInLongerThanTheLoopWrapsAround() {                     // back = 100 ms latency + 30 ms Offset > L
+    const uint32_t Ls = 4800, D = 4800, a = 1440, P = 6000;            // the shortest loop, 100 ms
+    for (uint32_t n : {2000u, 4900u}) {                                // rounded up, rounded down: one loop
+        Rig r; r.lp.setTailMs(0); recordBase(r, Ls, 0.0f); r.silence(1234);
+        r.lp.setTriggerLatencyMs(100.0f); r.lp.setAdvanceMs(30.0f);
+        auto x = sine(317, 0.1f, P + n);
+        r.feed(slice(x, 0, P)); const uint32_t phase = r.lp.position();
+        r.lp.pressRec(1); r.feed(slice(x, P, P + n)); r.lp.pressRec(1); r.silence(1000);
+        std::vector<float> want(Ls, 0.0f);                             // input j lands a early, faded in from P - D
+        for (uint32_t j = P - D; j < P + n; ++j) want[(j + 2 * Ls + phase - P - a) % Ls] += x[j] * fadeInGain(j - (P - D));
+        CHECK(r.lp.trackLength(1) == Ls && maxAbsDiff(trackImage(r, 1), want) < 1e-6f);
+    }
+}
 static void autoRecordCanMakeALongTrack() {
     Rig r; silentBase(r); r.lp.setAutoRec(true); r.lp.pressRec(1); r.silence(2000);
     r.feed(sine(220, 0.1f, 52800)); r.lp.pressRec(1);
@@ -138,7 +151,8 @@ int main() {
     oneLoopTracksReportLengthAndPosition();
     longRecordingRoundsUp(); longRecordingRoundsDownOntoTheStart(); oneLoopFromMidPassStaysOneLoop(); lessThanALoopIsOneLoop();
     roundingCountsFromTheStartPress(); bStopsAtThePress(); handoverAndStopCloseWithTheRule(); maximumClosesAtWholeLoops();
-    reusedBufferNeverPlaysOldAudio(); leadInSitsBeforeTheStartOrWrapsToTheEnd(); autoRecordCanMakeALongTrack();
+    reusedBufferNeverPlaysOldAudio(); leadInSitsBeforeTheStartOrWrapsToTheEnd(); leadInLongerThanTheLoopWrapsAround();
+    autoRecordCanMakeALongTrack();
     recToDubAfterALongCloseUndoesExactly(); longTrackSeamIsContinuous();
     REPORT();
 }
