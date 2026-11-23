@@ -60,26 +60,30 @@ How the engine keeps tracks in step (Claude's call):
   today.
 - **Recording runs past the loop end.** The track keeps recording pass after pass until it closes, up to the
   5-minute maximum. The other tracks keep playing.
-- **B stops recording the moment you press it**, as today. Nothing you play after the press is recorded,
-  except the short Tail ring-out below. Only the track's length rounds to a loop boundary (decided by the user
-  after the builder check):
-  - **Pressed within the first quarter of a pass** (the boundary just passed is no more than L/4 behind the
-    press): the track ends on that boundary. Everything played past the boundary, up to the press, folds into
-    the track's start, fading out the way the first loop's tail does. If that overshoot is shorter than the Tail
-    setting, the input keeps blending live into the start for the rest of the Tail, like the first loop.
-  - **Pressed later in a pass:** the track ends on the next boundary. The rest of that last pass is silent. The
-    recording stops at the press with the usual 5 ms punch-out fade.
-  - **Pressed before the first boundary** (still in the pass where recording started): the track is one loop
-    long and the rest of the pass is silent, exactly as today. A long track is never shorter than one loop.
+- **B stops recording the moment you press it**, as today. Nothing you play after the press is recorded.
+  Only the track's length rounds to whole loops (decided by the user after the builder check). **Whole loops
+  count from the moment you started recording this track**, not from the start of the loop pass. That keeps a
+  recording started mid-pass and played for one loop exactly one loop long, as today. *Correction made while
+  planning:* the first draft counted from pass starts, which would have doubled that case.
+  - **Pressed within a quarter loop after a whole number of loops:** it rounds down. What you played past the
+    last whole loop, at most a quarter loop, lands on top of the track's beginning at full level, exactly where
+    it falls in time. A one-loop recording onto the loop that runs a little long does exactly that today, and
+    the seam is the continuous input itself.
+  - **Pressed later:** it rounds up. The rest of the last loop is silent. The recording stops at the press with
+    the usual 5 ms punch-out fade.
+  - **Pressed before one whole loop:** the track is one loop long and the rest of it is silent, exactly as today.
+    A long track is never shorter than one loop.
 - **Handover, stop and the maximum** close the same way. There's no "carry on to the boundary" anywhere, so
   only one track ever takes the input (the existing single-writer rule).
 - **The quarter is measured at the press,** the same instant the recording stops. *Claude's call.* Closes of a
   recording onto the loop are not back-dated today either.
 - **The maximum:** a long track is at most `floor(5 min / L)` loops. At that boundary it closes as if B had been
   pressed there.
-- **Where the recording sits:** a long track's cycle starts at the start of the loop pass in which you started
-  recording it. What you played in that first pass before you started is silence. *Claude's call.* This keeps
-  the recording exactly where you played it relative to every other track.
+- **Where the recording sits:** a long track's cycle starts at the start of the loop pass in which you pressed B
+  to start it. *Claude's call.* This keeps the recording exactly where you played it relative to every other
+  track, and makes "restart from the top" put one-loop tracks at the top. A start back-dated by the trigger
+  latency to just before that pass start wraps to the end of the track, as it wraps to the end of the loop
+  today.
 
 ### Playing
 
@@ -129,17 +133,17 @@ How the engine keeps tracks in step (Claude's call):
     offsets, `Op::at`/`Op::len`, `tailEnd`, the punch-out fade, the park split.
 - **A recording onto the loop writes linearly from the base phase,** without wrapping at L, until it closes.
   - The track's index while recording is (passes so far × L) + `pos_`.
-  - When it closes on boundary b, `len = b`. On a rounded-down close, the overshoot past b is folded into
-    [0, overshoot) before the track plays.
+  - It closes at k whole loops counted from the start press: `len = k·L`. Indices from `len` on wrap onto the
+    track's beginning (the overshoot of a rounded-down close; see below).
 - **A reused buffer must never play stale audio:**
   - while recording, the playhead position is zeroed before it's read (the writer is behind the playhead by
     the back-dating);
   - after the close, [0, start) is zeroed as the track plays, never in one block, because L can be long. Today's
     zero op covers one pass of L; extend the mechanism to the track's length.
-- **The fold and live tail generalize `closeFirst`'s tail logic.** Overshoot h past boundary b:
-  - fold `buf[b+i]` into `buf[i]` with a fade over max(T, h);
-  - if h < T, `tailEnd` covers the rest of T live;
-  - keep unity gain where it overlaps other writers (the `histUsed_` rules).
+- **The overshoot of a rounded-down close is added onto the track's beginning lazily,** as the playhead reaches
+  it on the next pass. It works like a one-off op, as the zero op does. The close itself does no bulk copy
+  (L/4 of a long loop is too much for one audio block). Only the back-dated lead-in that wrapped before index 0
+  (at most the trigger latency plus the offset, a few thousand samples) is placed at the close.
 - **Pending undo/redo on a long track** lasts one pass of that track, up to 5 minutes, and holds its delta and
   an op slot until then. *Claude's call (builder check):* keep the existing 32-op cap. Rapid undo/redo past it
   within one long pass is ignored, as today within one loop. Mark it as a `ponytail:` ceiling. A foot doesn't
@@ -154,11 +158,14 @@ How the engine keeps tracks in step (Claude's call):
 ## Testing
 
 - **Engine:**
-  - **Length rounding:** a press within L/4 past a boundary rounds down; later rounds up with the rest of the
-    pass silent; a press in the first pass gives one loop, as today.
-  - **B stops at the press:** input after the press (beyond the Tail ring-out of a rounded-down close) is not in
-    the track.
-  - **The overshoot is in the track:** what was played past the boundary appears at the track's start.
+  - **Length rounding**, counted from the start press:
+    - within L/4 past a whole number of loops rounds down;
+    - later rounds up, with the rest silent;
+    - less than one loop gives one loop, as today;
+    - a recording started mid-pass and played for exactly one loop is one loop.
+  - **B stops at the press:** input after the press (beyond the 5 ms punch-out) is not in the track.
+  - **The overshoot is in the track:** what was played past the last whole loop appears, added at full level,
+    at the track's beginning.
   - **Seam:** maxStep across a long track's wrap stays within the existing bound, for both kinds of close.
   - **Lock:** after many passes the long track's content lines up with the base loop sample-exactly.
   - **Two long tracks of different lengths,** started on different passes, keep their alignment through 20
@@ -178,7 +185,6 @@ How the engine keeps tracks in step (Claude's call):
 
 ## Left to the builder
 
-- The exact fold fade curve, as long as the seam test passes and the overshoot is kept.
 - The widget pixels while recording a long track, and the tick style.
 - How `pos_` and the per-track `pos` share code, as long as the lock and alignment tests pass.
 - The order of the work: probably the length model and playheads first, then recording and closing, then
