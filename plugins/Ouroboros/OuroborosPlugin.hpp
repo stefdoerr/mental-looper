@@ -347,6 +347,7 @@ protected:
 
         // C footswitch: a tap undoes once the double-tap window passes, a second tap within it stops,
         // a hold of hold_time redoes once, and a hold of 2x hold_time while stopped clears all.
+        // Stopped, a second press fires the pending undo and starts afresh: quick taps each undo (R9).
         // ponytail: timed in whole blocks (<= one block of error); sample-exact if it matters.
         const uint64_t hold = uint64_t(fVal[kParamHoldTime] * 0.001 * getSampleRate());
         const uint64_t window = uint64_t(fVal[kParamDoubleTap] * 0.001 * getSampleRate());
@@ -356,7 +357,12 @@ protected:
             {
                 fHeld = true; fHold = 0; fDone = false;
                 fStoppedPress = fEngine.transport() == ouro::Transport::Stopped;
-                if (fTapPending) { fTapPending = false; fDone = true; fStoppedPress = false; stopNow(); }
+                if (fTapPending)
+                {
+                    fTapPending = false;
+                    if (fStoppedPress) fEngine.undo(fTapTrack);
+                    else { fDone = true; stopNow(); }
+                }
             }
             fHold += frames;
             if (!fDone && !fStoppedPress && fHold >= hold) { fDone = true; fEngine.redo(sel); }

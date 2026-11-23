@@ -166,6 +166,16 @@ static void bAfterATapUndoesFirst() {                                 // Ruling 
     set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(120);         // ...record again
     CHECK(eng().state(0) == ouro::TrackState::Recording && eng().loopLength() == 0);
 }
+static void quickTapsWhileStoppedEachUndo() {                         // Ruling R9
+    fresh(); recordBaseAndDub();
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); run(P(), sine(220, 0.1f, 4800 - 128));
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40);           // a second layer
+    doubleTap(); runN(20);
+    CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 2);
+    set(kParamUndoRedo, 1); runN(2); set(kParamUndoRedo, 0); runN(2);  // two quick taps
+    set(kParamUndoRedo, 1); runN(2); set(kParamUndoRedo, 0); runN(120);
+    CHECK(eng().undoDepth(0) == 0 && eng().transport() == ouro::Transport::Stopped);
+}
 static void tapUndoesTheTrackItWasTappedOn() {                        // Review Focus 5
     fresh(); recordBaseAndDub();
     set(kParamTrack, 2); runN(1); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(20);
@@ -338,6 +348,7 @@ int main()
     holdWhileStoppedClearsAll();
     doubleTapThenHoldDoesNotClear();
     tapWhileStoppedUndoes();
+    quickTapsWhileStoppedEachUndo();
     tapUndoesTheTrackItWasTappedOn();
     bAfterATapUndoesFirst();
     doubleTapDuringAShortFirstRecording();
