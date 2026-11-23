@@ -176,6 +176,29 @@ static void restartWaitsForTheLineWhileModPlays() {
     r.playing = false; r.lp.stop(ouro::StopMode::Instant); r.silenceSync(2000);
     r.lp.pressRec(0); CHECK(!r.lp.waiting() && r.lp.transport() == ouro::Transport::Running);   // MOD stopped: at once
 }
+// A restart within the grace while MOD plays starts at once, every playhead advanced as if it had started on the line.
+static void aLateRestartPlaysAsIfStartedOnTheLine() {
+    SyncRig r; r.lp.setSync(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(20000);
+    const auto img = r.loopImage();                                      // one bar: MOD's phase is the same after it
+    r.lp.stop(ouro::StopMode::Instant); r.silenceSync(2000); CHECK(r.lp.transport() == ouro::Transport::Stopped);
+    r.toPhase(1280); r.lp.pressRec(0);                                   // 26.7 ms after the line
+    CHECK(!r.lp.waiting() && r.lp.transport() == ouro::Transport::Running && r.lp.position() == 1280);
+    const auto o = r.capture(2000);                                      // past the 3 ms fade-in: the loop from 1280
+    CHECK(r.lp.trackPosition(0) == 1280 + 2000);
+    CHECK(maxAbsDiff(slice(o, 144, 2000), slice(img, 1280 + 144, 1280 + 2000)) < 1e-6f);
+}
+// The advance splits a pending op as a park does: an undo made while stopped is heard from the late restart on.
+static void aLateRestartKeepsAPendingUndo() {
+    SyncRig r; r.lp.setSync(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(20000);
+    const auto base = r.loopImage();
+    r.lp.pressRec(0); r.feedSync(sine(480, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(2000);   // a layer everywhere
+    r.lp.stop(ouro::StopMode::Instant); r.silenceSync(2000); r.lp.undo(0);                          // undone, stopped
+    r.toPhase(1280); r.lp.pressRec(0);
+    const auto o = r.capture(2000);
+    CHECK(maxAbsDiff(slice(o, 144, 2000), slice(base, 1280 + 144, 1280 + 2000)) < 1e-5f);
+}
 static void syncTurnedOnOverAFreeLoop() {                                // Review Focus 1
     SyncRig r; r.lp.setTailMs(0); r.playing = false;
     r.lp.pressRec(0); r.feedSync(std::vector<float>(30000, 0.0f)); r.lp.pressRec(0);   // free, 30000 samples
@@ -240,6 +263,7 @@ int main() {
     aFreeGridRecordingKeepsItsGrid(); stopClosesOnTheLastLine(); roundedUpPastTheRecordingIsSilence();
     fractionalBarsKeepTheSeam(); theNextWriterFadesInAfterATempoChange();
     recordingOntoTheLoopStartsOnALine(); autoRecordStartsOnALine(); restartWaitsForTheLineWhileModPlays();
+    aLateRestartPlaysAsIfStartedOnTheLine(); aLateRestartKeepsAPendingUndo();
     syncTurnedOnOverAFreeLoop();
     autoRecordFirstLoopKeepsThePreRollAsALeadIn(); autoRecordOntoTheLoopKeepsFromTheLine();
     aQueuedRestartWaitsForTheLine();

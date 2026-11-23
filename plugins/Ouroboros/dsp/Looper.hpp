@@ -155,8 +155,8 @@ public:
             if (++histW_ == histLen_) histW_ = 0;
             float y = dry_.next(dryTo, ramp_) * x, used = 0.0f;
             if (recTrack_ >= 0) {                        // first recording: overwrite (reused pages hold old audio)
-                // closeFirst() rewrites the last D. After a lead-in (startFirst) the fade-in is done.
-                tracks_[recTrack_].buf[rec_] = x * (used = fadeInGain(rec_ + recLead_));
+                // closeFirst() rewrites the last D. fadeInGain(rec_), over recFadeIn_ (0 after a lead-in).
+                tracks_[recTrack_].buf[rec_] = x * (used = rec_ < recFadeIn_ ? float(rec_) / float(fadeIn_) : 1.0f);
                 ++rec_;
             } else if (L_ && tp_ != Transport::Stopped) {   // stopped: only the dry path, nothing moves
                 float wet = 0.0f;
@@ -307,8 +307,9 @@ public:
         lg_.start(false, wait, len);
     }
     // Stopped: plays again from the top. The track gains did not move while stopped: they snap, and the loops fade in.
-    // With a grid it goes on a line: while MOD plays it waits for the next one (it can't be back-dated, so no grace);
-    // MOD stopped, the loop's own grid is at its top, so at once. Again while it waits: cancelled.
+    // With a grid it goes on a line, as a press does: up to kSyncGraceMs after one it starts now, every playhead
+    // advanced by the samples since, as if it had started on the line; earlier, it waits for the next line. MOD
+    // stopped, the loop's own grid is at its top (the park put it there), so at once. Again while it waits: cancelled.
     // Stopping: a pending End of loop or Fade stop is cancelled (the loops ramp back up); otherwise the restart waits
     // for the park.
     void restart() {
@@ -320,7 +321,9 @@ public:
         if (tp_ != Transport::Stopped) return;
         if (pend_.kind == Pending::Restart) { pend_ = {}; return; }
         double ph;
-        if (gridPhase(ph) && ph >= 1.0) { pend_ = {Pending::Restart, -1}; return; }
+        const uint32_t since = gridPhase(ph) ? uint32_t(ph) : 0;
+        if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = {Pending::Restart, -1}; return; }
+        if (since) { advance(since); pos_ = (pos_ + since) % L_; }   // stopped: L_ is set
         tp_ = Transport::Running;
         for (Track& tr : tracks_) tr.gain.snap(target(tr));
         lg_.v = 0.0f;
@@ -524,6 +527,7 @@ private:
         }
         rec_ = back - lead;
         recLead_ = lead;
+        recFadeIn_ = lead ? 0 : fadeIn_;                 // the lead-in had the fade-in (lead = the pre-roll > fadeIn_)
         recD_ = msToSamples(trigMs_, sr_);               // <= minLoop_ <= histLen_ (trigMs_ <= kMinLoopMs)
         recTrack_ = t;
         recFree_ = gValid_ && !gPlaying_;
@@ -898,15 +902,24 @@ private:
     }
 
     // The stop's end: every playhead moves on by the same shift, which puts the longest track on its beginning (so
-    // one-loop tracks land at the top, base phase 0). Each track's new playhead is its P. An op whose owed stretch
-    // wraps past P splits there: a new part A owes [P, wrap end) and the op keeps [at, P), with the delta ownership.
-    // P is the same index at every park for one-loop tracks and those whose length divides the longest's; otherwise
-    // (or when the longest changes) parts of an earlier split can split again.
-    // ponytail: past the op slots (many pending ops and repeated parks), the rest stay whole: each plays its unapplied
-    // part once (a step where it ends) and finishes within two passes; more slots if that is ever heard
+    // one-loop tracks land at the top, base phase 0).
     void park() {
         uint32_t ml;
-        const uint32_t mp = longest(ml), shift = (ml - mp) % ml;
+        const uint32_t mp = longest(ml);
+        advance((ml - mp) % ml);
+        pos_ = 0;
+        tp_ = Transport::Stopped;
+        if (restartQueued_) { restartQueued_ = false; restart(); }
+    }
+
+    // Stopped: every track's playhead moves on by shift (the park's, or a late restart's). Each track's new playhead
+    // is its P. An op whose owed stretch wraps past P splits there: a new part A owes [P, wrap end) and the op keeps
+    // [at, P), with the delta ownership. P is the same index at every park for one-loop tracks and those whose length
+    // divides the longest's; otherwise (or when the longest changes, or after a late restart) parts of an earlier
+    // split can split again.
+    // ponytail: past the op slots (many pending ops and repeated parks), the rest stay whole: each plays its unapplied
+    // part once (a step where it ends) and finishes within two passes; more slots if that is ever heard
+    void advance(uint32_t shift) {
         for (Track& tr : tracks_) {
             if (!tr.len) continue;
             const uint32_t P = (tr.pos + shift % tr.len) % tr.len;
@@ -936,9 +949,6 @@ private:
             tr.nOps += w;
             tr.pos = P;
         }
-        pos_ = 0;
-        tp_ = Transport::Stopped;
-        if (restartQueued_) { restartQueued_ = false; restart(); }
     }
 
     bool fail() { release(); return false; }
@@ -979,6 +989,7 @@ private:
     };
     Pending pend_;
     uint32_t recLead_ = 0;           // first recording: its lead-in before buf[0], kept aside at the buffer's end
+    uint32_t recFadeIn_ = 0;         // first recording: its fade-in length from buf[0] (fadeIn_, or 0 after a lead-in)
     uint32_t bars_ = 1;              // the first loop's bars
     bool sync_ = false, gValid_ = false, gPlaying_ = false;   // Sync = Bars; MOD's grid: usable, transport playing
     bool recFree_ = false;           // the first recording started on the free grid (MOD stopped): it keeps it
