@@ -108,6 +108,7 @@ public:
         tp_ = Transport::Running;
         restartQueued_ = false;
         lg_ = LoopGain{};
+        xf_ = 0;
     }
 
     void process(const float* in, float* out, uint32_t n) {
@@ -121,9 +122,10 @@ public:
                 if (!gridPhase(ph) || ph < 1.0) {
                     const Pending p = pend_;
                     pend_ = {};
+                    if (p.retrig) retrigger();           // MOD's start first: a press then acts on the new timeline
                     if (p.kind == Pending::Press) pressRec(p.t);
                     else if (p.kind == Pending::Arm) fireArm(p.t);
-                    else restart();
+                    else if (p.kind == Pending::Restart) restart();
                 }
                 at_ = 0;
             }
@@ -144,11 +146,11 @@ public:
                     close(u, recToDub_);
             }
             // The last track went empty and its ramp ended: L resets. Stopped, the gains don't move: empty is enough.
-            // An arm stays, and so does a track's waiting action: it then starts the first loop.
+            // An arm stays, and so does a track's waiting action: it then starts the first loop. MOD's retrigger goes.
             if (L_ && (tp_ == Transport::Stopped ? allEmpty() : idle())) {
                 const int a = armed_; const Pending p = pend_;
                 reset();
-                armed_ = a; if (p.t >= 0) pend_ = p;
+                armed_ = a; if (p.t >= 0) pend_ = {p.kind, p.t};
             }
             const uint32_t h = histW_;
             hist_[h] = x;
@@ -161,13 +163,14 @@ public:
             } else if (L_ && tp_ != Transport::Stopped) {   // stopped: only the dry path, nothing moves
                 float wet = 0.0f;
                 for (Track& tr : tracks_) wet += play(tr);   // read before write: the player hears the dry path
+                if (xf_) wet = crossfade(wet);           // a retrigger's 3 ms; else only this test
                 y += lg_.next() * wet;
                 for (Track& tr : tracks_) used += writeOut(tr, x);   // tails and fades first: the one track
                 for (Track& tr : tracks_) if (writing(tr)) used += writeIn(tr, x, used);   // recording takes the rest
                 if (++pos_ == L_) pos_ = 0;
                 for (Track& tr : tracks_) if (tr.len && ++tr.pos == tr.len) tr.pos = 0;   // every playhead in step
-                // Tails and fades done too. A queued restart then asks the grid at this sample.
-                if (tp_ == Transport::Stopping && lg_.ended() && !overlap()) { at_ = i; park(); at_ = 0; }
+                // Tails and fades done too. A queued restart then asks the grid at the next sample, its first.
+                if (tp_ == Transport::Stopping && lg_.ended() && !overlap()) { at_ = i + 1; park(); at_ = 0; }
             }
             histUsed_[h] = used;
             out[i] = softclip(y);
@@ -182,12 +185,12 @@ public:
     // line. Up to kSyncGraceMs after a line it acts now, back-dated to the line instead of by the trigger latency;
     // earlier, it waits for the next line. One action waits at a time, like the arm: a press cancels it, and on another
     // track then acts (a waiting restart, any press only cancels). An arm's start and a restart go on a line too (see
-    // fireArm() and restart()).
+    // fireArm() and restart()). MOD's retrigger waiting for its line stays (see modStarted()).
     void pressRec(int t) {
         if (!valid(t)) return;
-        if (pend_.kind) {
+        if (pend_.kind && pend_.kind != Pending::Retrigger) {
             const bool same = pend_.t == t || pend_.kind == Pending::Restart;
-            pend_ = {};
+            cancelWaiting();
             if (same) return;
         }
         if (tp_ != Transport::Running) { restart(); return; }
@@ -199,7 +202,7 @@ public:
         double ph;
         const bool snap = (recTrack_ >= 0 || (tracks_[t].state == TrackState::Empty && !autoRec_)) && gridPhase(ph);
         const uint32_t since = snap ? uint32_t(ph) : 0;
-        if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = {Pending::Press, t}; return; }
+        if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = {Pending::Press, t, pend_.retrig}; return; }
         bool cont = false, offset = true, trim = false;  // cont: the new writer complements the closed one's tail or
         for (int u = 0; u < kTracks; ++u)                // fade, at that one's offset (the first recording has none);
             if (u != t && writing(tracks_[u])) {         // trim: a first loop closed off this press's back-date (a
@@ -250,7 +253,7 @@ public:
             tr.baseUndone = false;
             tr.state = TrackState::Playing;
             if (armed_ == t) armed_ = -1;                // an arm is for an empty track only, and so is an action
-            if (pend_.t == t) pend_ = {};                // waiting for the line on it
+            if (pend_.t == t) cancelWaiting();           // waiting for the line on it
         } else if (tr.undoTop < tr.redoTop && tr.nOps < kMaxPendingOps) {
             addOp(tr, tr.layers[tr.undoTop].d, 1.0f, true, int32_t(tr.undoTop));
             ++tr.undoTop;
@@ -263,7 +266,7 @@ public:
         Track& tr = tracks_[t];
         if (recTrack_ == t) recTrack_ = -1;
         if (armed_ == t) armed_ = -1;
-        if (pend_.t == t) pend_ = {};
+        if (pend_.t == t) cancelWaiting();
         dropLayers(tr);                                  // an op still reading a layer keeps it: the ramp-out is smooth
         tr.state = TrackState::Empty;
     }
@@ -323,12 +326,29 @@ public:
         double ph;
         const uint32_t since = gridPhase(ph) ? uint32_t(ph) : 0;
         if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = {Pending::Restart, -1}; return; }
-        if (since) { advance(since); pos_ = (pos_ + since) % L_; }   // stopped: L_ is set
-        tp_ = Transport::Running;
-        for (Track& tr : tracks_) tr.gain.snap(target(tr));
-        lg_.v = 0.0f;
-        lg_.start(true, 0, fadeIn_);
+        start(since);
     }
+
+    // Sync = Bars: MOD's transport started (the plugin calls it on the edge, before process()). atLine: on a bar line,
+    // at this block's first sample; else on the next line. Running: every track retriggers (see retrigger()); a later
+    // line makes it the waiting action, or joins the one waiting (it goes first on the line), and a press keeps it:
+    // only C and a stop cancel it. Stopped: it starts from the top, or the restart waits for the line. Stopping: it
+    // restarts at the park, on MOD's grid (see restart()). A first recording ignores it, and so do empty tracks.
+    void modStarted(bool atLine) {
+        if (!enabled_ || recTrack_ >= 0 || allEmpty()) return;
+        if (tp_ == Transport::Stopping) { restartQueued_ = true; return; }
+        if (tp_ == Transport::Stopped) {                 // only a restart can wait: kept, never toggled
+            if (atLine) { pend_ = {}; start(0); } else pend_ = {Pending::Restart, -1};
+            return;
+        }
+        if (!atLine) { if (!pend_.kind) pend_.kind = Pending::Retrigger; pend_.retrig = true; return; }
+        pend_.retrig = false;
+        if (pend_.kind == Pending::Retrigger) pend_ = {};
+        retrigger();
+    }
+    // MOD's transport stopped: a stop with the Stop Mode. A first recording closes on the last line passed, or under a
+    // bar is dropped (see closeFirst()).
+    void modStopped(StopMode mode, float fadeMs) { stop(mode, fadeMs); }
 
     // Playback gains: settings, stored even while disabled; every gain ramps to its target over kRampMs.
     void setOn(int t, bool on) { if (inRange(t)) tracks_[t].on = on; }
@@ -354,7 +374,7 @@ public:
     void setAdvanceMs(float ms) { advMs_ = std::max(0.0f, std::min(ms, 30.0f)); }   // earlier only (R7)
     void setAutoRec(bool on) {                           // off: nothing starts by itself
         autoRec_ = on;
-        if (!on) { armed_ = -1; if (pend_.kind == Pending::Arm) pend_ = {}; }
+        if (!on) { armed_ = -1; if (pend_.kind == Pending::Arm) cancelWaiting(); }
     }
     void setThresholdDb(float db) {                      // NaN -> -60
         thr_ = std::pow(10.0f, std::max(-60.0f, std::min(db, -10.0f)) / 20.0f);
@@ -447,8 +467,9 @@ private:
         Layer* layers = nullptr;         // [0, undoTop) undo stack, [undoTop, redoTop) redo stack, top at undoTop
         uint32_t undoTop = 0, redoTop = 0;
         uint32_t baked = 0;              // dubs left in buf without a layer (evicted, or not stored): layerCount() keeps them
-        // In start order, a park's split parts first. The spare slot lets a cancel past the cap go through. x2: a
-        // park can split every op once (one is added only at nOps <= cap); see park() for parts that split again.
+        // In start order, a jump's split parts first. The spare slot lets a cancel past the cap go through. x2: one
+        // is added only at nOps <= cap, and a jump (advance(): a park, a late restart, a retrigger) can split every op
+        // once. Parts that split again at a later jump take the slots left; past them advance() keeps ops whole.
         Op ops[kOpSlots];
         uint32_t nOps = 0;
         Writer dub, fade;
@@ -457,9 +478,11 @@ private:
         // until the next recording or reset(): the ramp-out and the pending ops still read it. Recording onto the loop
         // (and after its abort) len is cap_: buf is linear from the start press, index 0, and the playhead zeroes it.
         uint32_t len = 0, pos = 0;
+        uint32_t xpos = 0;               // a retrigger's crossfade: the old playhead
         uint32_t phase = 0;              // the base phase at index 0: the track's beginning is phase samples before it
         uint32_t leadIn = 0;             // recording onto the loop: back-dated samples before index 0, at cap_ - leadIn
-        uint32_t tailEnd = 0;            // > 0: the input still blends into [pos, tailEnd) on the pass after the close
+        uint32_t tailEnd = 0;            // > 0: the input blends into [tailAt, tailEnd) on the pass after the close
+        uint32_t tailAt = 0;             // where: the playhead, on the timeline a retrigger leaves (see retrigger())
         Ramp gain;                       // output gain, towards target()
         float volDb = 0.0f, vol = 1.0f;  // volume in dB and linear
         bool on = true;
@@ -471,6 +494,8 @@ private:
     float fadeInGain(uint32_t i) const { return i < fadeIn_ ? float(i) / float(fadeIn_) : 1.0f; }
     static bool writing(const Track& tr) { return tr.state == TrackState::Recording || tr.state == TrackState::Overdubbing; }
     float target(const Track& tr) const { return tr.state != TrackState::Empty && tr.on && !bypass_ ? tr.vol : 0.0f; }
+    // Cancels the waiting press, arm or restart. MOD's retrigger stays: only C and a stop cancel it.
+    void cancelWaiting() { pend_ = {pend_.retrig ? Pending::Retrigger : Pending::None, -1, pend_.retrig}; }
     bool idle() const {                                  // every track empty and ramped out
         for (const Track& tr : tracks_) if (tr.state != TrackState::Empty || tr.gain.v != 0.0f) return false;
         return true;
@@ -488,8 +513,46 @@ private:
         return p;
     }
     bool overlap() const {                               // some track still takes a share of the input
-        for (const Track& tr : tracks_) if (tr.pos < tr.tailEnd || tr.fade.left) return true;
+        for (const Track& tr : tracks_) if (tr.tailEnd || tr.fade.left) return true;
         return false;
+    }
+
+    // Stopped: plays from the top, every playhead since samples on (see restart()); the loops fade in.
+    void start(uint32_t since) {
+        if (since) { advance(since); pos_ = (pos_ + since) % L_; }   // stopped: L_ is set
+        tp_ = Transport::Running;
+        for (Track& tr : tracks_) tr.gain.snap(target(tr));
+        lg_.v = 0.0f;
+        lg_.start(true, 0, fadeIn_);
+    }
+
+    // MOD started on a line, the looper running: every writer closes as a stop closes it, and every playhead moves on
+    // as a park moves it (the longest track on its beginning). For fadeIn_ the old positions fade out under the new
+    // ones (see crossfade()), read from the buffer only: so their pending ops are applied ahead now, as their playhead
+    // would, over the punch-out fade too (a zero op applied after a closed writer's fade would wipe it). What still
+    // writes on the old timeline, the punch-out fades and the first loop's tail (see writeOut()), goes on in step.
+    // ponytail: the old read lacks an undo or redo's hold-back while it ramps in (pressed within kRampMs before): it
+    // steps by the part held back; carry each track's adj into the crossfade if that is heard
+    void retrigger() {
+        if (allEmpty()) return;                          // every track cleared while it waited
+        for (int u = 0; u < kTracks; ++u) if (writing(tracks_[u])) close(u, false);
+        for (Track& tr : tracks_) {
+            tr.xpos = tr.pos;
+            for (uint32_t k = 0; tr.len && k < fadeOut_; ++k) { commit(tr); if (++tr.pos == tr.len) tr.pos = 0; }
+            tr.pos = tr.xpos;                            // the ops keep their place: a later playhead skips what's done
+        }
+        toTop();
+        xf_ = fadeIn_;
+    }
+    // Per sample while a retrigger's crossfade runs: linear, the new positions in as a fade-in, the old ones out.
+    float crossfade(float wet) {
+        const float g = float(xf_--) / float(fadeIn_);
+        float old = 0.0f;
+        for (Track& tr : tracks_) {
+            old += tr.gain.v * tr.buf[tr.xpos];
+            if (++tr.xpos == tr.len) tr.xpos = 0;
+        }
+        return (1.0f - g) * wet + g * old;
     }
 
     // The bar grid at the next sample; false if there is none (Sync off, or no valid grid). ph: samples since the last
@@ -518,7 +581,7 @@ private:
         double ph;
         const bool grid = gridPhase(ph);
         const uint32_t since = grid ? uint32_t(ph) : 0;
-        if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = {Pending::Arm, t}; return; }
+        if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = {Pending::Arm, t, pend_.retrig}; return; }
         if (L_) startDub(tracks_[t], since + P, false, true, true, true); else startFirst(t, since + P, grid ? P : 0);
     }
 
@@ -630,7 +693,7 @@ private:
         // keeps the tail and the seam click-free, and a MOD start re-aligns it (aligning here would click every pass).
         pos_ = rec_ % L;
         tr.len = L;
-        tr.pos = pos_;
+        tr.pos = tr.tailAt = pos_;                                    // the tail, if any, starts here (pos_ = D)
         tr.phase = 0;                                                 // laid out by base phase
         tr.state = TrackState::Playing;
         // No track ramp: the loops fade in instead. Rounded up onto the lead-in's middle, though, the track ramps in.
@@ -725,8 +788,14 @@ private:
         tr.fade.left = fadeOut_;
     }
 
-    // Commits the pending ops that owe the playhead, then reads it through the track's gain.
+    // Commits the pending ops that owe the playhead (see commit()), then reads it through the track's gain.
     float play(Track& tr) {
+        const float adj = commit(tr);
+        const float g = tr.gain.next(target(tr), ramp_);
+        return g != 0.0f ? g * (tr.buf[tr.pos] + adj) : 0.0f;
+    }
+    // Applies the pending ops that owe the playhead. Returns what holds back their change during their ramp.
+    float commit(Track& tr) {
         if (tr.len == cap_) tr.buf[tr.pos] = 0.0f;       // recording onto the loop: never stale, never itself
         float adj = 0.0f;                                // holds back the ops' change during their ramp
         for (uint32_t k = 0; k < tr.nOps;) {
@@ -747,17 +816,16 @@ private:
             if (++op.at == tr.len) op.at = 0;
             if (++op.done == op.len) endOp(tr, k); else ++k;
         }
-        const float g = tr.gain.next(target(tr), ramp_);
-        return g != 0.0f ? g * (tr.buf[tr.pos] + adj) : 0.0f;
+        return adj;
     }
 
     // The outgoing shares of the input: the first recording's tail and the punch-out fade; returns their sum.
     float writeOut(Track& tr, float x) {
         float used = 0.0f;
-        if (tr.pos < tr.tailEnd) {                       // tail of the first recording, g: 1 -> 0 over T = tailEnd
-            tr.buf[tr.pos] += x * float(tr.tailEnd - tr.pos) / float(tr.tailEnd);
-            used += float(tr.tailEnd - tr.pos) / float(tr.tailEnd);
-            if (tr.pos + 1 == tr.tailEnd) tr.tailEnd = 0;
+        if (tr.tailEnd) {                                // tail of the first recording, g: 1 -> 0 over T = tailEnd
+            tr.buf[tr.tailAt] += x * float(tr.tailEnd - tr.tailAt) / float(tr.tailEnd);
+            used += float(tr.tailEnd - tr.tailAt) / float(tr.tailEnd);
+            if (++tr.tailAt == tr.tailEnd) tr.tailEnd = 0;
         }
         if (tr.fade.left) {                              // punch-out fade: env -> 0
             const float e = tr.fade.env * float(tr.fade.left) / float(fadeOut_);
@@ -910,23 +978,28 @@ private:
         --tr.nOps;
     }
 
-    // The stop's end: every playhead moves on by the same shift, which puts the longest track on its beginning (so
-    // one-loop tracks land at the top, base phase 0).
+    // The stop's end: every playhead goes to the top (see toTop()). A queued restart then starts.
     void park() {
-        uint32_t ml;
-        const uint32_t mp = longest(ml);
-        advance((ml - mp) % ml);
-        pos_ = 0;
+        toTop();
         tp_ = Transport::Stopped;
         if (restartQueued_) { restartQueued_ = false; restart(); }
     }
 
-    // Stopped: every track's playhead moves on by shift (the park's, or a late restart's). Each track's new playhead
-    // is its P. An op whose owed stretch wraps past P splits there: a new part A owes [P, wrap end) and the op keeps
-    // [at, P), with the delta ownership. P is the same index at every park for one-loop tracks and those whose length
-    // divides the longest's; otherwise (or when the longest changes, or after a late restart) parts of an earlier
-    // split can split again.
-    // ponytail: past the op slots (many pending ops and repeated parks), the rest stay whole: each plays its unapplied
+    // Every playhead moves on by the same shift, which puts the longest track on its beginning (so one-loop tracks land
+    // at the top, base phase 0): a park, or a retrigger.
+    void toTop() {
+        uint32_t ml;
+        const uint32_t mp = longest(ml);
+        advance((ml - mp) % ml);
+        pos_ = 0;
+    }
+
+    // Every track's playhead moves on by shift: a park's or a late restart's (stopped), or a retrigger's (its crossfade
+    // covers the jump). Each track's new playhead is its P. An op whose owed stretch wraps past P splits there: a new
+    // part A owes [P, wrap end) and the op keeps [at, P), with the delta ownership. P is the same index at every park
+    // for one-loop tracks and those whose length divides the longest's; otherwise (or when the longest changes, after a
+    // late restart or a retrigger) parts of an earlier split can split again.
+    // ponytail: past the op slots (many pending ops and repeated jumps), the rest stay whole: each plays its unapplied
     // part once (a step where it ends) and finishes within two passes; more slots if that is ever heard
     void advance(uint32_t shift) {
         for (Track& tr : tracks_) {
@@ -936,7 +1009,7 @@ private:
             auto wraps = [&](const Op& o) { return rel(o) != 0 && rel(o) + (o.len - o.done) > tr.len; };
             uint32_t w = 0;
             for (uint32_t k = 0; k < tr.nOps; ++k) {
-                tr.ops[k].ramp = false;                  // after a park the playhead only reads applied audio
+                tr.ops[k].ramp = false;                  // after a jump the playhead only reads applied audio
                 w += wraps(tr.ops[k]);
             }
             w = std::min(w, kOpSlots - tr.nOps);         // the first w that wrap split
@@ -993,8 +1066,9 @@ private:
     bool restartQueued_ = false;     // B during a stop that cannot cancel: restart as soon as the engine parks
     int armed_ = -1;                 // the track auto-record starts at the threshold, else -1
     struct Pending {                 // Sync: the action waiting for the next bar line: a press or an arm firing on
-        enum Kind : uint8_t { None, Press, Arm, Restart } kind = None;   // track t, or a restart (t -1)
-        int t = -1;
+        enum Kind : uint8_t { None, Press, Arm, Restart, Retrigger } kind = None;   // track t, a restart (t -1), or
+        int t = -1;                  // only MOD's retrigger (t -1)
+        bool retrig = false;         // MOD's retrigger goes first on that line (see modStarted())
     };
     Pending pend_;
     uint32_t recLead_ = 0;           // first recording: its lead-in before buf[0], kept aside at the buffer's end
@@ -1003,6 +1077,7 @@ private:
     bool sync_ = false, gValid_ = false, gPlaying_ = false;   // Sync = Bars; MOD's grid: usable, transport playing
     bool recFree_ = false;           // the first recording started on the free grid (MOD stopped): it keeps it
     double spb_ = 0.0, modPh_ = 0.0; // MOD's samples per bar, and samples since its last line at the block start
+    uint32_t xf_ = 0;                // a retrigger's crossfade: samples to go
     uint32_t at_ = 0;                // the sample process() is at in its block, while it asks gridPhase (else 0)
     float thr_ = 0.01f;              // auto-record threshold, linear (-40 dB)
     bool autoRec_ = false;

@@ -256,6 +256,112 @@ static void maxLengthKeepsAPressWaitingOnAnotherTrack() {
     r.silenceSync(300); CHECK(!r.lp.waiting() && r.lp.state(1) == TrackState::Recording);
 }
 
+// Task 3: following MOD's play/stop.
+static void modStartRetriggersOnTheLine() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(240, 0.1f, 96000)); r.lp.pressRec(0);   // 240 Hz: whole cycles in a bar
+    r.silenceSync(40000); const size_t from = r.out.size() - 1;
+    r.phase = 0.0; r.lp.modStarted(true); r.silenceSync(4800);
+    CHECK(r.lp.position() < 4800 + 128 && r.lp.trackPosition(0) < 4800 + 128);   // back near the top
+    CHECK(maxStep(slice(r.out, from, r.out.size())) < 2.5f * 2.0f * sineStep(240, 0.1f));   // no click
+}
+static void modStartWhileOverdubbingKeepsTheLayer() {                    // Review Focus 3
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(240, 0.1f, 96000)); r.lp.pressRec(0);
+    auto base = r.loopImage();
+    r.lp.pressRec(0); r.feedSync(sine(480, 0.1f, 20000));
+    r.phase = 0.0; r.lp.modStarted(true); r.silenceSync(2000);
+    CHECK(r.lp.state(0) == TrackState::Playing && r.lp.undoDepth(0) == 1);
+    r.lp.undo(0); CHECK(maxAbsDiff(r.settle(), base) < 1e-5f);
+}
+static void modStartMidBarWaitsForTheLine() {                            // Review Focus 4
+    SyncRig r; r.lp.setSync(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(10000);
+    r.phase = 30000.0; const uint32_t p = r.lp.position();
+    r.lp.modStarted(false); r.silenceSync(128);
+    CHECK(r.lp.position() == (p + 128) % 96000 && r.lp.waiting());     // no jump yet
+    r.silenceSync(66000 - 128 + 128); CHECK(!r.lp.waiting() && r.lp.position() <= 128);
+}
+static void modStopDuringTheFirstRecordingKeepsWholeBars() {
+    SyncRig r; r.lp.setSync(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000 + 30000));
+    r.lp.modStopped(ouro::StopMode::Instant, 3000.0f);
+    CHECK(r.lp.loopLength() == 96000 && r.lp.bars() == 1);
+    SyncRig q; q.lp.setSync(true); q.toPhase(0);
+    q.lp.pressRec(0); q.feedSync(sine(220, 0.1f, 50000)); q.lp.modStopped(ouro::StopMode::Instant, 3000.0f);
+    CHECK(q.lp.loopLength() == 0 && q.lp.state(0) == TrackState::Empty);
+}
+static void modStartFromStoppedRestarts() {                              // tail 0: the default 50 ms parks after 2432
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0);
+    r.lp.modStopped(ouro::StopMode::Instant, 3000.0f); r.silenceSync(2000);
+    CHECK(r.lp.transport() == ouro::Transport::Stopped);
+    r.phase = 0.0; r.lp.modStarted(true); r.silenceSync(128);
+    CHECK(r.lp.transport() == ouro::Transport::Running && r.lp.position() <= 128);
+}
+
+// Beyond the brief: a retrigger's old positions hear their pending ops (applied ahead): an undo still going through
+// the loop doesn't bring the undone layer back for the crossfade.
+static void aRetriggerHearsAPendingUndo() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(240, 0.1f, 96000)); r.lp.pressRec(0);
+    r.lp.pressRec(0); r.feedSync(sine(330, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(2000);   // a layer everywhere
+    r.lp.undo(0); r.silenceSync(20000); const size_t from = r.out.size() - 1;   // halfway through, at the layer's peak
+    r.phase = 0.0; r.lp.modStarted(true); r.silenceSync(4800);
+    CHECK(maxStep(slice(r.out, from, r.out.size())) < 2.5f * 2.0f * sineStep(240, 0.1f));
+}
+// Beyond the brief: a retrigger only moves the playheads. A recording onto the loop it closes (started on a line, so
+// its punch-out fade lies past the close, where a zero op clears the rest) and a first loop's tail it cuts into keep
+// exactly what a press, or no MOD start, would have left.
+static std::vector<float> ontoTheLoopClosedBy(bool retrig) {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(240, 0.1f, 96000)); r.lp.pressRec(0);
+    r.toPhase(96000 - 1280); r.lp.pressRec(1); r.silenceSync(1280);        // starts on the line, back-date 0
+    const auto in = sine(330, 0.1f, 42000);
+    r.feedSync(slice(in, 0, 40000));                                       // under a loop: rounded up
+    if (retrig) { r.phase = 0.0; r.lp.modStarted(true); } else r.lp.pressRec(1);
+    r.feedSync(slice(in, 40000, 42000));                                   // the punch-out fade takes the input on
+    return r.settle();
+}
+static std::vector<float> tailCutBy(bool retrig) {
+    SyncRig r; r.lp.setSync(true); r.toPhase(0);                           // the default 50 ms tail
+    const auto in = sine(240, 0.1f, 100000);
+    r.lp.pressRec(0); r.feedSync(slice(in, 0, 96000)); r.lp.pressRec(0);
+    r.feedSync(slice(in, 96000, 97280));
+    if (retrig) { r.phase = 0.0; r.lp.modStarted(true); }
+    r.feedSync(slice(in, 97280, 100000));                                  // the tail takes the input on to its end
+    return r.settle();
+}
+static void aRetriggerLeavesTheLoopsAsTheyWere() {
+    CHECK(maxAbsDiff(ontoTheLoopClosedBy(true), ontoTheLoopClosedBy(false)) < 1e-6f);
+    CHECK(maxAbsDiff(tailCutBy(true), tailCutBy(false)) < 1e-6f);
+}
+// Beyond the brief: MOD's mid-bar start never cancels a waiting press, nor a press it: both go on the line, the
+// retrigger first. Ignored with every track empty and during a first recording.
+static void aModStartJoinsAWaitingPress() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.modStarted(false); CHECK(!r.lp.waiting());                       // nothing to start
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 50000));
+    r.lp.modStarted(false); CHECK(!r.lp.waiting() && r.lp.state(0) == TrackState::Recording);
+    r.feedSync(sine(220, 0.1f, 46000)); r.lp.pressRec(0); r.silenceSync(10000);
+    r.lp.pressRec(1); CHECK(r.lp.waitingTrack() == 1);                   // 10000 after the line: waits
+    r.phase = 30000.0; r.lp.modStarted(false); CHECK(r.lp.waitingTrack() == 1);
+    r.lp.pressRec(1); CHECK(r.lp.waiting() && r.lp.waitingTrack() == -1);   // the press goes, the retrigger stays
+    r.lp.pressRec(1); CHECK(r.lp.waitingTrack() == 1);
+    r.silenceSync(66000 + 128);
+    CHECK(!r.lp.waiting() && r.lp.position() <= 128);
+    CHECK(r.lp.state(1) == TrackState::Recording && r.lp.trackPosition(1) <= 128);
+}
+// Beyond the brief (Task 2's parked finding): a restart queued during an Instant stop, late within the grace at the
+// park, plays on MOD's timeline, not a sample behind it.
+static void aQueuedRestartPlaysOnModsTimeline() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(1280);   // pos_ = MOD's
+    r.lp.stop(ouro::StopMode::Instant); r.lp.pressRec(0); r.silenceSync(1280);   // parks ~2000 after the line
+    CHECK(r.lp.transport() == ouro::Transport::Running && !r.lp.waiting());
+    CHECK(r.lp.position() == uint32_t(r.phase));
+}
+
 int main() {
     earlyPressWaitsForTheLine(); latePressIsBackDatedToTheLine(); pressPastTheGraceWaitsForTheNextLine();
     firstLoopIsWholeBars(); tempoChangeDuringTheFirstRecording(); cancelAWaitingPress(); noGridActsAtOnce();
@@ -268,5 +374,9 @@ int main() {
     autoRecordFirstLoopKeepsThePreRollAsALeadIn(); autoRecordOntoTheLoopKeepsFromTheLine();
     aQueuedRestartWaitsForTheLine();
     maxLengthKeepsAPressWaitingOnAnotherTrack();
+    modStartRetriggersOnTheLine(); modStartWhileOverdubbingKeepsTheLayer(); modStartMidBarWaitsForTheLine();
+    modStopDuringTheFirstRecordingKeepsWholeBars(); modStartFromStoppedRestarts();
+    aRetriggerHearsAPendingUndo(); aRetriggerLeavesTheLoopsAsTheyWere(); aModStartJoinsAWaitingPress();
+    aQueuedRestartPlaysOnModsTimeline();
     REPORT();
 }
