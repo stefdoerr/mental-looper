@@ -147,6 +147,96 @@ static void longTrackSeamIsContinuous() {                              // the ov
     CHECK(maxStep(wrap(trackImage(r, 1))) < 2.5f * 2.0f * sineStep(220, 0.1f));
 }
 
+// Track t recorded from base phase `phase`, exactly k loops of a sine (frequency hz, 0.1).
+static void recordLoops(Rig& r, int t, uint32_t phase, uint32_t k, double hz) {
+    toPos(r, phase); r.lp.pressRec(t); r.feed(sine(hz, 0.1f, k * L)); r.lp.pressRec(t); r.silence(500);
+}
+static void overdubUndoRedoOnALongTrack() {
+    Rig r; silentBase(r); recordLoops(r, 1, 6000, 2, 220); auto img0 = trackImage(r, 1);
+    r.lp.pressRec(1); r.feed(sine(550, 0.1f, 60000)); r.lp.pressRec(1); r.silence(2 * L);
+    auto img1 = trackImage(r, 1);
+    CHECK(r.lp.undoDepth(1) == 1 && maxAbsDiff(img0, img1) > 0.05f);
+    r.lp.undo(1); r.silence(2 * L + 1000); CHECK(maxAbsDiff(trackImage(r, 1), img0) < 1e-5f);
+    r.lp.redo(1); r.silence(2 * L + 1000); CHECK(maxAbsDiff(trackImage(r, 1), img1) < 1e-5f);
+}
+static void pendingUndoOnALongTrackSurvivesStop() {
+    Rig r; silentBase(r); recordLoops(r, 1, 6000, 3, 220); auto img0 = trackImage(r, 1);
+    r.lp.pressRec(1); r.feed(sine(550, 0.1f, 30000)); r.lp.pressRec(1); r.silence(3 * L);
+    r.lp.undo(1); r.silence(20000);                                    // a fraction of the 3-loop pass applied
+    r.lp.stop(StopMode::Instant); r.silence(1000); CHECK(r.lp.transport() == Transport::Stopped);
+    r.lp.restart(); r.silence(3 * L + 1000);
+    CHECK(maxAbsDiff(trackImage(r, 1), img0) < 1e-5f && r.lp.pendingOps(1) == 0);
+}
+static void parkPutsTheLongestOnItsBeginning() {
+    Rig r; silentBase(r); recordLoops(r, 1, 6000, 2, 220); recordLoops(r, 2, 15000, 3, 330);
+    r.silence(41234); r.lp.stop(StopMode::Instant); r.silence(1000);
+    CHECK(r.lp.transport() == Transport::Stopped && r.lp.trackPosition(2) == 0 && r.lp.position() == 0
+          && r.lp.trackPosition(0) == 0 && r.lp.trackPosition(1) % L == 0);
+}
+static void endOfLoopWaitsForTheLongest() {
+    Rig r; silentBase(r); recordLoops(r, 1, 6000, 3, 220); r.silence(10000);
+    const uint32_t rest = 3 * L - r.lp.trackPosition(1);
+    r.lp.stop(StopMode::EndOfLoop);
+    r.silence(rest - 1); CHECK(r.lp.transport() == Transport::Stopping);
+    r.silence(1); CHECK(r.lp.transport() == Transport::Stopped && r.lp.trackPosition(1) == 0 && r.lp.position() == 0);
+}
+static void twoLongTracksKeepTheirAlignment() {                        // the arrangement is the same after a restart
+    Rig r; silentBase(r); recordLoops(r, 1, 6000, 2, 220); recordLoops(r, 2, 15000, 3, 330);
+    for (int u = 0; u < ouro::kTracks; ++u) r.lp.setOn(u, true);
+    r.silence(1000);
+    auto pre = r.capture(12 * L);                                      // two joint cycles (6 loops each)
+    r.silence(33333); r.lp.stop(StopMode::Instant); r.silence(1000); r.lp.restart();
+    auto post = r.capture(3 * L);
+    bool found = false;
+    for (uint32_t o = 0; o < 6 * L && !found; ++o) {
+        float e = 0.0f;
+        for (uint32_t i = 200; i < 3 * L && e < 1e-5f; ++i) e = std::max(e, std::fabs(pre[o + i] - post[i]));
+        found = e < 1e-5f;
+    }
+    CHECK(found);
+}
+static void baseUndoRedoOfALongTrackKeepsAlignment() {                 // Review Focus 2
+    Rig r; silentBase(r); recordLoops(r, 1, 6000, 2, 220);
+    const uint32_t before = r.lp.trackPosition(1);
+    r.lp.undo(1); CHECK(r.lp.state(1) == TrackState::Empty && r.lp.canRedo(1));
+    r.silence(5 * L + 777);
+    r.lp.redo(1);
+    CHECK(r.lp.state(1) == TrackState::Playing && r.lp.trackPosition(1) == (before + 5 * L + 777) % (2 * L));
+}
+static void tiedLongestKeepTheirOffset() {                             // begun 3 passes apart: the lower lands on 0
+    Rig r; silentBase(r); recordLoops(r, 1, 6000, 2, 220); recordLoops(r, 2, 3000, 2, 330);
+    r.silence(41234); r.lp.stop(StopMode::Instant); r.silence(1000);
+    CHECK(r.lp.trackPosition(1) == 0 && r.lp.trackPosition(2) == L);
+}
+static void endOfLoopWaitsForATrackTheStopCloses() {                   // 2 loops + 2000: closed by the stop, 2 loops
+    Rig r; silentBase(r); toPos(r, 6000); r.lp.pressRec(1); r.feed(sine(220, 0.1f, 2 * L + 2000));
+    r.lp.stop(StopMode::EndOfLoop);
+    const uint32_t rest = 2 * L - r.lp.trackPosition(1);
+    r.silence(rest - 1); CHECK(r.lp.transport() == Transport::Stopping);
+    r.silence(1); CHECK(r.lp.transport() == Transport::Stopped && r.lp.trackPosition(1) == 0);
+}
+static void manyOpsThroughShiftingParks() {                            // 2 loops under 3: alternate parks land L apart
+    Rig r; silentBase(r); recordLoops(r, 1, 6000, 2, 220); recordLoops(r, 2, 15000, 3, 330);
+    auto img0 = trackImage(r, 1);
+    for (int i = 0; i < 25; ++i) { r.lp.pressRec(1); r.feed(sine(550, 0.1f, 1000)); r.lp.undo(1); }   // 25 cancel ops
+    for (int i = 0; i < 4; ++i) { r.silence(3000); r.lp.stop(StopMode::Instant); r.silence(1000); r.lp.restart(); }
+    r.lp.pressRec(0); r.feed(sine(330, 0.1f, 2 * L)); r.lp.pressRec(0);   // reuses the blocks the cancels freed
+    r.silence(4 * L);
+    CHECK(maxAbsDiff(trackImage(r, 1), img0) < 1e-5f && r.lp.pendingOps(1) == 0);
+}
+// The cancel starts at s with track 2 at 2L - 2860. Park 1 lands track 1 at s + L + 2860: the delta's reader owes
+// [s + L + 2860, s + 2L), the owner [s + 5720, s + L + 2860). Park 2 lands it L on, at s + 2860: the owner ends first.
+static void anOwnerEndingFirstHandsItsDeltaOn() {
+    Rig r; silentBase(r); recordLoops(r, 1, 6000, 2, 220); recordLoops(r, 2, 15000, 3, 330);
+    auto img0 = trackImage(r, 1);
+    r.silence((5 * L - 3860 - r.lp.trackPosition(2)) % (3 * L));
+    r.lp.pressRec(1); r.feed(sine(550, 0.1f, 1000)); r.lp.undo(1);     // a cancel op, owning its delta
+    for (int i = 0; i < 2; ++i) { r.silence(5000); r.lp.stop(StopMode::Instant); r.silence(1000); r.lp.restart(); }
+    r.silence(L + 100); r.lp.pressRec(0); r.feed(sine(330, 0.1f, 4096)); r.lp.pressRec(0);   // takes a freed block
+    r.silence(2 * L);
+    CHECK(maxAbsDiff(trackImage(r, 1), img0) < 1e-5f);
+}
+
 int main() {
     oneLoopTracksReportLengthAndPosition();
     longRecordingRoundsUp(); longRecordingRoundsDownOntoTheStart(); oneLoopFromMidPassStaysOneLoop(); lessThanALoopIsOneLoop();
@@ -154,5 +244,9 @@ int main() {
     reusedBufferNeverPlaysOldAudio(); leadInSitsBeforeTheStartOrWrapsToTheEnd(); leadInLongerThanTheLoopWrapsAround();
     autoRecordCanMakeALongTrack();
     recToDubAfterALongCloseUndoesExactly(); longTrackSeamIsContinuous();
+    overdubUndoRedoOnALongTrack(); pendingUndoOnALongTrackSurvivesStop(); parkPutsTheLongestOnItsBeginning();
+    endOfLoopWaitsForTheLongest(); twoLongTracksKeepTheirAlignment(); baseUndoRedoOfALongTrackKeepsAlignment();
+    tiedLongestKeepTheirOffset(); endOfLoopWaitsForATrackTheStopCloses(); manyOpsThroughShiftingParks();
+    anOwnerEndingFirstHandsItsDeltaOn();
     REPORT();
 }

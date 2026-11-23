@@ -228,9 +228,10 @@ public:
     void clearAll() { for (int t = 0; t < kTracks; ++t) clearTrack(t); }
 
     // Closes every writer and cancels an arm, then fades the loops out. Stopping never changes the loop: the engine
-    // parks at the top once the fade, every tail and every punch-out fade have ended. Instant: kRampMs now. EndOfLoop:
-    // kRampMs ending at the top. A rest of kFadeInMs..kRampMs fades at once over the rest, still ending at the top; a
-    // shorter rest fades over kFadeInMs, and the park then jumps back to the top. Fade: fadeMs (kRampMs..10 s) now,
+    // parks (see park()) once the fade, every tail and every punch-out fade have ended. Instant: kRampMs now.
+    // EndOfLoop: kRampMs ending where the longest track's pass ends (measured after the closes). A rest of
+    // kFadeInMs..kRampMs fades at once over the rest, still ending there; a shorter rest fades over kFadeInMs, and the
+    // park then jumps back to the longest track's beginning. Fade: fadeMs (kRampMs..10 s) now,
     // cubic. A second stop cancels a queued restart and, while the loops still sound, cuts to Instant from the current
     // gain. A stop that closes the first recording parks silently in every mode (R7): Instant from loop gain 0.
     void stop(StopMode mode, float fadeMs = 3000.0f) {
@@ -252,7 +253,8 @@ public:
         if (mode == StopMode::EndOfLoop) {
             // ponytail: started while the loop gain still rises (within kFadeInMs of a restart or kRampMs of a cancel;
             // automation or MIDI only), the wait holds the partial gain; let the rise finish during the wait if heard
-            const uint32_t r = L_ - pos_;
+            uint32_t ml;
+            const uint32_t mp = longest(ml), r = ml - mp;
             if (r > ramp_) wait = r - ramp_; else len = std::max(r, fadeIn_);
         } else if (mode == StopMode::Fade) {             // clamped in ms first: msToSamples(NaN or < 0) is undefined
             len = msToSamples(std::min(10000.0f, std::max(kRampMs, fadeMs)), sr_);
@@ -340,6 +342,7 @@ public:
     bool enabled() const { return enabled_; }
 
 private:
+    static constexpr uint32_t kOpSlots = 2 * (kMaxPendingOps + 1);
     struct Layer { Delta d; uint32_t seq = 0; uint8_t refs = 0; };   // refs: pending ops reading d
     struct Op {                          // pending undo/redo: adds sign*d at the playhead over the len positions it owes
         Delta d;                         // a copy of the handle: the blocks are shared with the layer
@@ -348,7 +351,7 @@ private:
         uint32_t at = 0;                 // the next position it owes: it applies only when the playhead is there
         uint32_t done = 0, len = 0;      // positions applied; ramps for ramp_, ends at len (at most one pass)
         int32_t layer = -1;              // its layer while d is in a stack, else -1
-        bool owns = false, ramp = false; // owns: releases d when it ends
+        bool owns = false, ramp = false; // owns: releases d when it ends (see endOp)
         bool zero = false;               // a zero op: sets buf = 0 instead (the unrecorded rest of a recording onto L)
         bool fold = false;               // a fold op: adds buf[at + len] instead (a rounded-down close's overshoot)
     };
@@ -366,8 +369,8 @@ private:
         Layer* layers = nullptr;         // [0, undoTop) undo stack, [undoTop, redoTop) redo stack, top at undoTop
         uint32_t undoTop = 0, redoTop = 0;
         // In start order, a park's split parts first. The spare slot lets a cancel past the cap go through. x2: a
-        // park can split every op (only ops added since the last restart can wrap; one is added only at nOps <= cap).
-        Op ops[2 * (kMaxPendingOps + 1)];
+        // park can split every op once (one is added only at nOps <= cap); see park() for parts that split again.
+        Op ops[kOpSlots];
         uint32_t nOps = 0;
         Writer dub, fade;
         TrackState state = TrackState::Empty;
@@ -396,6 +399,14 @@ private:
     bool allEmpty() const {
         for (const Track& tr : tracks_) if (tr.state != TrackState::Empty) return false;
         return true;
+    }
+    // The longest non-empty track's position; its length goes to len. Lowest index on ties; none longer than L: pos_, L.
+    uint32_t longest(uint32_t& len) const {
+        uint32_t p = pos_;
+        len = L_;
+        for (int t = 0; t < kTracks; ++t)
+            if (state(t) != TrackState::Empty && trackLength(t) > len) { len = trackLength(t); p = trackPosition(t); }
+        return p;
     }
     bool overlap() const {                               // some track still takes a share of the input
         for (const Track& tr : tracks_) if (tr.pos < tr.tailEnd || tr.fade.left) return true;
@@ -666,8 +677,8 @@ private:
         tr.redoTop = tr.undoTop;
     }
 
-    // Layer i left both stacks: release its blocks, or hand them to the newest op still reading them
-    // (the last in array order ends last: every op owes at most one pass, and a park puts its split parts first).
+    // Layer i left both stacks: release its blocks, or hand them to the newest op still reading them (endOp passes
+    // them on if another reader ends later).
     void dropLayer(Track& tr, uint32_t i) {
         Layer& ly = tr.layers[i];
         if (ly.refs == 0) { ly.d.release(pool_); return; }
@@ -697,6 +708,8 @@ private:
     }
 
     // layer >= 0: d is that layer's delta; -1: the op owns d.
+    // ponytail: an op lasts one pass of its track, up to 5 min on a long one, and holds its slot that long: presses past
+    // kMaxPendingOps within one long pass are ignored; more slots if a foot ever gets there
     void addOp(Track& tr, const Delta& d, float sign, bool ramp, int32_t layer) {
         Op& op = tr.ops[tr.nOps++];
         op = Op{};
@@ -721,23 +734,34 @@ private:
         op.len = n;
     }
 
+    // An owner hands its delta to another op still reading it, else releases it: parks that land a track on different
+    // indices can change which reader ends last.
     void endOp(Track& tr, uint32_t k) {
         Op& op = tr.ops[k];
-        if (op.owns) op.d.release(pool_);
-        else if (op.layer >= 0) --tr.layers[op.layer].refs;
+        if (op.owns) {
+            uint32_t j = 0;
+            while (j < tr.nOps && (j == k || !tr.ops[j].d.shares(op.d))) ++j;
+            if (j < tr.nOps) tr.ops[j].owns = true; else op.d.release(pool_);
+        } else if (op.layer >= 0) {
+            --tr.layers[op.layer].refs;
+        }
         std::copy(tr.ops + k + 1, tr.ops + tr.nOps, tr.ops + k);   // keep start order
         --tr.nOps;
     }
 
-    // The stop's end: every playhead goes to the top, the index P of its beginning (base phase 0). An op whose owed
-    // stretch wraps past P splits there: a new part A owes [P, wrap end) and the op keeps [at, P), with the delta
-    // ownership (it ends last). The A parts go before every other op, so the last op in array order still ends last.
-    // ponytail: every track lands on its own beginning, so long tracks of different lengths lose their alignment to
-    // each other; shift every playhead by the longest track's distance to its beginning instead
+    // The stop's end: every playhead moves on by the same shift, which puts the longest track on its beginning (so
+    // one-loop tracks land at the top, base phase 0). Each track's new playhead is its P. An op whose owed stretch
+    // wraps past P splits there: a new part A owes [P, wrap end) and the op keeps [at, P), with the delta ownership.
+    // P is the same index at every park for one-loop tracks and those whose length divides the longest's; otherwise
+    // (or when the longest changes) parts of an earlier split can split again.
+    // ponytail: past the op slots (many pending ops and repeated parks), the rest stay whole: each plays its unapplied
+    // part once (a step where it ends) and finishes within two passes; more slots if that is ever heard
     void park() {
+        uint32_t ml;
+        const uint32_t mp = longest(ml), shift = (ml - mp) % ml;
         for (Track& tr : tracks_) {
             if (!tr.len) continue;
-            const uint32_t P = (tr.len - tr.phase) % tr.len;
+            const uint32_t P = (tr.pos + shift % tr.len) % tr.len;
             auto rel = [&](const Op& o) { return (o.at + tr.len - P) % tr.len; };   // owed start, counted from P
             auto wraps = [&](const Op& o) { return rel(o) != 0 && rel(o) + (o.len - o.done) > tr.len; };
             uint32_t w = 0;
@@ -745,8 +769,9 @@ private:
                 tr.ops[k].ramp = false;                  // after a park the playhead only reads applied audio
                 w += wraps(tr.ops[k]);
             }
+            w = std::min(w, kOpSlots - tr.nOps);         // the first w that wrap split
             std::copy_backward(tr.ops, tr.ops + tr.nOps, tr.ops + tr.nOps + w);
-            for (uint32_t k = w, a = 0; k < tr.nOps + w; ++k) {
+            for (uint32_t k = w, a = 0; a < w; ++k) {
                 Op& o = tr.ops[k];
                 if (!wraps(o)) continue;
                 Op& A = tr.ops[a++];
@@ -761,7 +786,7 @@ private:
                 o.done = 0;
             }
             tr.nOps += w;
-            tr.pos = P;                                  // every beginning is at the top
+            tr.pos = P;
         }
         pos_ = 0;
         tp_ = Transport::Stopped;

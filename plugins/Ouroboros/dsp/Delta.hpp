@@ -38,6 +38,7 @@ public:
     uint32_t start() const { return start_; }
     uint32_t length() const { return length_; }
     uint32_t blocks() const { return (length_ + BlockPool::kBlock - 1) / BlockPool::kBlock; }
+    bool shares(const Delta& o) const { return head_ >= 0 && head_ == o.head_; }   // copies of one delta's handle
 
     void release(BlockPool& p) {
         for (int32_t b = head_; b >= 0;) { int32_t n = p.next(b); p.free(b); b = n; }
