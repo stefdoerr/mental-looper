@@ -641,9 +641,10 @@ private:
 
     // Frees one layer: a redo entry, else the oldest undo layer. A track offers the redo entry undone longest ago
     // (the far end of its redo stack, redone last), so its next redo stays the layer just undone; across tracks
-    // the lowest seq goes. Layers read by a pending op or still written by a punch-out fade are skipped (when the
-    // far end is still read, so is the rest of that redo stack: undone later, its ops end later). False if nothing
-    // could be freed.
+    // the lowest seq goes. Layers read by a pending op (refs) or still written by a punch-out fade are skipped. A
+    // track whose far end is still read offers no redo entry, though one nearer the top may be free (parks that move
+    // the playhead can end ops out of order): it may then drop an undo layer instead. Safe, not optimal. False if
+    // nothing could be freed.
     // ponytail: O(tracks x layers) scan plus an array shift per call. Lowering the budget far below the use with
     // thousands of layers evicts them all in one block (multi-ms, an xrun); keep a per-track oldest index / a ring
     // of layers, or spread the evictions over blocks, if that is hit.
