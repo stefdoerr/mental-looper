@@ -1,6 +1,6 @@
 /*
  * Ouroboros — MOD modgui controller. Knobs are bound by MOD-UI from the HTML.
- * This script only drives the six trigger buttons: a press writes 1 to the
+ * This script only drives the seven trigger buttons: a press writes 1 to the
  * port, the release writes 0. MOD reads control ports once per audio block,
  * so a fast tap could collapse to just "0" and miss the rising edge; hold the
  * 1 for at least 90 ms. A button also lights while its port is on, so presses
@@ -8,7 +8,7 @@
  */
 
 function (event, funcs) {
-    var KEYS = ['rec', 'undo', 'redo', 'onoff', 'clear_track', 'clear_all'];
+    var KEYS = ['rec', 'stop_play', 'undo', 'redo', 'onoff', 'clear_track', 'clear_all'];
     var MIN_HOLD = 90;  // ms
 
     function paint(icon, sym) {

@@ -127,14 +127,14 @@
 }
 
 /* ============================ Trigger buttons ============================
-   Two rows of three. Plain flat keys, no custom art (v1). */
+   Two rows of four. Plain flat keys, no custom art (v1). */
 .ouroboros-pedal .ouroboros-keys {
     position: absolute;
     top: 142px;
     left: 70px;
     right: 14px;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 6px;
 }
 .ouroboros-pedal .ouroboros-key {

@@ -8,7 +8,8 @@ bars: the first loop you record sets the length, and the other three tracks lock
 as much as you like and undo one layer at a time. Built with the
 [DISTRHO Plugin Framework (DPF)](https://github.com/DISTRHO/DPF), mono in and mono out.
 
-- Rec / Play / Dub on one footswitch, undo (tap) and redo (hold) on another.
+- Rec / Play / Dub on one footswitch; undo (tap), redo (hold) and stop (double-tap) on another.
+- Optional auto-record: arm a track and it starts on your first note.
 - Click-free loop point, punch in/out, undo, redo and clear.
 - Per-track volume and on/off. The Dwarf screen shows a progress bar and track states
   (Starless 19 or later).
