@@ -312,11 +312,24 @@ static void passDotsStopAt18()
     CHECK(litIn(b, 40, 1, 32, 39, 33) == 18);
 }
 
+// A long track emptied by undoing its only recording keeps its length in the engine (for a redo); the bar shows the
+// first loop, like a track never recorded: no ticks, the fill follows position/loopLength.
+static void emptyTrackShowsTheLoopNotItsOldLength()
+{
+    auto v = view(); v.state[0] = TrackState::Empty; v.loopLength = 1000; v.position = 500;
+    v.trackLength = 3000; v.trackPosition = 0;
+    uint8_t b[1024]; ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(px(b, 40, 14, 28) == 1 && px(b, 40, 26, 28) == 0);         // no inverted ticks in the filled or empty part
+    int lit = 0; for (int x = 1; x < 39; ++x) lit += px(b, 40, x, 30);
+    CHECK(std::abs(lit - 19) <= 1);                                    // half of the first loop, not 0 of 3000
+}
+
 int main()
 {
     sizeIsMono1(); barFillsProportionally(); emptyBarWhenNoLoop(); elapsedShownWhileRecording();
     marksReflectTracks(); selectedFrame(); ringsAroundSymbols(); stateText(); stateTextNotClipped(); tallThreshold(); layoutRows(); shortAreaBarOnly(); topAndBottomRowsBlank();
     stoppedShowsStop(); armedShowsArmAndBlinksItsDot(); everyWidgetStringHasGlyphs();
     longTrackBarHasPassTicks(); crowdedTicksAreLeftOut(); recordingShowsPassesSoFar(); passMarksStayInsideTheBar(); passDotsStopAt18();
+    emptyTrackShowsTheLoopNotItsOldLength();
     REPORT();
 }

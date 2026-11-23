@@ -83,13 +83,15 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
     if (v.loopLength > 0)
     {
         const uint64_t inner = w > 2 ? w - 2 : 0;
-        // a long track fills by its own length; otherwise by the loop (or the base phase while recording onto it)
-        const uint64_t len = v.trackLength > 0 ? v.trackLength : v.loopLength;
-        const uint64_t pos = v.trackLength > 0 ? v.trackPosition : v.position;
+        // A long track fills by its own length; otherwise by the loop (or the base phase while recording onto it). An
+        // empty track (its only recording undone, the length kept for a redo) shows like one never recorded: the loop.
+        const uint64_t trackLen = v.state[v.selected] != TrackState::Empty ? v.trackLength : 0;
+        const uint64_t len = trackLen > 0 ? trackLen : v.loopLength;
+        const uint64_t pos = trackLen > 0 ? v.trackPosition : v.position;
         uint64_t fill = (inner * pos + len / 2) / len;
         if (fill > inner) fill = inner;
         if (fill > 0) rect(1, barY + 1, 1 + int(fill), barEnd - 1, true);
-        const uint64_t k = v.trackLength / v.loopLength;
+        const uint64_t k = trackLen / v.loopLength;
         // Ticks and dots need an inner row (barH >= 3). Ticks stay in the inner columns by construction (inner / k >= 3).
         if (k > 1 && inner / k >= 3 && barH >= 3)   // a tick per loop boundary: inverts the top inner row
             for (uint64_t i = 1; i < k; ++i)
