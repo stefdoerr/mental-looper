@@ -219,17 +219,20 @@ public:
     }
     void clearAll() { for (int t = 0; t < kTracks; ++t) clearTrack(t); }
 
-    // Closes every writer, then fades the loops out. Stopping never changes the loop: the engine parks at the top once
-    // the fade, every tail and every punch-out fade have ended. Instant: kRampMs now. EndOfLoop: kRampMs ending at the
-    // top (a shorter rest fades at once over max(rest, kFadeInMs); the park then jumps back to the top). Fade: fadeMs now, cubic. A second stop while the loops still
-    // sound cuts to Instant from the current gain.
+    // Closes every writer and cancels an arm, then fades the loops out. Stopping never changes the loop: the engine
+    // parks at the top once the fade, every tail and every punch-out fade have ended. Instant: kRampMs now. EndOfLoop:
+    // kRampMs ending at the top. A rest of kFadeInMs..kRampMs fades at once over the rest, still ending at the top; a
+    // shorter rest fades over kFadeInMs, and the park then jumps back to the top. Fade: fadeMs (kRampMs..10 s) now,
+    // cubic. A second stop cancels a queued restart and, while the loops still sound, cuts to Instant from the current
+    // gain.
     void stop(StopMode mode, float fadeMs = 3000.0f) {
         if (!enabled_ || tp_ == Transport::Stopped) return;
         if (tp_ == Transport::Stopping) {
-            if (lg_.v > 0.0f) { stopMode_ = StopMode::Instant; restartQueued_ = false; lg_.start(false, 0, ramp_); }
+            restartQueued_ = false;
+            if (lg_.v > 0.0f) { stopMode_ = StopMode::Instant; lg_.start(false, 0, ramp_); }
             return;
         }
-        armed_ = -1;                                     // a stop cancels the arm
+        armed_ = -1;
         for (int u = 0; u < kTracks; ++u) if (writing(tracks_[u])) close(u, false);
         if (!L_ || allEmpty()) return;                   // nothing to stop
         tp_ = Transport::Stopping;
@@ -237,10 +240,12 @@ public:
         restartQueued_ = false;
         uint32_t wait = 0, len = ramp_;
         if (mode == StopMode::EndOfLoop) {
+            // ponytail: started while the loop gain still rises (within kFadeInMs of a restart or kRampMs of a cancel;
+            // automation or MIDI only), the wait holds the partial gain; let the rise finish during the wait if heard
             const uint32_t r = L_ - pos_;
             if (r > ramp_) wait = r - ramp_; else len = std::max(r, fadeIn_);
-        } else if (mode == StopMode::Fade) {
-            len = std::min(std::max(msToSamples(fadeMs, sr_), ramp_), msToSamples(10000.0f, sr_));
+        } else if (mode == StopMode::Fade) {             // clamped in ms first: msToSamples(NaN or < 0) is undefined
+            len = msToSamples(std::min(10000.0f, std::max(kRampMs, fadeMs)), sr_);
         }
         lg_.start(false, wait, len);
     }

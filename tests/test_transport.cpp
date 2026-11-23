@@ -140,9 +140,13 @@ static void endOfLoopLateStopIsClickFree() {
     CHECK(maxStep(slice(r.out, from, r.out.size())) < 2.5f * sineStep(220, 0.1f) + 3.0f * 0.1f / 144.0f);
 }
 static void secondStopClearsAQueuedRestart() {
-    Rig r; baseAndLayer(r); r.lp.stop(StopMode::Fade, 3000.0f); r.lp.restart();   // cancels (not queued)
-    r.lp.stop(StopMode::Instant); r.lp.restart(); r.lp.stop(StopMode::Instant);   // queued, then cleared
-    r.silence(4800); CHECK(r.lp.transport() == Transport::Stopped);
+    { Rig r; baseAndLayer(r); r.lp.stop(StopMode::Fade, 3000.0f); r.lp.restart();   // cancels (not queued)
+      r.lp.stop(StopMode::Instant); r.lp.restart(); r.lp.stop(StopMode::Instant);   // queued, then cleared
+      r.silence(4800); CHECK(r.lp.transport() == Transport::Stopped); }
+    { Rig r; r.lp.pressRec(0); r.feed(sine(220, 0.1f, 24064)); r.lp.pressRec(0);   // tail 50 ms
+      r.lp.stop(StopMode::Instant); r.silence(1000);                               // faded out, the tail still writing
+      r.lp.restart(); r.lp.stop(StopMode::Instant);                                // queued, then cleared
+      r.silence(4800); CHECK(r.lp.transport() == Transport::Stopped && r.lp.position() == 0); }   // parked, stays
 }
 // Track 0 holds a constant 0.5, settled. Tail 0 is a 144-sample crossfade: feeding 0.5 through it keeps the start flat.
 static void constantLoop(Rig& r) {
@@ -156,6 +160,12 @@ static void fadeFollowsTheCurve() {
     CHECK(o[12000] > o[24000] && o[24000] > o[36000]);
     CHECK(peak(slice(o, 48001, o.size())) == 0.0f && r.lp.transport() == Transport::Stopped);
     CHECK(maxStep(o) < 1e-3f);
+}
+static void fadeTimeIsClamped() {                                  // to kRampMs..10 s, in ms first: NaN -> kRampMs
+    for (float ms : {-1.0f, NAN}) {
+        Rig r; constantLoop(r); r.lp.stop(StopMode::Fade, ms); r.silence(720 + 128);
+        CHECK(r.lp.transport() == Transport::Stopped);
+    }
 }
 static void secondStopCutsAPendingFade() {
     Rig r; constantLoop(r); r.lp.stop(StopMode::Fade, 3000.0f); r.silence(4800);
@@ -189,5 +199,6 @@ int main() {
     stopClosesWritersAndNeedsALoop();
     endOfLoopStopsAtTheTop(); endOfLoopKeepsAPendingUndoWhole(); endOfLoopLateStopIsClickFree(); secondStopClearsAQueuedRestart();
     fadeFollowsTheCurve(); secondStopCutsAPendingFade(); bDuringAFadeCancelsIt(); bDuringInstantWindowRestartsAfterPark();
+    fadeTimeIsClamped();
     REPORT();
 }
