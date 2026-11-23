@@ -38,14 +38,17 @@ START_NAMESPACE_DISTRHO
 #endif
 
 static_assert(!(DISTRHO_PLUGIN_WANT_STATE || DISTRHO_PLUGIN_WANT_MIDI_INPUT || DISTRHO_PLUGIN_WANT_MIDI_OUTPUT
-                || DISTRHO_PLUGIN_WANT_TIMEPOS || DISTRHO_PLUGIN_WANT_LATENCY),
-              "paramFromLv2Index assumes no LV2 event or latency ports");
+                || DISTRHO_PLUGIN_WANT_LATENCY),
+              "paramFromLv2Index assumes no LV2 event port but time position's, and no latency port");
 
-// LV2 port index -> parameter index. Valid because the plugin has no event
-// ports (no state, MIDI or time position): params follow the audio ports.
+// LV2 index of the first parameter: after the audio ports and, with time position, DPF's events-in port
+// (no state, MIDI or latency ports).
+constexpr uint32_t kLv2FirstParam = DISTRHO_PLUGIN_NUM_INPUTS + DISTRHO_PLUGIN_NUM_OUTPUTS + DISTRHO_PLUGIN_WANT_TIMEPOS;
+
+// LV2 port index -> parameter index.
 constexpr uint32_t paramFromLv2Index(uint32_t lv2Index)
 {
-    return lv2Index - (DISTRHO_PLUGIN_NUM_INPUTS + DISTRHO_PLUGIN_NUM_OUTPUTS);
+    return lv2Index - kLv2FirstParam;
 }
 
 // Port order and symbols are frozen from the first release (saved pedalboards).
@@ -57,6 +60,7 @@ enum ParamIndex {
     kParamAfterRec, kParamDryThru, kParamTail, kParamHoldTime, kParamBudget,
     kParamOffset, kParamTriggerLatency,
     kParamStopPlay, kParamStopMode, kParamFadeTime, kParamAutoRec, kParamThreshold, kParamDoubleTap,
+    kParamSync,
     kParamBypass,
     kNumParams
 };
@@ -135,7 +139,7 @@ public:
 protected:
     static int hmiPort(uint32_t lv2Index)
     {
-        if (lv2Index < DISTRHO_PLUGIN_NUM_INPUTS + DISTRHO_PLUGIN_NUM_OUTPUTS) return -1;
+        if (lv2Index < kLv2FirstParam) return -1;
         switch (paramFromLv2Index(lv2Index)) {
         case kParamRec:      return ouro::kHmiRec;
         case kParamUndoRedo: return ouro::kHmiUndo;
@@ -228,6 +232,7 @@ protected:
             {"auto_rec",        "Auto Rec",           Bool, 0, 1, 0, ""},
             {"threshold",       "Threshold",          Db, -60, -10, -40, "dB"},
             {"double_tap",      "Double-Tap",         Ms, 150, 600, 400, "ms"},
+            {"sync",            "Sync",               Enum, 0, 1, 0, ""},
         };
         const Def& d = defs[index];
         p.symbol = d.symbol;
@@ -247,6 +252,7 @@ protected:
             static const char* const trackNames[] = {"Track 1", "Track 2", "Track 3", "Track 4"};
             static const char* const afterNames[] = {"Rec > Play", "Rec > Dub"};
             static const char* const stopNames[] = {"Instant", "End of loop", "Fade"};
+            static const char* const syncNames[] = {"Off", "Bars"};
             p.hints |= kParameterIsInteger;
             p.enumValues.count = n;
             p.enumValues.restrictedMode = true;
@@ -254,7 +260,8 @@ protected:
             for (uint8_t k = 0; k < n; ++k)
             {
                 p.enumValues.values[k].value = d.min + k;
-                p.enumValues.values[k].label = index == kParamTrack ? trackNames[k] : index == kParamStopMode ? stopNames[k] : afterNames[k];
+                p.enumValues.values[k].label = index == kParamTrack ? trackNames[k] : index == kParamStopMode ? stopNames[k]
+                                             : index == kParamSync ? syncNames[k] : afterNames[k];
             }
             break;
         }
@@ -315,6 +322,11 @@ protected:
         if (changed(kParamAutoRec))       fEngine.setAutoRec(on(kParamAutoRec));
         if (changed(kParamThreshold))     fEngine.setThresholdDb(fVal[kParamThreshold]);
         fEngine.setBypass(on(kParamBypass));
+
+        // Sync = Bars: MOD's bar grid, before the presses below so they see this block's grid, then its play/stop
+        // edges. The first run and Sync turning on only take MOD's state: neither is an edge. Off: only the flag test.
+        if (changed(kParamSync)) fEngine.setSync(on(kParamSync));
+        if (on(kParamSync)) followMod(changed(kParamSync));
 
         // Volume proxy: follows the selected track; a different value written to it goes to that track.
         const uint32_t vn = kParamVolume1 + sel;
@@ -401,10 +413,33 @@ protected:
     }
 
 private:
-    void stopNow()
+    void stopNow(bool mod = false)                  // mod: MOD's transport stopped
     {
-        const int m = std::min(2, std::max(0, int(std::lround(fVal[kParamStopMode]))));
-        fEngine.stop(ouro::StopMode(m), fVal[kParamFadeTime] * 1000.0f);
+        const auto m = ouro::StopMode(std::min(2, std::max(0, int(std::lround(fVal[kParamStopMode])))));
+        const float fadeMs = fVal[kParamFadeTime] * 1000.0f;
+        if (mod) fEngine.modStopped(m, fadeMs); else fEngine.stop(m, fadeMs);
+    }
+
+    // MOD's grid at this block's start goes to the engine; a play/stop change with a valid grid is an edge, unless
+    // init (the first run, or Sync just turned on). BBT fields are read only when valid (DPF: else unset).
+    void followMod(bool init)
+    {
+        const TimePosition& pos = getTimePosition();
+        const TimePosition::BarBeatTick& b = pos.bbt;
+        double spb = 0.0, toNext = 0.0;
+        if (b.valid)
+        {
+            const double spBeat = 60.0 / b.beatsPerMinute * getSampleRate();
+            spb = b.beatsPerBar * spBeat;
+            toNext = (b.beatsPerBar - (b.beat - 1) - b.tick / b.ticksPerBeat) * spBeat;
+            if (toNext < 1.0 || toNext > spb - 1.0) toNext = 0.0;   // within a sample of the line: on it
+        }
+        fEngine.setGrid(b.valid, pos.playing, spb, toNext);
+        if (b.valid && !init && pos.playing != fModPlaying)
+        {
+            if (pos.playing) fEngine.modStarted(toNext == 0.0); else stopNow(true);
+        }
+        fModPlaying = pos.playing;
     }
 
     // Renders each shown slot and draws it when the bitmap changed or the handle is new. No allocation: fixed buffers.
@@ -453,6 +488,7 @@ private:
     bool fTapStopped = false;               // the pending tap was released while stopped: a double-tap resumes
     uint64_t fSinceTap = 0;
     int fTapTrack = 0;
+    bool fModPlaying = false;               // MOD's transport as of the last run() with Sync on
 
     ouro::HmiBridge fHmi;                           // labels and LEDs; inert without the host's HMI
     const ALABS_HMI_WidgetDraw* fWidgetDraw = nullptr;  // null: host can't show widgets

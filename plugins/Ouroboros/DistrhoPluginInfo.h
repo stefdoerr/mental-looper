@@ -54,6 +54,9 @@
 
 #define DISTRHO_PLUGIN_WANT_PROGRAMS                          0
 #define DISTRHO_PLUGIN_WANT_STATE                             0
+// MOD's transport (tempo, bar position, play/stop) for Sync. Adds DPF's
+// lv2_events_in port between the audio ports and the parameters.
+#define DISTRHO_PLUGIN_WANT_TIMEPOS                           1
 // Enables requestParameterValueChange() — used when the DSP needs to
 // echo parameter changes back to the host (e.g. for derived ports
 // recomputed from other ports).

@@ -65,13 +65,13 @@ static void portSymbolsAreFrozen()
     static const char* kSym[] = { "rec","undo_redo","track","onoff","volume","undo","redo","clear_track",
         "clear_all","on_1","on_2","on_3","on_4","volume_1","volume_2","volume_3","volume_4","after_rec",
         "dry_thru","tail","hold_time","budget","offset","trigger_latency",
-        "stop_play","stop_mode","fade_time","auto_rec","threshold","double_tap" };
-    for (uint32_t i = 0; i < 30; ++i) CHECK(std::strcmp(P().getParameterSymbol(i), kSym[i]) == 0);
+        "stop_play","stop_mode","fade_time","auto_rec","threshold","double_tap","sync" };
+    for (uint32_t i = 0; i < 31; ++i) CHECK(std::strcmp(P().getParameterSymbol(i), kSym[i]) == 0);
     CHECK(P().getParameterDesignation(kParamBypass) == kParameterDesignationBypass);
-    CHECK(kParamBypass == 30 && P().getParameterCount() == 31);
+    CHECK(kParamBypass == 31 && P().getParameterCount() == 32);
     CHECK(std::strcmp(P().getLabel(), DISTRHO_PLUGIN_NAME) == 0);
-    // groups: g1_perform 0-8, g2_tracks 9-16, g3_settings 17-23,25-29; stop_play (24) in perform
-    for (uint32_t i = 0; i < 30; ++i)
+    // groups: g1_perform 0-8, g2_tracks 9-16, g3_settings 17-23,25-30; stop_play (24) in perform
+    for (uint32_t i = 0; i < 31; ++i)
     {
         const uint32_t g = P().getParameterGroupId(i);
         CHECK(g == (i <= 8 || i == 24 ? 0u : i <= 16 ? 1u : 2u));
@@ -86,6 +86,7 @@ static void portSymbolsAreFrozen()
     CHECK(P().getParameterRanges(kParamTriggerLatency).def == 3.0f && P().getParameterRanges(kParamOn1).def == 1.0f);
     CHECK(P().getParameterEnumValues(kParamStopMode).count == 3 && P().getParameterRanges(kParamFadeTime).def == 3.0f);
     CHECK(P().getParameterRanges(kParamThreshold).def == -40.0f && P().getParameterRanges(kParamDoubleTap).def == 400.0f && P().getParameterRanges(kParamAutoRec).def == 0.0f);
+    CHECK(P().getParameterEnumValues(kParamSync).count == 2 && P().getParameterRanges(kParamSync).def == 0.0f);
 }
 
 static void silentAndMono()
@@ -371,6 +372,48 @@ static void widgetShowsLayerCounts()
     CHECK(eng().layerCount(0) == 1 && countRowShows(1));
 }
 
+static double gT = 0.0;                                             // MOD's transport position, in samples
+static void runMod(bool playing, int k) {                           // k blocks; the time position advances as MOD's would
+    for (int i = 0; i < k; ++i) {
+        const double beats = std::fmod(gT / 24000.0, 4.0);          // 120 BPM 4/4 at 48 kHz: 24000 samples a beat
+        TimePosition t; t.playing = playing; t.frame = uint64_t(gT); t.bbt.valid = true; t.bbt.bar = 1 + int(gT / 96000.0);
+        t.bbt.beat = 1 + int(beats); t.bbt.tick = (beats - int(beats)) * 1920.0; t.bbt.barStartTick = 0;
+        t.bbt.beatsPerBar = 4; t.bbt.beatType = 4; t.bbt.ticksPerBeat = 1920; t.bbt.beatsPerMinute = 120;
+        P().setTimePosition(t); runN(1);
+        if (playing) gT += 128;
+    }
+}
+static void syncPressWaitsForTheBar() {
+    fresh(); gT = 50000; set(kParamSync, 1); runMod(true, 1);       // mid-bar
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);
+    CHECK(eng().waiting() && eng().state(0) == ouro::TrackState::Empty);
+    runMod(true, 358);                                              // past the next bar line (96000)
+    CHECK(!eng().waiting() && eng().state(0) == ouro::TrackState::Recording);
+}
+static void modPlayAndStopEdgesFollow() {
+    fresh(); gT = 0; set(kParamSync, 1); runMod(true, 1);           // the first run is no edge
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);           // 128 after the line: back-dated to it
+    runMod(true, 748 - 1);                                          // to 96000 - 128
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runMod(true, 10);
+    CHECK(eng().loopLength() == 96000);
+    runMod(false, 1); runMod(false, 20); CHECK(eng().transport() == ouro::Transport::Stopped);   // stop edge
+    gT = 0; runMod(true, 1); CHECK(eng().transport() == ouro::Transport::Running);               // play edge, on the line
+}
+static void syncSwitchedOnWhilePlayingIsNoEdge() {
+    fresh(); gT = 30000; runMod(true, 1);                           // Sync Off: a free loop
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runMod(true, 100);
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runMod(true, 5);
+    const uint32_t p = eng().position();
+    set(kParamSync, 1); runMod(true, 1);
+    CHECK(eng().position() == (p + 128) % eng().loopLength() && eng().transport() == ouro::Transport::Running);
+    CHECK(!eng().waiting());                                        // no retrigger queued for the next line either
+}
+static void pressSeesThisBlocksGrid() {                             // setGrid comes before the presses
+    fresh(); gT = 50000; set(kParamSync, 1); runMod(true, 1);
+    gT = 97000; set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);   // MOD jumped to 1000 past a line: in grace
+    CHECK(eng().state(0) == ouro::TrackState::Recording);
+}
+
 int main()
 {
     d_nextBufferSize = 128;
@@ -404,5 +447,9 @@ int main()
     reactivateResets();
     disabledEngineStillPassesDry();
     widgetShowsLayerCounts();
+    syncPressWaitsForTheBar();
+    modPlayAndStopEdgesFollow();
+    syncSwitchedOnWhilePlayingIsNoEdge();
+    pressSeesThisBlocksGrid();
     REPORT();
 }
