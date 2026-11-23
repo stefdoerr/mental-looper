@@ -256,11 +256,12 @@ static void maxLengthKeepsAPressWaitingOnAnotherTrack() {
     r.silenceSync(300); CHECK(!r.lp.waiting() && r.lp.state(1) == TrackState::Recording);
 }
 
-// Task 3: following MOD's play/stop.
+// Task 3: following MOD's play/stop. Each retrigger jumps off-phase (not a whole number of periods from the top), so
+// a hard cut would step: without the crossfade these measure 29x (one track, overdub) and 58x (two tracks) sineStep.
 static void modStartRetriggersOnTheLine() {
     SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
     r.lp.pressRec(0); r.feedSync(sine(240, 0.1f, 96000)); r.lp.pressRec(0);   // 240 Hz: whole cycles in a bar
-    r.silenceSync(40000); const size_t from = r.out.size() - 1;
+    r.silenceSync(40064); const size_t from = r.out.size() - 1;
     r.phase = 0.0; r.lp.modStarted(true); r.silenceSync(4800);
     CHECK(r.lp.position() < 4800 + 128 && r.lp.trackPosition(0) < 4800 + 128);   // back near the top
     CHECK(maxStep(slice(r.out, from, r.out.size())) < 2.5f * 2.0f * sineStep(240, 0.1f));   // no click
@@ -269,10 +270,21 @@ static void modStartWhileOverdubbingKeepsTheLayer() {                    // Revi
     SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
     r.lp.pressRec(0); r.feedSync(sine(240, 0.1f, 96000)); r.lp.pressRec(0);
     auto base = r.loopImage();
-    r.lp.pressRec(0); r.feedSync(sine(480, 0.1f, 20000));
+    r.lp.pressRec(0); r.feedSync(sine(480, 0.1f, 20064)); const size_t from = r.out.size() - 1;
     r.phase = 0.0; r.lp.modStarted(true); r.silenceSync(2000);
+    CHECK(maxStep(slice(r.out, from, r.out.size())) < 2.0f * (sineStep(240, 0.1f) + sineStep(480, 0.1f)));   // no click
     CHECK(r.lp.state(0) == TrackState::Playing && r.lp.undoDepth(0) == 1);
     r.lp.undo(0); CHECK(maxAbsDiff(r.settle(), base) < 1e-5f);
+}
+static void modStartOverTracksOfOneAndTwoBars() {                       // the 2-bar track lands on its beginning
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(240, 0.1f, 96000)); r.lp.pressRec(0);
+    r.toPhase(96000 - 1280); r.lp.pressRec(1); r.silenceSync(1280);        // starts on the line
+    r.feedSync(sine(330, 0.1f, 2 * 96000)); r.lp.pressRec(1); CHECK(r.lp.trackLength(1) == 2 * 96000);
+    r.silenceSync(50064); const size_t from = r.out.size() - 1;
+    r.phase = 0.0; r.lp.modStarted(true); r.silenceSync(4800);
+    CHECK(r.lp.position() == 4800 && r.lp.trackPosition(1) == 4800);
+    CHECK(maxStep(slice(r.out, from, r.out.size())) < 2.0f * (sineStep(240, 0.1f) + sineStep(330, 0.1f)));
 }
 static void modStartMidBarWaitsForTheLine() {                            // Review Focus 4
     SyncRig r; r.lp.setSync(true); r.toPhase(0);
@@ -374,7 +386,8 @@ int main() {
     autoRecordFirstLoopKeepsThePreRollAsALeadIn(); autoRecordOntoTheLoopKeepsFromTheLine();
     aQueuedRestartWaitsForTheLine();
     maxLengthKeepsAPressWaitingOnAnotherTrack();
-    modStartRetriggersOnTheLine(); modStartWhileOverdubbingKeepsTheLayer(); modStartMidBarWaitsForTheLine();
+    modStartRetriggersOnTheLine(); modStartWhileOverdubbingKeepsTheLayer(); modStartOverTracksOfOneAndTwoBars();
+    modStartMidBarWaitsForTheLine();
     modStopDuringTheFirstRecordingKeepsWholeBars(); modStartFromStoppedRestarts();
     aRetriggerHearsAPendingUndo(); aRetriggerLeavesTheLoopsAsTheyWere(); aModStartJoinsAWaitingPress();
     aQueuedRestartPlaysOnModsTimeline();
