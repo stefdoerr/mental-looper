@@ -286,7 +286,7 @@ public:
     void setTriggerLatencyMs(float ms) { trigMs_ = std::max(0.0f, std::min(ms, kHistoryMs)); }
     void setRecToDub(bool on) { recToDub_ = on; }
     void setAdvanceMs(float ms) { advMs_ = std::max(0.0f, std::min(ms, 30.0f)); }   // earlier only (R7)
-    void setAutoRec(bool on) { autoRec_ = on; }
+    void setAutoRec(bool on) { autoRec_ = on; if (!on) armed_ = -1; }   // off: nothing starts by itself
     void setThresholdDb(float db) {                      // NaN -> -60
         thr_ = std::pow(10.0f, std::max(-60.0f, std::min(db, -10.0f)) / 20.0f);
     }

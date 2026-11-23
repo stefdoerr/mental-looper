@@ -73,6 +73,8 @@ static void armEdgeCases() {
     { Rig r; r.lp.setTailMs(0); recordBase(r, 24064, 0.1f); recordBaseOn(r, 1); r.lp.undo(1);   // track 1's base undone
       r.lp.setAutoRec(true); r.lp.pressRec(1); CHECK(r.lp.armedTrack() == 1);
       r.lp.redo(1); CHECK(r.lp.state(1) == TrackState::Playing && r.lp.armedTrack() == -1); }   // not empty: no arm
+    { Rig r; r.lp.setAutoRec(true); r.lp.pressRec(0); r.lp.setAutoRec(false);           // Auto Rec off: the arm goes
+      CHECK(r.lp.armedTrack() == -1); r.feed(quietThenCos(0, 2400)); CHECK(r.lp.state(0) == TrackState::Empty); }
 }
 int main() {
     armsInsteadOfRecording(); startsAtTheCrossingWithPreRoll(); closeStaysBackDatedByTriggerLatency();
