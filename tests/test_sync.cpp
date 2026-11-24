@@ -2,21 +2,24 @@
 using ouro::TrackState;
 
 // Drives a Looper with a virtual MOD transport: before each block it hands the engine the grid at that block start.
+// toPhase() hands it too, so a press right after it sees the grid even with no block between (the plugin hands the
+// grid before the presses); grid() alone for a press before any block.
 struct SyncRig : Rig {
     bool valid = true, playing = true; double spb = 96000.0, phase = 0.0;   // 120 BPM 4/4 at 48 kHz; phase: samples into the bar
     using Rig::Rig;
+    void grid() { lp.setGrid(valid, playing, spb, phase == 0.0 ? 0.0 : spb - phase); }
     void feedSync(const std::vector<float>& in) {
         std::vector<float> o(block);
         for (size_t i = 0; i < in.size(); i += block) {
             const uint32_t n = uint32_t(std::min<size_t>(block, in.size() - i));
-            lp.setGrid(valid, playing, spb, phase == 0.0 ? 0.0 : spb - phase);
+            grid();
             lp.process(in.data() + i, o.data(), n);
             out.insert(out.end(), o.begin(), o.begin() + n);
             if (playing) phase = std::fmod(phase + n, spb);
         }
     }
     void silenceSync(uint32_t n) { feedSync(std::vector<float>(n, 0.0f)); }
-    void toPhase(double p) { silenceSync(uint32_t(std::fmod(p - phase + 2 * spb, spb))); }   // block-quantized is fine at 128 | p
+    void toPhase(double p) { silenceSync(uint32_t(std::fmod(p - phase + 2 * spb, spb))); grid(); }   // block-quantized is fine at 128 | p
 };
 
 static void earlyPressWaitsForTheLine() {
@@ -70,7 +73,7 @@ static void syncOffIsUnchanged() {                                       // iden
     CHECK(maxAbsDiff(run(true), run(false)) == 0.0f);
 }
 static void freeGridStartsAtTheFirstPress() {                            // MOD stopped, no loop: the press is bar 1
-    SyncRig r; r.lp.setSync(true); r.playing = false; r.phase = 12345.0;
+    SyncRig r; r.lp.setSync(true); r.playing = false; r.phase = 12345.0; r.grid();
     r.lp.pressRec(0); CHECK(!r.lp.waiting() && r.lp.state(0) == TrackState::Recording);
     r.feedSync(sine(220, 0.1f, 96000 + 640)); r.lp.pressRec(0);         // 13 ms after the free grid's bar 2
     CHECK(r.lp.loopLength() == 96000 && r.lp.bars() == 1);
@@ -400,6 +403,72 @@ static void aQueuedRestartPlaysOnModsTimeline() {
     CHECK(r.lp.position() == uint32_t(r.phase));
 }
 
+// Final review M1: Sync turned off while MOD's retrigger waits drops it (off: don't follow MOD); a press waiting with it
+// acts at once, with no jump.
+static void syncOffDropsAWaitingRetrigger() {
+    for (bool press : {false, true}) {
+        SyncRig r; r.lp.setSync(true); r.toPhase(0);
+        r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(10000);
+        if (press) { r.lp.pressRec(1); CHECK(r.lp.userWaiting(1)); }  // 10000 after the line: waits
+        r.phase = 30000.0; r.lp.modStarted(false); r.silenceSync(128);
+        const uint32_t p = r.lp.position();
+        r.lp.setSync(false); r.silenceSync(128);
+        CHECK(!r.lp.waiting() && r.lp.position() == (p + 128) % 96000);
+        CHECK(r.lp.state(1) == (press ? TrackState::Recording : TrackState::Empty));
+    }
+}
+// Final review M2: C cancels only the user's wait. With only MOD's retrigger waiting (no WAIT) the undo acts; with a
+// press waiting too, the press goes. The retrigger stays either way and fires on the line.
+static void undoKeepsAWaitingRetrigger() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0);
+    r.lp.pressRec(0); r.feedSync(sine(330, 0.1f, 20000)); r.lp.pressRec(0); r.silenceSync(2000);   // a layer
+    r.lp.pressRec(1); CHECK(r.lp.userWaiting(1));                       // 22000 after the line: waits
+    r.phase = 30000.0; r.lp.modStarted(false);
+    r.lp.undo(1); CHECK(r.lp.waiting() && !r.lp.userWaiting(1) && r.lp.undoDepth(0) == 1);   // the press goes
+    r.lp.undo(0); CHECK(r.lp.waiting() && r.lp.undoDepth(0) == 0);    // the undo acts
+    r.silenceSync(66000 + 128); CHECK(!r.lp.waiting() && r.lp.position() <= 128);   // retriggered on the line
+}
+// Final review M3: a first recording started with no grid closes free, as with Sync Off, though a grid appears before
+// the close (MOD starts mid-take).
+static void aRecordingStartedWithNoGridClosesFree() {
+    SyncRig r; r.lp.setSync(true); r.valid = false; r.silenceSync(30000);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000 + 60000));
+    r.valid = true; r.phase = 20000.0; r.feedSync(sine(220, 0.1f, 1280));
+    const uint32_t n = r.lp.recordedSamples();
+    r.lp.pressRec(0);
+    CHECK(!r.lp.waiting() && r.lp.loopLength() == n && r.lp.bars() == 1);
+}
+// Final review M4: MOD starts while a Fade stop still sounds: the stop is cancelled and every track retriggers on the
+// line (mid-bar: on the next). Instant: the restart still waits for the park.
+static void modStartCancelsASoundingStop() {
+    for (bool atLine : {true, false}) {
+        SyncRig r; r.lp.setSync(true); r.toPhase(0);
+        r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(20000);
+        r.playing = false; r.lp.modStopped(ouro::StopMode::Fade, 3000.0f); r.silenceSync(24000);
+        CHECK(r.lp.transport() == ouro::Transport::Stopping);
+        r.playing = true; r.phase = atLine ? 0.0 : 30000.0; r.lp.modStarted(atLine);
+        CHECK(r.lp.transport() == ouro::Transport::Running && r.lp.waiting() == !atLine);
+        r.silenceSync(atLine ? 128 : 66000 + 128); CHECK(!r.lp.waiting() && r.lp.position() == 128);
+    }
+    SyncRig q; q.lp.setSync(true); q.toPhase(0);
+    q.lp.pressRec(0); q.feedSync(sine(220, 0.1f, 96000)); q.lp.pressRec(0); q.silenceSync(20000);
+    q.lp.modStopped(ouro::StopMode::Instant, 3000.0f); q.lp.modStarted(true);
+    CHECK(q.lp.transport() == ouro::Transport::Stopping);
+}
+// Final review M5: the free grid's first line is the press, back-dated by the trigger latency as with Sync Off (a note
+// played with the press keeps its attack): a take closed on its bar 2 is the Sync Off take.
+static void freeGridFirstPressKeepsTheTriggerLatency() {
+    auto take = [](bool sync) {
+        SyncRig r; r.lp.setTriggerLatencyMs(3.0f); r.lp.setSync(sync); r.playing = false;
+        const auto in = sine(220, 0.1f, 5000 + 96000);
+        r.feedSync(slice(in, 0, 5000)); r.lp.pressRec(0); r.feedSync(slice(in, 5000, 5000 + 96000)); r.lp.pressRec(0);
+        CHECK(r.lp.loopLength() == 96000);
+        return r.loopImage();
+    };
+    CHECK(maxAbsDiff(take(true), take(false)) == 0.0f);
+}
+
 int main() {
     earlyPressWaitsForTheLine(); latePressIsBackDatedToTheLine(); pressPastTheGraceWaitsForTheNextLine();
     firstLoopIsWholeBars(); tempoChangeDuringTheFirstRecording(); cancelAWaitingPress(); noGridActsAtOnce();
@@ -418,5 +487,7 @@ int main() {
     aRetriggerHearsAPendingUndo(); aRetriggerLeavesTheLoopsAsTheyWere(); aModStartJoinsAWaitingPress();
     aQueuedRestartPlaysOnModsTimeline(); userWaitingIsAPressAnArmOrARestartNotARetrigger();
     aWaitingArmIsUserWaiting();
+    syncOffDropsAWaitingRetrigger(); undoKeepsAWaitingRetrigger(); aRecordingStartedWithNoGridClosesFree();
+    modStartCancelsASoundingStop(); freeGridFirstPressKeepsTheTriggerLatency();
     REPORT();
 }

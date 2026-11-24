@@ -199,8 +199,9 @@ public:
             armed_ = -1;
             if (same) return;
         }
-        double ph;
-        const bool snap = (recTrack_ >= 0 || (tracks_[t].state == TrackState::Empty && !autoRec_)) && gridPhase(ph);
+        double ph;                                       // the free grid's first line (nothing recorded, MOD stopped)
+        const bool snap = (recTrack_ >= 0 || (tracks_[t].state == TrackState::Empty && !autoRec_ && (L_ || gPlaying_)))
+                          && gridPhase(ph);              // is the press: back-dated by the trigger latency, no snap
         const uint32_t since = snap ? uint32_t(ph) : 0;
         if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = {Pending::Press, t, pend_.retrig}; return; }
         bool cont = false, offset = true, trim = false;  // cont: the new writer complements the closed one's tail or
@@ -223,8 +224,8 @@ public:
 
     void undo(int t) {
         if (!valid(t)) return;
-        if (armed_ >= 0) { armed_ = -1; return; }       // a tap on C cancels the arm, and only that
-        if (pend_.kind) { pend_ = {}; return; }         // likewise an action waiting for the line
+        if (armed_ >= 0) { armed_ = -1; return; }       // a tap on C cancels the arm, and only that; likewise the
+        if (pend_.kind && pend_.kind != Pending::Retrigger) { cancelWaiting(); return; }   // user's wait (not MOD's)
         Track& tr = tracks_[t];
         if (tr.state == TrackState::Recording) {         // abort: the track is empty again
             tr.state = TrackState::Empty;
@@ -331,12 +332,13 @@ public:
 
     // Sync = Bars: MOD's transport started (the plugin calls it on the edge, before process()). atLine: on a bar line,
     // at this block's first sample; else on the next line. Running: every track retriggers (see retrigger()); a later
-    // line makes it the waiting action, or joins the one waiting (it goes first on the line), and a press keeps it:
-    // only C and a stop cancel it. Stopped: it starts from the top, or the restart waits for the line. Stopping: it
+    // line makes it the waiting action, or joins the one waiting (it goes first on the line), and a press or C keeps
+    // it: only a stop or Sync off cancels it. Stopped: it starts from the top, or the restart waits for the line.
+    // Stopping: a stop still sounding (End of loop, Fade) is cancelled as B cancels it, then as Running; else it
     // restarts at the park, on MOD's grid (see restart()). A first recording ignores it, and so do empty tracks.
     void modStarted(bool atLine) {
         if (!enabled_ || recTrack_ >= 0 || allEmpty()) return;
-        if (tp_ == Transport::Stopping) { restartQueued_ = true; return; }
+        if (tp_ == Transport::Stopping) { restart(); if (tp_ != Transport::Running) return; }
         if (tp_ == Transport::Stopped) {                 // only a restart can wait: kept, never toggled
             if (atLine) { pend_ = {}; start(0); } else pend_ = {Pending::Restart, -1};
             return;
@@ -381,8 +383,15 @@ public:
     }
     // Sync = Bars (off: no grid, everything as before). setGrid comes once per block, before process(): MOD's bar
     // grid at the block start. toNextBar: samples to the next bar line, in [0, samplesPerBar). A bar outside
-    // kMinLoopMs..kMaxLoopSeconds is no grid.
-    void setSync(bool on) { sync_ = on; if (!on) gValid_ = false; }   // off: the grid is ignored, nothing kept up
+    // kMinLoopMs..kMaxLoopSeconds is no grid. Off: the grid is ignored and nothing kept up; MOD's waiting retrigger
+    // goes (off: don't follow MOD), a waiting press acts at once.
+    void setSync(bool on) {
+        sync_ = on;
+        if (on) return;
+        gValid_ = false;
+        pend_.retrig = false;
+        if (pend_.kind == Pending::Retrigger) pend_ = {};
+    }
     void setGrid(bool valid, bool playing, double samplesPerBar, double toNextBar) {
         gValid_ = sync_ && valid && samplesPerBar >= minLoop_ && samplesPerBar <= maxRec_;   // NaN fails
         gPlaying_ = playing;
@@ -496,7 +505,7 @@ private:
     float fadeInGain(uint32_t i) const { return i < fadeIn_ ? float(i) / float(fadeIn_) : 1.0f; }
     static bool writing(const Track& tr) { return tr.state == TrackState::Recording || tr.state == TrackState::Overdubbing; }
     float target(const Track& tr) const { return tr.state != TrackState::Empty && tr.on && !bypass_ ? tr.vol : 0.0f; }
-    // Cancels the waiting press, arm or restart. MOD's retrigger stays: only C and a stop cancel it.
+    // Cancels the waiting press, arm or restart. MOD's retrigger stays: only a stop or Sync off cancels it.
     void cancelWaiting() { pend_ = {pend_.retrig ? Pending::Retrigger : Pending::None, -1, pend_.retrig}; }
     bool idle() const {                                  // every track empty and ramped out
         for (const Track& tr : tracks_) if (tr.state != TrackState::Empty || tr.gain.v != 0.0f) return false;
@@ -535,6 +544,10 @@ private:
     // writes on the old timeline, the punch-out fades and the first loop's tail (see writeOut()), goes on in step.
     // ponytail: the old read lacks an undo or redo's hold-back while it ramps in (pressed within kRampMs before): it
     // steps by the part held back; carry each track's adj into the crossfade if that is heard
+    // ponytail: two retriggers can overlap: a waiting one fires on a block's last sample, then a stop edge and a start
+    // edge on a line come in the next two blocks (the start cancels a sounding stop, see modStarted(), or B does). The
+    // second drops the rest of the first's old read: a step of the share left, xf_ / fadeIn_ of the first's old - new
+    // (about 0.1 at 128 frames, 48 kHz); keep a second old read if that is heard
     void retrigger() {
         if (allEmpty()) return;                          // every track cleared while it waited
         for (int u = 0; u < kTracks; ++u) if (writing(tracks_[u])) close(u, false);
@@ -560,9 +573,10 @@ private:
     // The bar grid at the next sample; false if there is none (Sync off, or no valid grid). ph: samples since the last
     // line, fractional; the sample is on a line when ph < 1. The grid is MOD's bars while it plays, else the loop's
     // bars, else (nothing recorded) the press is the line. The first recording counts lines from its start (a line)
-    // unless it started on MOD's grid and MOD still plays: a recording started with MOD stopped keeps that grid.
+    // unless it started on MOD's grid and MOD still plays: a recording started with MOD stopped keeps that grid, and
+    // one started with no grid has none (it closes free, as with Sync off).
     bool gridPhase(double& ph) const {
-        if (!gValid_) return false;                      // also false with Sync off (see setSync)
+        if (!gValid_ || (recTrack_ >= 0 && recNoGrid_)) return false;   // also false with Sync off (see setSync)
         if (recTrack_ >= 0 && (recFree_ || !gPlaying_)) ph = phaseIn(rec_, spb_);
         else if (gPlaying_) ph = phaseIn(modPh_ + at_, spb_);
         else if (L_) ph = phaseIn(pos_, double(L_) / bars_);
@@ -604,6 +618,7 @@ private:
         recD_ = msToSamples(trigMs_, sr_);               // <= minLoop_ <= histLen_ (trigMs_ <= kMinLoopMs)
         recTrack_ = t;
         recFree_ = gValid_ && !gPlaying_;
+        recNoGrid_ = !gValid_;
         tracks_[t].state = TrackState::Recording;
     }
 
@@ -1078,6 +1093,7 @@ private:
     uint32_t bars_ = 1;              // the first loop's bars
     bool sync_ = false, gValid_ = false, gPlaying_ = false;   // Sync = Bars; MOD's grid: usable, transport playing
     bool recFree_ = false;           // the first recording started on the free grid (MOD stopped): it keeps it
+    bool recNoGrid_ = false;         // the first recording started with no grid: it keeps none
     double spb_ = 0.0, modPh_ = 0.0; // MOD's samples per bar, and samples since its last line at the block start
     uint32_t xf_ = 0;                // a retrigger's crossfade: samples to go
     uint32_t at_ = 0;                // the sample process() is at in its block, while it asks gridPhase (else 0)
