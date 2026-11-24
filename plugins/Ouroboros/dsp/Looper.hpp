@@ -225,7 +225,7 @@ public:
     void undo(int t) {
         if (!valid(t)) return;
         if (armed_ >= 0) { armed_ = -1; return; }       // a tap on C cancels the arm, and only that; likewise the
-        if (pend_.kind && pend_.kind != Pending::Retrigger) { cancelWaiting(); return; }   // user's wait (not MOD's)
+        if (userWaiting()) { cancelWaiting(); return; } // user's wait, on any track (not MOD's)
         Track& tr = tracks_[t];
         if (tr.state == TrackState::Recording) {         // abort: the track is empty again
             tr.state = TrackState::Empty;
@@ -440,7 +440,8 @@ public:
     Transport transport() const { return tp_; }
     int armedTrack() const { return armed_; }            // -1: none
     bool waiting() const { return pend_.kind; }          // an action waits for the next bar line
-    // The wait is the user's own: a press or arm on t, or a restart (not MOD's lone retrigger).
+    // The wait is the user's own: a press or arm on t, or a restart (not MOD's lone retrigger). No t: on any track.
+    bool userWaiting() const { return pend_.kind && pend_.kind != Pending::Retrigger; }
     bool userWaiting(int t) const { return pend_.kind == Pending::Restart || ((pend_.kind == Pending::Press || pend_.kind == Pending::Arm) && pend_.t == t); }
     int waitingTrack() const { return pend_.t; }         // its track; -1: none, or a restart
     uint32_t bars() const { return L_ ? bars_ : 0; }     // the first loop's bars (1 if recorded without a grid)
@@ -547,7 +548,7 @@ private:
     // ponytail: two retriggers can overlap: a waiting one fires on a block's last sample, then a stop edge and a start
     // edge on a line come in the next two blocks (the start cancels a sounding stop, see modStarted(), or B does). The
     // second drops the rest of the first's old read: a step of the share left, xf_ / fadeIn_ of the first's old - new
-    // (about 0.1 at 128 frames, 48 kHz); keep a second old read if that is heard
+    // (about 0.1 at 128-frame blocks and 48 kHz, larger with smaller blocks); keep a second old read if that is heard
     void retrigger() {
         if (allEmpty()) return;                          // every track cleared while it waited
         for (int u = 0; u < kTracks; ++u) if (writing(tracks_[u])) close(u, false);

@@ -378,9 +378,9 @@ protected:
                     fTapPending = false; fDone = true; fStoppedPress = false;
                     if (fTapStopped) fEngine.restart(); else stopNow();
                 }
-                // A wait shown on this track is cancelled now: after the window the line may have acted. The tap
-                // then undoes nothing, but a second tap still stops.
-                else if ((fTapCancels = fEngine.userWaiting(sel))) fEngine.undo(sel);
+                // A wait for the line, on any track, is cancelled now: after the window the line may have acted.
+                // The tap then undoes nothing, but a second tap still stops.
+                else if ((fTapCancels = fEngine.userWaiting())) fEngine.undo(sel);
             }
             fHold += frames;
             if (!fDone && !fStoppedPress && fHold >= hold) { fDone = true; fEngine.redo(sel); }

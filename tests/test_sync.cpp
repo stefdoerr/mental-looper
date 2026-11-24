@@ -425,7 +425,8 @@ static void undoKeepsAWaitingRetrigger() {
     r.lp.pressRec(0); r.feedSync(sine(330, 0.1f, 20000)); r.lp.pressRec(0); r.silenceSync(2000);   // a layer
     r.lp.pressRec(1); CHECK(r.lp.userWaiting(1));                       // 22000 after the line: waits
     r.phase = 30000.0; r.lp.modStarted(false);
-    r.lp.undo(1); CHECK(r.lp.waiting() && !r.lp.userWaiting(1) && r.lp.undoDepth(0) == 1);   // the press goes
+    CHECK(r.lp.userWaiting() && r.lp.userWaiting(1) && !r.lp.userWaiting(0));
+    r.lp.undo(1); CHECK(r.lp.waiting() && !r.lp.userWaiting() && r.lp.undoDepth(0) == 1);   // the press goes
     r.lp.undo(0); CHECK(r.lp.waiting() && r.lp.undoDepth(0) == 0);    // the undo acts
     r.silenceSync(66000 + 128); CHECK(!r.lp.waiting() && r.lp.position() <= 128);   // retriggered on the line
 }

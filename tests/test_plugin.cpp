@@ -441,6 +441,22 @@ static void tapCancelsAWaitingActionAtOnce() {
     CHECK(eng().state(0) == ouro::TrackState::Recording && eng().userWaiting(0));
     runTo(192000 + 128 * 200); CHECK(eng().loopLength() == 192000 && eng().state(0) == ouro::TrackState::Playing);
 }
+// The tap cancels a wait on any track at once: B waits on track 1, the knob turns to track 2 (its loop), C just before
+// the line. Track 1 does not start and track 2 is not undone.
+static void tapCancelsAWaitOnAnotherTrack() {
+    fresh(); gT = 0; set(kParamSync, 1); set(kParamTrack, 2); runMod(true, 1);
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);           // track 2's first loop: one bar
+    runTo(96000 - 1280); set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runTo(96000 + 128 * 20);
+    CHECK(eng().loopLength() == 96000 && eng().state(1) == ouro::TrackState::Playing);
+    set(kParamTrack, 1); runMod(true, 1);
+    runTo(2 * 96000 + 30000); set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);   // track 1 waits for the line
+    CHECK(eng().userWaiting(0) && eng().waitingTrack() == 0);
+    set(kParamTrack, 2); runMod(true, 1); runTo(3 * 96000 - 1280);
+    set(kParamUndoRedo, 1); runMod(true, 1); CHECK(!eng().waiting());
+    runMod(true, 19); set(kParamUndoRedo, 0); runMod(true, 200);
+    CHECK(eng().state(0) == ouro::TrackState::Empty && !eng().waiting());
+    CHECK(eng().state(1) == ouro::TrackState::Playing && !eng().canRedo(1));
+}
 
 int main()
 {
@@ -480,5 +496,6 @@ int main()
     syncSwitchedOnWhilePlayingIsNoEdge();
     pressSeesThisBlocksGrid();
     tapCancelsAWaitingActionAtOnce();
+    tapCancelsAWaitOnAnotherTrack();
     REPORT();
 }
