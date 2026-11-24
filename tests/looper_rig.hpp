@@ -8,8 +8,8 @@
 struct Rig {                                         // trigger latency forced to 0 unless a test sets it
     ouro::Looper lp; double sr; uint32_t block; std::vector<float> out;
 
-    explicit Rig(double rate = 48000.0, uint32_t blockSize = 128) : sr(rate), block(blockSize) {
-        lp.init(sr, block);
+    explicit Rig(double rate = 48000.0, uint32_t blockSize = 128, size_t poolBytes = 0) : sr(rate), block(blockSize) {
+        lp.init(sr, block, poolBytes);              // 0: the default pool
         lp.setTriggerLatencyMs(0.0f);
     }
     void feed(const std::vector<float>& in) {        // block-sized process() calls; appends to out
@@ -39,6 +39,27 @@ struct Rig {                                         // trigger latency forced t
         silence(std::max(lp.loopLength(), block));
         return loopImage();
     }
+};
+
+// Drives a Looper with a virtual MOD transport: before each block it hands the engine the grid at that block start.
+// toPhase() hands it too, so a press right after it sees the grid even with no block between (the plugin hands the
+// grid before the presses); grid() alone for a press before any block.
+struct SyncRig : Rig {
+    bool valid = true, playing = true; double spb = 96000.0, phase = 0.0;   // 120 BPM 4/4 at 48 kHz; phase: samples into the bar
+    using Rig::Rig;
+    void grid() { lp.setGrid(valid, playing, spb, phase == 0.0 ? 0.0 : spb - phase); }
+    void feedSync(const std::vector<float>& in) {
+        std::vector<float> o(block);
+        for (size_t i = 0; i < in.size(); i += block) {
+            const uint32_t n = uint32_t(std::min<size_t>(block, in.size() - i));
+            grid();
+            lp.process(in.data() + i, o.data(), n);
+            out.insert(out.end(), o.begin(), o.begin() + n);
+            if (playing) phase = std::fmod(phase + n, spb);
+        }
+    }
+    void silenceSync(uint32_t n) { feedSync(std::vector<float>(n, 0.0f)); }
+    void toPhase(double p) { silenceSync(uint32_t(std::fmod(p - phase + 2 * spb, spb))); grid(); }   // block-quantized is fine at 128 | p
 };
 
 inline float fadeInGain(uint32_t i, double sr = 48000.0) {   // linear 0->1 over kFadeInMs

@@ -3,6 +3,7 @@
 #include "Font.hpp"
 #include "../dsp/Looper.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -14,6 +15,9 @@ struct WidgetView {
     Transport transport; bool armed[kTracks]; bool waiting;   // waiting: a user action waits for the bar line
     uint32_t trackLength, trackPosition;   // selected track: length (0 = none or still recording onto the loop), samples since its start
     uint32_t layers[kTracks];              // layers heard per track (Looper::layerCount); 0 draws no count
+    int part, queuedPart;                  // current part 0-3; the part a switch waits for (-1: none)
+    int songStep, songLength;              // the song's playing step (-1: not playing) and its length
+    bool memoryFull;                       // the pool is full: FULL takes the state text's place
 };
 
 // Mono1: rows top->bottom, (w+7)/8 bytes per row, MSB = leftmost pixel, 1 = lit. Returns bytes written.
@@ -47,14 +51,34 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
     if (tall)
     {
         static const char* const names[] = { "--", "REC", "PLAY", "DUB" };   // by TrackState: Empty, Recording, Playing, Overdubbing
-        char t[3] = { 'T', char('1' + v.selected), '\0' };
+        // Part letter and track ("A1"); the selection frame below shows the track too.
+        char t[3] = { char('A' + v.part), char('1' + v.selected), '\0' };
         drawText(bits, w, 0, textY, t);
         const char* txt = names[int(v.state[v.selected])];
         if (v.transport == Transport::Stopped) txt = "STOP";
         else if (v.transport == Transport::Stopping) txt = v.blinkOn ? "STOP" : "";
         else if (v.armed[v.selected]) txt = "ARM";
         if (v.waiting) txt = "WAIT";
-        drawText(bits, w, 14, textY, txt);
+        // State slot, highest first: FULL, WAIT/ARM/STOP, REC/DUB, the queued "A>B" (blinking), the song position (instead of PLAY or --).
+        const TrackState st = v.state[v.selected];
+        const bool special = v.transport != Transport::Running || v.armed[v.selected] || v.waiting;
+        const bool writing = st == TrackState::Recording || st == TrackState::Overdubbing;
+        char pos[16];
+        int tx = 14;
+        char sw[4] = { char('A' + v.part), '>', char('A' + v.queuedPart), '\0' };
+        if (!special && !writing)
+        {
+            if (v.queuedPart >= 0 && v.queuedPart < kParts && v.blinkOn) txt = sw;
+            else if (v.songStep >= 0)
+            {
+                std::snprintf(pos, sizeof pos, "%d/%d", std::min(v.songStep + 1, v.songLength), v.songLength);   // a step edited to Stop can leave songStep past the end
+                txt = pos;
+                const int len = int(std::strlen(pos));
+                if (14 + len * 6 - 1 > w) tx = w - (len * 6 - 1);   // "10/16" is 29 px wide: keeps the whole text in 40 px
+            }
+        }
+        if (v.memoryFull) txt = "FULL";
+        drawText(bits, w, tx, textY, txt);
 
         const int cell = w / kTracks;
         for (int i = 0; i < kTracks; ++i)

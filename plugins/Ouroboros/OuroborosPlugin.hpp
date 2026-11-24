@@ -10,12 +10,14 @@
 #include "dsp/Looper.hpp"
 #include "hmi/HmiBridge.hpp"
 #include "hmi/LoopWidget.hpp"
+#include "hmi/SongWidget.hpp"
 #include "hmi/lv2-hmi.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 #include <memory>
@@ -63,11 +65,19 @@ enum ParamIndex {
     kParamOffset, kParamTriggerLatency,
     kParamStopPlay, kParamStopMode, kParamFadeTime, kParamAutoRec, kParamThreshold, kParamDoubleTap,
     kParamSync, kParamClick, kParamClickLevel, kParamLength,
+    kParamPart, kParamSong, kParamStep, kParamStepPart, kParamStepRepeats,
+    // The song's steps, hidden: saved with the pedalboard (the Step proxies edit them).
+    kParamStep1Part, kParamStep1Repeats, kParamStep2Part, kParamStep2Repeats, kParamStep3Part, kParamStep3Repeats,
+    kParamStep4Part, kParamStep4Repeats, kParamStep5Part, kParamStep5Repeats, kParamStep6Part, kParamStep6Repeats,
+    kParamStep7Part, kParamStep7Repeats, kParamStep8Part, kParamStep8Repeats, kParamStep9Part, kParamStep9Repeats,
+    kParamStep10Part, kParamStep10Repeats, kParamStep11Part, kParamStep11Repeats, kParamStep12Part, kParamStep12Repeats,
+    kParamStep13Part, kParamStep13Repeats, kParamStep14Part, kParamStep14Repeats, kParamStep15Part, kParamStep15Repeats,
+    kParamStep16Part, kParamStep16Repeats,
     kParamBypass,
     kNumParams
 };
 
-enum GroupId { kGroupPerform = 0, kGroupTracks, kGroupSettings };
+enum GroupId { kGroupPerform = 0, kGroupTracks, kGroupSettings, kGroupSong };
 
 class OuroborosPlugin : public Plugin
 {
@@ -111,7 +121,8 @@ public:
 
     void widgetShown(const char* symbol, ALABS_HMI_Widget w, const ALABS_HMI_WidgetArea* area)
     {
-        if (fWidgetDraw == nullptr || w == nullptr || area == nullptr || std::strcmp(symbol, "loop") != 0
+        const bool song = symbol != nullptr && std::strcmp(symbol, "song_steps") == 0;
+        if (fWidgetDraw == nullptr || w == nullptr || area == nullptr || symbol == nullptr || (!song && std::strcmp(symbol, "loop") != 0)
             || area->pixelFormat != ALABS_HMI_PixelFormat_Mono1
             || area->width == 0 || area->width > kMaxW || area->height == 0 || area->height > kMaxH)
             return;
@@ -122,6 +133,7 @@ public:
             {
                 s.w.store(area->width, std::memory_order_relaxed);
                 s.h.store(area->height, std::memory_order_relaxed);
+                s.song.store(song, std::memory_order_relaxed);
                 s.handle.store(w, std::memory_order_release);
                 return;
             }
@@ -196,6 +208,7 @@ protected:
         case kGroupPerform:  pg.name = "Perform";  pg.symbol = "g1_perform";  break;
         case kGroupTracks:   pg.name = "Tracks";   pg.symbol = "g2_tracks";   break;
         case kGroupSettings: pg.name = "Settings"; pg.symbol = "g3_settings"; break;
+        case kGroupSong:     pg.name = "Song";     pg.symbol = "g4_song";     break;
         default: Plugin::initPortGroup(groupId, pg); break;
         }
     }
@@ -207,9 +220,24 @@ protected:
             p.initDesignation(kParameterDesignationBypass);
             return;
         }
+        if (index >= kParamStep1Part)           // step1_part, step1_repeats, ...: A x1, then Loop
+        {
+            const unsigned s = (index - kParamStep1Part) / 2 + 1;
+            const bool reps = (index - kParamStep1Part) % 2;
+            char sym[32], name[32];
+            std::snprintf(sym, sizeof sym, reps ? "step%u_repeats" : "step%u_part", s);
+            std::snprintf(name, sizeof name, reps ? "Step %u Repeats" : "Step %u Part", s);
+            p.symbol = sym;
+            p.name = name;
+            p.ranges.min = reps ? 1 : 0; p.ranges.max = reps ? 16 : ouro::kStepStop;
+            p.ranges.def = reps ? 1 : s == 1 ? 0 : ouro::kStepLoop;
+            p.groupId = kGroupSong;
+            p.hints = kParameterIsAutomatable | kParameterIsInteger | kParameterIsHidden;
+            return;
+        }
         enum { Trig, Bool, Int, Enum, Db, Ms };
         struct Def { const char* symbol; const char* name; int kind; float min, max, def; const char* unit; };
-        static const Def defs[kParamBypass] = {
+        static const Def defs[kParamStep1Part] = {
             {"rec",             "Rec",                Trig, 0, 1, 0, ""},
             {"undo_redo",       "Undo/Redo",          Bool, 0, 1, 0, ""},
             {"track",           "Track",              Enum, 1, 4, 1, ""},
@@ -244,13 +272,19 @@ protected:
             {"click",           "Click",              Bool, 0, 1, 0, ""},
             {"click_level",     "Click Level",        Db, -40, 0, -10, "dB"},
             {"length",          "Length",             Enum, 0, 16, 0, ""},
+            {"part",            "Part",               Enum, 0, 3, 0, ""},
+            {"song",            "Song",               Bool, 0, 1, 0, ""},
+            {"step",            "Step",               Int,  1, 16, 1, ""},
+            {"step_part",       "Step Part",          Enum, 0, 5, 0, ""},
+            {"step_repeats",    "Step Repeats",       Int,  1, 16, 1, ""},
         };
         const Def& d = defs[index];
         p.symbol = d.symbol;
         p.name = d.name;
         p.unit = d.unit;
         p.ranges.min = d.min; p.ranges.max = d.max; p.ranges.def = d.def;
-        p.groupId = index <= kParamClearAll || index == kParamStopPlay ? kGroupPerform : index <= kParamVolume4 ? kGroupTracks : kGroupSettings;
+        p.groupId = index <= kParamClearAll || index == kParamStopPlay ? kGroupPerform
+                  : index <= kParamVolume4 ? kGroupTracks : index >= kParamPart ? kGroupSong : kGroupSettings;
         p.hints = kParameterIsAutomatable;
         switch (d.kind)
         {
@@ -259,11 +293,13 @@ protected:
         case Int:  p.hints |= kParameterIsInteger; break;
         case Enum:
         {
-            const uint8_t n = index == kParamTrack ? 4 : index == kParamStopMode ? 3 : index == kParamLength ? 17 : 2;
+            const uint8_t n = index == kParamTrack || index == kParamPart ? 4 : index == kParamStopMode ? 3
+                            : index == kParamLength ? 17 : index == kParamStepPart ? 6 : 2;
             static const char* const trackNames[] = {"Track 1", "Track 2", "Track 3", "Track 4"};
             static const char* const afterNames[] = {"Rec > Play", "Rec > Dub"};
             static const char* const stopNames[] = {"Instant", "End of loop", "Fade"};
             static const char* const syncNames[] = {"Off", "Bars"};
+            static const char* const partNames[] = {"A", "B", "C", "D", "Loop", "Stop"};
             static const char* const lengthNames[] = {"Free", "1 bar", "2 bars", "3 bars", "4 bars", "5 bars", "6 bars",
                 "7 bars", "8 bars", "9 bars", "10 bars", "11 bars", "12 bars", "13 bars", "14 bars", "15 bars", "16 bars"};
             p.hints |= kParameterIsInteger;
@@ -275,7 +311,7 @@ protected:
                 p.enumValues.values[k].value = d.min + k;
                 p.enumValues.values[k].label = index == kParamTrack ? trackNames[k] : index == kParamStopMode ? stopNames[k]
                                              : index == kParamSync ? syncNames[k] : index == kParamLength ? lengthNames[k]
-                                             : afterNames[k];
+                                             : index == kParamPart || index == kParamStepPart ? partNames[k] : afterNames[k];
             }
             break;
         }
@@ -309,9 +345,10 @@ protected:
 
         const auto on = [this](uint32_t i) { return fVal[i] > 0.5f; };
         const auto request = [this](uint32_t i, float v) { fVal[i] = v; fPrev[i] = v; requestParameterValueChange(i, v); };
+        const auto num = [this](uint32_t i, int lo, int hi) { return std::min(hi, std::max(lo, int(std::lround(fVal[i])))); };
 
         // Track selection first: it retargets everything below.
-        const int sel = std::min(3, std::max(0, int(std::lround(fVal[kParamTrack])) - 1));
+        const int sel = num(kParamTrack, 1, 4) - 1;
         const bool trackChanged = sel != fSel;
         fSel = sel;
         if (fFirst)
@@ -338,6 +375,8 @@ protected:
         if (changed(kParamThreshold))     fEngine.setThresholdDb(fVal[kParamThreshold]);
         if (changed(kParamLength))        fEngine.setFixedBars(uint32_t(std::max(0L, std::lround(fVal[kParamLength]))));
         if (changed(kParamClickLevel))    fClickGain = std::pow(10.0f, fVal[kParamClickLevel] / 20.0f);
+        if (changed(kParamStopMode) || changed(kParamFadeTime))   // what a Stop step uses
+            fEngine.setStopMode(stopMode(), fVal[kParamFadeTime] * 1000.0f);
         fEngine.setBypass(on(kParamBypass));
 
         // Sync = Bars: MOD's bar grid, before the presses below so they see this block's grid, then its play/stop
@@ -355,6 +394,28 @@ protected:
             fEngine.setVolumeDb(sel, fVal[kParamVolume]);
             request(vn, fVal[kParamVolume]);
         }
+
+        // The song: the hidden step ports are the arrangement (every one on the first run, so a loaded song is in place
+        // before Song comes on). Step Part and Step Repeats are proxies of the selected step's ports, as Volume is of
+        // the selected track's. Part goes before Song: with both changed (a load, a preset) Song on still holds, and a
+        // load with Song on starts in step 1's part.
+        for (int s = 0; s < ouro::kSteps; ++s)
+        {
+            const uint32_t i = kParamStep1Part + 2 * s;
+            if (changed(i) || changed(i + 1)) fEngine.setStep(s, num(i, 0, ouro::kStepStop), uint32_t(num(i + 1, 1, 16)));
+        }
+        const int step = num(kParamStep, 1, ouro::kSteps) - 1;
+        const uint32_t sp = kParamStep1Part + 2 * step;
+        bool edited = false;
+        for (uint32_t k = 0; k < 2; ++k)
+        {
+            const uint32_t proxy = kParamStepPart + k;
+            if (changed(kParamStep) || (changed(sp + k) && !changed(proxy))) request(proxy, fVal[sp + k]);
+            else if (changed(proxy) && fVal[proxy] != fVal[sp + k]) { request(sp + k, fVal[proxy]); edited = true; }
+        }
+        if (edited) fEngine.setStep(step, num(sp, 0, ouro::kStepStop), uint32_t(num(sp + 1, 1, 16)));
+        if (changed(kParamPart)) fEngine.setPart(num(kParamPart, 0, ouro::kParts - 1));
+        if (changed(kParamSong)) fEngine.setSong(on(kParamSong));
 
         // Triggers and the footswitch act on rising edges only; a trigger held high from the
         // start (previous value NaN on the first run) counts as a press.
@@ -427,6 +488,23 @@ protected:
         fEngine.process(inputs[0], outputs[0], frames);
         renderClick(outputs[1], frames);        // after the engine: an output may share the input's buffer
 
+        // The engine moves Part (the song, Clear All) and Song (a hand on Part turns it off): the ports follow. Part
+        // shows the part to play next, a queued one included. After a switch, On 1-4, Volume 1-4 and Volume show the
+        // new part's tracks.
+        const int next = fEngine.queuedPart() >= 0 ? fEngine.queuedPart() : fEngine.part();
+        if (num(kParamPart, 0, ouro::kParts - 1) != next) request(kParamPart, float(next));
+        if (on(kParamSong) != fEngine.songOn()) request(kParamSong, fEngine.songOn() ? 1.0f : 0.0f);
+        if (fEngine.part() != fPart)
+        {
+            fPart = fEngine.part();
+            for (int t = 0; t < 4; ++t)
+            {
+                request(kParamOn1 + t, fEngine.isOn(t) ? 1.0f : 0.0f);
+                request(kParamVolume1 + t, fEngine.volumeDb(t));
+            }
+            request(kParamVolume, fEngine.volumeDb(sel));
+        }
+
         // Widgets: blink toggles every 250 ms of audio; slots are redrawn every 960 samples (20 ms at 48 kHz).
         fBlinkAcc += frames;
         const uint32_t blinkPeriod = uint32_t(getSampleRate() * 0.25);
@@ -439,11 +517,14 @@ protected:
     }
 
 private:
+    ouro::StopMode stopMode() const
+    {
+        return ouro::StopMode(std::min(2, std::max(0, int(std::lround(fVal[kParamStopMode])))));
+    }
     void stopNow(bool mod = false)                  // mod: MOD's transport stopped
     {
-        const auto m = ouro::StopMode(std::min(2, std::max(0, int(std::lround(fVal[kParamStopMode])))));
         const float fadeMs = fVal[kParamFadeTime] * 1000.0f;
-        if (mod) fEngine.modStopped(m, fadeMs); else fEngine.stop(m, fadeMs);
+        if (mod) fEngine.modStopped(stopMode(), fadeMs); else fEngine.stop(stopMode(), fadeMs);
     }
 
     // MOD's grid at this block's start goes to the engine; a play/stop change with a valid grid is an edge, unless
@@ -531,6 +612,12 @@ private:
         v.loopLength = fEngine.loopLength(); v.position = fEngine.position();
         v.trackLength = fEngine.trackLength(fSel); v.trackPosition = fEngine.trackPosition(fSel);
         v.recordedSamples = fEngine.recordedSamples(); v.sampleRate = fEngine.sampleRate(); v.blinkOn = fBlinkOn;
+        v.part = fEngine.part(); v.queuedPart = fEngine.queuedPart();
+        v.songStep = fEngine.songStep(); v.songLength = fEngine.songLength(); v.memoryFull = fEngine.memoryFull();
+        ouro::SongView sv = {};
+        for (int i = 0; i < ouro::kSteps; ++i) { sv.part[i] = uint8_t(fEngine.stepPart(i)); sv.repeats[i] = uint8_t(fEngine.stepRepeats(i)); }
+        sv.playing = fEngine.songStep(); sv.on = fEngine.songOn();
+        sv.edited = std::min(ouro::kSteps, std::max(1, int(std::lround(fVal[kParamStep])))) - 1;
 
         uint8_t bits[kMaxBytes];
         for (auto& s : fSlots)
@@ -540,7 +627,8 @@ private:
             if (w != nullptr)
             {
                 const uint16_t sw = s.w.load(std::memory_order_relaxed), sh = s.h.load(std::memory_order_relaxed);
-                const size_t n = ouro::renderLoopWidget(v, sw, sh, bits);
+                const size_t n = s.song.load(std::memory_order_relaxed) ? ouro::renderSongWidget(sv, sw, sh, bits)
+                                                                        : ouro::renderLoopWidget(v, sw, sh, bits);
                 if (w != s.drawn || std::memcmp(bits, s.last, n) != 0)
                 {
                     fWidgetDraw->draw_bitmap(fWidgetDraw->handle, w, 0, 0, sw, sh, bits);
@@ -556,6 +644,7 @@ private:
     float fVal[kNumParams] = {};            // current port values
     float fPrev[kParamBypass] = {};         // values as of the last run() (NaN: apply everything)
     int fSel = 0;                           // selected track, 0-3
+    int fPart = 0;                          // the engine's part at the last run(): a switch re-requests track ports
     bool fFirst = true;                     // first run after activate(): apply every value, then snap gains
     uint64_t fHold = 0;                     // samples undo_redo has been held
     bool fHeld = false, fDone = false, fTapPending = false, fStoppedPress = false;
@@ -582,6 +671,7 @@ private:
     struct WidgetSlot {
         std::atomic<ALABS_HMI_Widget> handle{nullptr};
         std::atomic<uint16_t> w{0}, h{0};
+        std::atomic<bool> song{false};      // the song widget (else the loop widget); written before the handle is published
         std::atomic<bool> drawing{false};   // run() is between loading the handle and finishing draw_bitmap
         ALABS_HMI_Widget drawn = nullptr;   // run() only: the handle last drawn (new handle = redraw all)
         uint8_t last[kMaxBytes] = {};       // run() only: the last bitmap drawn

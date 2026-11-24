@@ -15,7 +15,7 @@ public:
     bool append(BlockPool& p, float v) {
         const uint32_t i = length_ % BlockPool::kBlock;
         if (i == 0) {
-            int32_t b = p.alloc();
+            int32_t b = p.alloc(BlockPool::Kind::Undo);
             if (b < 0) return false;
             if (tail_ >= 0) p.next(tail_) = b; else head_ = b;
             tail_ = b;
@@ -39,6 +39,9 @@ public:
     uint32_t length() const { return length_; }
     uint32_t blocks() const { return (length_ + BlockPool::kBlock - 1) / BlockPool::kBlock; }
     bool shares(const Delta& o) const { return head_ >= 0 && head_ == o.head_; }   // copies of one delta's handle
+
+    // One more owner of every block: a copy of this handle that releases on its own (see release()).
+    void retain(BlockPool& p) const { for (int32_t b = head_; b >= 0; b = p.next(b)) p.addRef(b); }
 
     void release(BlockPool& p) {
         for (int32_t b = head_; b >= 0;) { int32_t n = p.next(b); p.free(b); b = n; }

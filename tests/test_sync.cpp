@@ -1,27 +1,6 @@
 #include "looper_rig.hpp"
 using ouro::TrackState;
 
-// Drives a Looper with a virtual MOD transport: before each block it hands the engine the grid at that block start.
-// toPhase() hands it too, so a press right after it sees the grid even with no block between (the plugin hands the
-// grid before the presses); grid() alone for a press before any block.
-struct SyncRig : Rig {
-    bool valid = true, playing = true; double spb = 96000.0, phase = 0.0;   // 120 BPM 4/4 at 48 kHz; phase: samples into the bar
-    using Rig::Rig;
-    void grid() { lp.setGrid(valid, playing, spb, phase == 0.0 ? 0.0 : spb - phase); }
-    void feedSync(const std::vector<float>& in) {
-        std::vector<float> o(block);
-        for (size_t i = 0; i < in.size(); i += block) {
-            const uint32_t n = uint32_t(std::min<size_t>(block, in.size() - i));
-            grid();
-            lp.process(in.data() + i, o.data(), n);
-            out.insert(out.end(), o.begin(), o.begin() + n);
-            if (playing) phase = std::fmod(phase + n, spb);
-        }
-    }
-    void silenceSync(uint32_t n) { feedSync(std::vector<float>(n, 0.0f)); }
-    void toPhase(double p) { silenceSync(uint32_t(std::fmod(p - phase + 2 * spb, spb))); grid(); }   // block-quantized is fine at 128 | p
-};
-
 static void earlyPressWaitsForTheLine() {
     SyncRig r; r.lp.setSync(true); r.toPhase(96000 - 1280);              // 10 blocks before the line
     r.lp.pressRec(0); CHECK(r.lp.waiting() && r.lp.state(0) == TrackState::Empty);

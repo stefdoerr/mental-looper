@@ -61,7 +61,7 @@ static const LV2_Feature* const fullFeatures[] = { &gOptionsFeature, &gMapFeatur
 
 static std::string bundleDir;
 static int portIndex(const std::string& ttlPath, const std::string& symbol);
-static float gIn[128], gOut[128], gClick[128], gPorts[64];  // gPorts[i]: port i's lv2:default
+static float gIn[128], gOut[128], gClick[128], gPorts[128];  // gPorts[i]: port i's lv2:default
 static LV2_Atom_Sequence gEvents = { { sizeof(LV2_Atom_Sequence_Body), 0 }, { 0, 0 } };  // lv2_events_in: empty
 
 // Each control port's lv2:default, from the generated TTL next to the .so.
@@ -75,7 +75,7 @@ static void readDefaults(const std::string& ttlPath)
     {
         if (tok == "lv2:index")
             ttl >> index;
-        else if (tok == "lv2:default" && index >= 0 && index < 64)
+        else if (tok == "lv2:default" && index >= 0 && index < 128)
             ttl >> gPorts[index];
     }
 }
@@ -86,7 +86,7 @@ static void connectAll(const LV2_Descriptor* d, LV2_Handle h)
     d->connect_port(h, 1, gOut);
     d->connect_port(h, 2, gClick);     // the Click output
     d->connect_port(h, 3, &gEvents);   // DPF's events-in port (time position), before the parameters
-    for (uint32_t i = 4; i < 64; ++i)
+    for (uint32_t i = 4; i < 128; ++i)
         d->connect_port(h, i, &gPorts[i]);
 }
 
@@ -162,6 +162,27 @@ static void widgetShownLeadsToDraw(const LV2_Descriptor* d)
     for (auto& r : gDraws)
         whole |= r.widget == (ALABS_HMI_Widget)0x3 && r.x == 0 && r.y == 0 && r.w == 51 && r.h == 8 && !r.nullBits;
     CHECK(whole);
+    d->cleanup(h);
+}
+
+// The song widget (128 x 37) is drawn too, whole and with a real bitmap.
+static void songWidgetShownLeadsToDraw(const LV2_Descriptor* d)
+{
+    gDraws.clear();
+    LV2_Handle h = d->instantiate(d, 48000, bundleDir.c_str(), fullFeatures);
+    connectAll(d, h);
+    d->activate(h);
+    auto wn = (const ALABS_HMI_WidgetNotification*)d->extension_data(ALABS_HMI__WidgetNotification);
+    CHECK(wn != nullptr);
+    if (wn == nullptr) { d->cleanup(h); return; }
+    ALABS_HMI_WidgetArea area = { sizeof(area), 128, 37, ALABS_HMI_PixelFormat_Mono1 };
+    wn->widget_shown(h, "song_steps", (ALABS_HMI_Widget)0x5, &area);
+    for (int i = 0; i < 40; ++i)
+        d->run(h, 128);
+    CHECK(!gDraws.empty());
+    if (!gDraws.empty()) CHECK(gDraws[0].x == 0 && gDraws[0].y == 0 && gDraws[0].w == 128 && gDraws[0].h == 37 && !gDraws[0].nullBits);
+    wn->widget_hidden(h, (ALABS_HMI_Widget)0x5);
+    d->deactivate(h);
     d->cleanup(h);
 }
 
@@ -281,6 +302,7 @@ int main(int argc, char** argv)
     extensionDataForwarded(d);
     instantiateWithoutFeatures(d);
     widgetShownLeadsToDraw(d);
+    songWidgetShownLeadsToDraw(d);
     widgetShownWithoutDrawFeature(d);
     addressedRecGetsLabel(d, so.substr(0, so.size() - 3) + ".ttl");
     widgetRedrawsWhenProgressMoves(d, so.substr(0, so.size() - 3) + ".ttl");

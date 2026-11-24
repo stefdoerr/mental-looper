@@ -4,6 +4,7 @@
 #include "test_util.hpp"
 
 #include <memory>
+#include <string>
 
 USE_NAMESPACE_DISTRHO
 
@@ -60,16 +61,33 @@ static void recordBaseAndDub()
     runN(40);                                                       // let the tail and fade finish
 }
 
-static void portSymbolsAreFrozen()
+static void layout()
 {
     fresh();
     static const char* kSym[] = { "rec","undo_redo","track","onoff","volume","undo","redo","clear_track",
         "clear_all","on_1","on_2","on_3","on_4","volume_1","volume_2","volume_3","volume_4","after_rec",
         "dry_thru","tail","hold_time","budget","offset","trigger_latency",
-        "stop_play","stop_mode","fade_time","auto_rec","threshold","double_tap","sync","click","click_level","length" };
-    for (uint32_t i = 0; i < 34; ++i) CHECK(std::strcmp(P().getParameterSymbol(i), kSym[i]) == 0);
+        "stop_play","stop_mode","fade_time","auto_rec","threshold","double_tap","sync","click","click_level","length",
+        "part","song","step","step_part","step_repeats" };
+    for (uint32_t i = 0; i < 39; ++i) CHECK(std::strcmp(P().getParameterSymbol(i), kSym[i]) == 0);
+    for (uint32_t s = 0; s < 16; ++s)                                   // step1_part, step1_repeats, ... hidden
+        for (uint32_t k = 0; k < 2; ++k)
+        {
+            const uint32_t i = kParamStep1Part + 2 * s + k;
+            const std::string sym = "step" + std::to_string(s + 1) + (k ? "_repeats" : "_part");
+            CHECK(std::strcmp(P().getParameterSymbol(i), sym.c_str()) == 0);
+            CHECK((P().getParameterHints(i) & kParameterIsHidden) != 0 && P().getParameterGroupId(i) == 3);
+            CHECK(P().getParameterRanges(i).def == (k ? 1.0f : s == 0 ? 0.0f : 4.0f));
+        }
+    for (uint32_t i = kParamPart; i <= kParamStepRepeats; ++i)
+        CHECK((P().getParameterHints(i) & kParameterIsHidden) == 0 && P().getParameterGroupId(i) == 3);
+    CHECK(std::strcmp(P().getPortGroupById(3).symbol, "g4_song") == 0);
+    CHECK(P().getParameterEnumValues(kParamPart).count == 4 && P().getParameterEnumValues(kParamStepPart).count == 6);
+    CHECK(std::strcmp(P().getParameterEnumValues(kParamStepPart).values[5].label, "Stop") == 0);
+    CHECK(P().getParameterRanges(kParamStep).min == 1.0f && P().getParameterRanges(kParamStep).max == 16.0f);
+    CHECK(P().getParameterRanges(kParamStepRepeats).max == 16.0f && P().getParameterRanges(kParamSong).def == 0.0f);
     CHECK(P().getParameterDesignation(kParamBypass) == kParameterDesignationBypass);
-    CHECK(kParamBypass == 34 && P().getParameterCount() == 35);
+    CHECK(kParamBypass == 71 && P().getParameterCount() == 72);
     CHECK(std::strcmp(P().getLabel(), DISTRHO_PLUGIN_NAME) == 0);
     // groups: g1_perform 0-8, g2_tracks 9-16, g3_settings 17-23,25-33; stop_play (24) in perform
     for (uint32_t i = 0; i < 34; ++i)
@@ -524,13 +542,100 @@ static void lengthReachesTheEngine() {
     CHECK(eng().state(0) == ouro::TrackState::Playing && eng().loopLength() == 96000);
 }
 
+// A 188-block loop on track 1 (as recordBaseAndDub's base), its tail done.
+static void recordLoop()
+{
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(187);
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40);
+}
+// Runs block by block until f() holds, at most max blocks; false if it never did.
+template <class F> static bool runUntil(F f, int max = 2000)
+{
+    for (int k = 0; k < max && !f(); ++k) runN(1);
+    return f();
+}
+static void song(std::initializer_list<std::pair<int, int>> steps)   // the hidden ports: part x repeats from step 1
+{
+    uint32_t i = kParamStep1Part;
+    for (const auto& s : steps) { set(i++, float(s.first)); set(i++, float(s.second)); }
+}
+
+static void partPortSwitchesAtThePartEnd() {
+    fresh(); recordLoop(); gReqs.clear();
+    set(kParamPart, 1); runN(1); CHECK(eng().queuedPart() == 1 && eng().part() == 0);
+    CHECK(!hasReq(kParamPart, 0));                                     // the knob shows the part picked
+    CHECK(runUntil([] { return eng().part() == 1; }, 200) && eng().queuedPart() == -1);
+}
+static void knobFollowsTheSong() {
+    fresh(); song({{0, 1}, {1, 1}, {4, 1}}); recordLoop(); gReqs.clear();   // A x1, B x1, Loop
+    set(kParamSong, 1); runN(1); CHECK(eng().songOn());
+    CHECK(runUntil([] { return eng().part() == 1; }) && hasReq(kParamPart, 1));
+    gReqs.clear(); CHECK(runUntil([] { return eng().part() == 0; }) && hasReq(kParamPart, 0));   // Loop: A again
+    CHECK(eng().songOn() && P().getParameterValue(kParamSong) == 1.0f);    // its own requests are no hand on Part
+}
+static void handOnPartTurnsSongPortOff() {
+    fresh(); song({{0, 1}, {1, 1}, {4, 1}}); recordLoop();
+    set(kParamSong, 1); CHECK(runUntil([] { return eng().part() == 1; }));
+    runN(1); gReqs.clear(); set(kParamPart, 0); runN(1);
+    CHECK(hasReq(kParamSong, 0) && !eng().songOn() && eng().queuedPart() == 0);
+}
+static void stepProxyEditsTheSelectedStep() {
+    fresh(); song({{0, 1}, {1, 2}, {2, 3}}); runN(1); gReqs.clear();
+    set(kParamStep, 3); runN(1); CHECK(hasReq(kParamStepPart, 2) && hasReq(kParamStepRepeats, 3));
+    set(kParamStepRepeats, 4); runN(1);
+    CHECK(hasReq(kParamStep3Repeats, 4) && eng().stepRepeats(2) == 4 && eng().stepPart(2) == 2);
+    set(kParamStepPart, 5); runN(1); CHECK(hasReq(kParamStep3Part, 5) && eng().stepPart(2) == ouro::kStepStop);
+    gReqs.clear(); set(kParamStep2Repeats, 7); runN(1);                 // another step's port: the proxies stay
+    CHECK(eng().stepRepeats(1) == 7 && gReqs.empty());
+    set(kParamStep3Repeats, 9); runN(1);                                // the selected step's port: they follow
+    CHECK(eng().stepRepeats(2) == 9 && hasReq(kParamStepRepeats, 9));
+    gReqs.clear(); set(kParamStep, 1); runN(1); CHECK(hasReq(kParamStepPart, 0) && hasReq(kParamStepRepeats, 1));
+}
+static void hiddenStepPortsRestoreTheArrangement() {
+    fresh(); song({{0, 1}, {1, 2}, {5, 1}}); runN(1);                   // as a pedalboard load sets them
+    CHECK(eng().stepPart(1) == 1 && eng().stepRepeats(1) == 2 && eng().stepPart(2) == ouro::kStepStop);
+    CHECK(eng().songLength() == 2);
+    recordLoop(); set(kParamSong, 1);                                  // A x1, B x2, Stop
+    CHECK(runUntil([] { return eng().songStep() == 1; }) && eng().part() == 1);
+    CHECK(runUntil([] { return eng().transport() == ouro::Transport::Stopped; }) && eng().songStep() == -1);
+}
+static void stopStepUsesTheStopModePort() {
+    fresh(); song({{0, 1}, {5, 1}}); set(kParamStopMode, 2); set(kParamFadeTime, 0.5f); recordLoop();
+    set(kParamSong, 1);
+    CHECK(runUntil([] { return eng().transport() == ouro::Transport::Stopping; }));
+    runN(90); CHECK(eng().transport() == ouro::Transport::Stopping);  // 240 ms into a 500 ms fade
+    runN(110); CHECK(eng().transport() == ouro::Transport::Stopped);
+}
+static void onAndVolumePortsFollowThePart() {
+    fresh(); recordLoop(); set(kParamOn2, 0); runN(1);
+    set(kParamPart, 1); CHECK(runUntil([] { return eng().part() == 1; }));
+    CHECK(!eng().isOn(1));                                              // B filled from A
+    set(kParamOn2, 1); set(kParamVolume1, -12); runN(1); CHECK(eng().isOn(1) && eng().volumeDb(0) == -12.0f);
+    gReqs.clear(); set(kParamPart, 0); CHECK(runUntil([] { return eng().part() == 0; }));
+    CHECK(hasReq(kParamOn2, 0) && hasReq(kParamVolume1, 0) && hasReq(kParamVolume, 0));
+    gReqs.clear(); set(kParamPart, 1); CHECK(runUntil([] { return eng().part() == 1; }));
+    CHECK(hasReq(kParamOn2, 1) && hasReq(kParamVolume1, -12) && hasReq(kParamVolume, -12));
+}
+static void loadWithSongOnStartsInStepOnesPart() {
+    fresh(); set(kParamStep1Part, 2); set(kParamSong, 1); runN(1);
+    CHECK(eng().part() == 2 && hasReq(kParamPart, 2) && eng().songOn());
+    fresh(); set(kParamPart, 1); set(kParamStep1Part, 2); set(kParamSong, 1); runN(1);   // a saved Part as well
+    CHECK(eng().part() == 2 && hasReq(kParamPart, 2) && eng().songOn() && !hasReq(kParamSong, 0));
+    fresh(); set(kParamPart, 3); runN(1); CHECK(eng().part() == 3 && !eng().songOn());   // Song off: the saved Part
+}
+static void clearAllRequestsPartA() {
+    fresh(); recordLoop(); set(kParamPart, 2); CHECK(runUntil([] { return eng().part() == 2; }));
+    gReqs.clear(); set(kParamClearAll, 1); runN(1); set(kParamClearAll, 0); runN(10);
+    CHECK(eng().part() == 0 && eng().loopLength() == 0 && hasReq(kParamPart, 0));
+}
+
 int main()
 {
     d_nextBufferSize = 128;
     d_nextSampleRate = 48000.0;
     d_nextCanRequestParameterValueChanges = true;
 
-    portSymbolsAreFrozen();
+    layout();
     silentAndMono();
     recActsOnRisingEdgeOnly();
     tapUndoHoldRedo();
@@ -566,5 +671,14 @@ int main()
     clickTicksOnModsBeats();
     clickIsSilentUnlessOnSyncedAndPlaying();
     lengthReachesTheEngine();
+    partPortSwitchesAtThePartEnd();
+    knobFollowsTheSong();
+    handOnPartTurnsSongPortOff();
+    stepProxyEditsTheSelectedStep();
+    hiddenStepPortsRestoreTheArrangement();
+    stopStepUsesTheStopModePort();
+    onAndVolumePortsFollowThePart();
+    loadWithSongOnStartsInStepOnesPart();
+    clearAllRequestsPartA();
     REPORT();
 }

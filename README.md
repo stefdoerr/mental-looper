@@ -13,6 +13,7 @@ as much as you like and undo one layer at a time. Built with the
 - Optional tempo sync: loops start on MOD's bar lines, are whole bars long, and follow MOD's play/stop. A click on its own output and a fixed loop length in bars come with it.
 - Click-free loop point, punch in/out, undo, redo and clear.
 - Tracks can be longer than the first loop: keep playing past the end.
+- Four parts (A-D) and a 16-step song: switch parts at the end of a pass, or let the song play them in order with repeats, Loop and Stop.
 - Per-track volume and on/off. The Dwarf screen shows a progress bar, track states and layer counts
   (Starless 19 or later).
 - The output is only the loops: wire your dry signal around it, or turn on **Dry thru**.

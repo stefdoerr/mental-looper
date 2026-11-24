@@ -1,4 +1,5 @@
 #include "hmi/LoopWidget.hpp"
+#include "hmi/SongWidget.hpp"
 #include "test_util.hpp"
 
 #include <cstdlib>
@@ -13,7 +14,7 @@ static ouro::WidgetView view()
     ouro::WidgetView v = {};
     v.selected = 0;
     for (int t = 0; t < ouro::kTracks; ++t) { v.state[t] = TrackState::Empty; v.on[t] = true; }
-    v.sampleRate = 48000;
+    v.sampleRate = 48000; v.queuedPart = -1; v.songStep = -1;   // 0 would be a queued part A / the song's first step
     return v;
 }
 
@@ -149,7 +150,7 @@ static void stateTextNotClipped()
     {
         auto v = view(); v.state[0] = e.s; uint8_t b[1024], ref[1024];
         ouro::renderLoopWidget(v, 40, 37, b);
-        std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 64, 0, 2, "T1"); ouro::drawText(ref, 64, 14, 2, e.txt);
+        std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 64, 0, 2, "A1"); ouro::drawText(ref, 64, 14, 2, e.txt);
         bool same = true;
         for (int y = 0; y < 11; ++y) for (int x = 0; x < 40; ++x) same &= px(b, 40, x, y) == px(ref, 64, x, y);
         CHECK(same);
@@ -402,6 +403,137 @@ static void emptyTrackShowsTheLoopNotItsOldLength()
     CHECK(std::abs(lit - 19) <= 1);                                    // half of the first loop, not 0 of 3000
 }
 
+static bool sameBits(const uint8_t* a, const uint8_t* b, size_t n) { return std::memcmp(a, b, n) == 0; }
+
+static void loopWidgetShowsPartQueuedSongAndFull()
+{
+    uint8_t a[1024], b[1024];
+    auto v = view(); v.part = 0; ouro::renderLoopWidget(v, 40, 37, a);
+    v.part = 1; ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(!sameBits(a, b, 5 * 37));
+    uint8_t c[1024]; v.part = 2; ouro::renderLoopWidget(v, 40, 37, c);
+    CHECK(!sameBits(b, c, 5 * 37));                                   // each part has its own letter
+    v = view(); ouro::renderLoopWidget(v, 40, 37, a);
+    v.queuedPart = 2; v.blinkOn = true; ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(!sameBits(a, b, 5 * 37));
+    uint8_t off[1024]; v.blinkOn = false; ouro::renderLoopWidget(v, 40, 37, off);
+    CHECK(!sameBits(b, off, 5 * 37));                                 // A>B blinks
+    v = view(); v.state[0] = TrackState::Playing; ouro::renderLoopWidget(v, 40, 37, a);
+    v.songStep = 2; v.songLength = 6; ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(!sameBits(a, b, 5 * 37));
+    v.songStep = 3; ouro::renderLoopWidget(v, 40, 37, a);
+    CHECK(!sameBits(a, b, 5 * 37));                                   // the position changes the picture
+    v = view(); v.state[0] = TrackState::Playing; ouro::renderLoopWidget(v, 40, 37, a);
+    v.memoryFull = true; ouro::renderLoopWidget(v, 40, 37, b);
+    CHECK(!sameBits(a, b, 5 * 37));
+    CHECK(showsText(v, "FULL"));
+    v.queuedPart = 1; v.blinkOn = true; CHECK(showsText(v, "FULL"));   // FULL wins over A>B
+    v = view(); v.queuedPart = 1; v.blinkOn = true; v.part = 0; CHECK(showsText(v, "A>B"));
+    v = view(); v.songStep = 2; v.songLength = 6; v.state[0] = TrackState::Playing; CHECK(showsText(v, "3/6"));   // instead of PLAY
+    v.state[0] = TrackState::Overdubbing; CHECK(showsText(v, "DUB"));                // recording feedback stays visible in song play
+    v.state[0] = TrackState::Recording; v.queuedPart = 1; v.blinkOn = true; CHECK(showsText(v, "REC"));   // REC/DUB beat A>B
+    v.state[0] = TrackState::Playing; CHECK(showsText(v, "A>B"));                    // A>B beats the position
+    v.blinkOn = false; CHECK(showsText(v, "3/6"));                                   // ...and alternates with it
+    v.queuedPart = -1; v.armed[0] = true; CHECK(showsText(v, "ARM"));                // ARM, WAIT and STOP beat the position
+    v.armed[0] = false; v.waiting = true; CHECK(showsText(v, "WAIT"));
+    v.waiting = false; v.transport = ouro::Transport::Stopped; CHECK(showsText(v, "STOP"));
+    v.transport = ouro::Transport::Running; v.state[0] = TrackState::Empty; CHECK(showsText(v, "3/6"));   // the position replaces -- too
+    v.songStep = -1; CHECK(showsText(v, "--")); v.songStep = 2;   // no song, no position
+    v.songStep = 7; v.songLength = 2; CHECK(showsText(v, "2/2"));   // never past the length (a step before it was edited to Stop)
+    v.songStep = 2; v.songLength = 6;
+    v.state[0] = TrackState::Playing;
+    v.songStep = 9; v.songLength = 16;   // 5 characters still fit in 40 px
+    ouro::renderLoopWidget(v, 40, 37, a);
+    CHECK(litIn(a, 40, 11, 2, 40, 9) > 0 && litIn(a, 40, 0, 0, 40, 2) == 0);
+    // the marks band, the bar and rows below the text are not touched by any of it
+    uint8_t p[1024], q[1024];
+    v = view(); v.state[0] = TrackState::Playing; v.loopLength = 1000; v.position = 500; ouro::renderLoopWidget(v, 40, 37, p);
+    v.part = 3; v.queuedPart = 0; v.songStep = 1; v.songLength = 4; v.memoryFull = true; v.blinkOn = true; ouro::renderLoopWidget(v, 40, 37, q);
+    for (int y = 9; y < 37; ++y) for (int x = 0; x < 40; ++x) CHECK(px(p, 40, x, y) == px(q, 40, x, y));
+}
+
+static ouro::SongView sixSteps()
+{
+    ouro::SongView s = {};
+    const uint8_t part[6] = { 0, 1, 0, 1, 2, ouro::kStepStop }, rep[6] = { 4, 2, 4, 4, 2, 1 };
+    for (int i = 0; i < ouro::kSteps; ++i) { s.part[i] = i < 6 ? part[i] : 0; s.repeats[i] = i < 6 ? rep[i] : 7; }   // steps 6.. lie behind the Stop
+    s.playing = -1; s.edited = 0; s.on = true;
+    return s;
+}
+
+// 128 px: 6 cells of 21 px from x = 1; label rows 11..17, number rows 2..8
+static void songWidgetDrawsEachStepsLabel()
+{
+    auto s = sixSteps(); uint8_t b[1024], ref[1024];
+    CHECK(ouro::renderSongWidget(s, 128, 37, b) == 16 * 37);
+    const char* lab[6] = { "AX4", "BX2", "AX4", "BX4", "CX2", "STOP" };
+    for (int k = 0; k < 6; ++k)
+    {
+        std::memset(ref, 0, sizeof ref);
+        const int lw = int(std::strlen(lab[k])) * 6 - 1, x0 = 1 + 21 * k;
+        ouro::drawText(ref, 128, x0 + (21 - lw) / 2, 11, lab[k]);
+        bool same = true;
+        for (int y = 11; y < 18; ++y) for (int x = x0; x < x0 + 20; ++x) same &= px(b, 128, x, y) == px(ref, 128, x, y);
+        CHECK(same && litIn(ref, 128, 0, 11, 128, 18) > 0);
+        CHECK(litIn(b, 128, x0 - 1, 2, x0 + 22, 9) > 0);   // its number
+    }
+    CHECK(litIn(b, 128, 0, 0, 128, 1) == 0 && litIn(b, 128, 0, 36, 128, 37) == 0);
+    CHECK(litIn(b, 128, 0, 29, 128, 36) > 0);              // the info line
+}
+
+static void songWidgetMarksPlayingAndEdited()
+{
+    auto s = sixSteps(); uint8_t a[1024], b[1024];
+    s.edited = 1; s.playing = -1; ouro::renderSongWidget(s, 128, 37, a);
+    CHECK(litIn(a, 128, 22, 20, 43, 23) == 0);                              // no playing mark
+    CHECK(litIn(a, 128, 22, 24, 43, 27) > 0 && litIn(a, 128, 1, 24, 22, 27) == 0 && litIn(a, 128, 43, 24, 128, 27) == 0);   // edited: under cell 1 only
+    s.playing = 3; ouro::renderSongWidget(s, 128, 37, b);
+    CHECK(litIn(b, 128, 64, 20, 85, 23) == 9 && litIn(b, 128, 0, 20, 64, 23) == 0 && litIn(b, 128, 85, 20, 128, 23) == 0);   // a 5-3-1 triangle under cell 3
+    s.on = false; ouro::renderSongWidget(s, 128, 37, b);
+    CHECK(litIn(b, 128, 0, 20, 128, 23) == 0);                              // song off: nothing plays
+    s.on = true; s.edited = 4; ouro::renderSongWidget(s, 128, 37, b);
+    CHECK(litIn(b, 128, 85, 24, 106, 27) > 0 && litIn(b, 128, 22, 24, 43, 27) == 0);
+}
+
+static void songWidgetDrawsNothingBehindTheEnd()
+{
+    auto s = sixSteps(); uint8_t a[1024], b[1024];
+    ouro::renderSongWidget(s, 128, 37, a);
+    for (int i = 6; i < ouro::kSteps; ++i) { s.part[i] = 3; s.repeats[i] = 16; }
+    ouro::renderSongWidget(s, 128, 37, b);
+    CHECK(sameBits(a, b, 16 * 37));                                         // steps after the Stop are not drawn
+    s.part[3] = ouro::kStepLoop;                                            // an earlier end: step 5 (CX2) and Stop vanish
+    ouro::renderSongWidget(s, 128, 37, b);
+    CHECK(litIn(b, 128, 64, 11, 128, 18) > 0 && litIn(b, 128, 86, 11, 128, 18) == 0);   // LOOP at step 3; nothing right of it
+    CHECK(litIn(b, 128, 85, 2, 128, 9) == 0 && litIn(b, 128, 86, 11, 128, 18) == 0);
+}
+
+static void songWidgetNarrowStaysInItsBuffer()
+{
+    // a 96 x 16 area: 4 cells, the window follows the edited step; guard bytes behind the bitmap stay untouched
+    for (int e = 0; e < ouro::kSteps; ++e)
+        for (int end : { 5, 15 })
+        {
+            auto s = sixSteps(); s.edited = e; s.playing = e % 6;
+            for (int i = 0; i < ouro::kSteps; ++i) { if (i > end) s.part[i] = 0; }
+            if (end == 15) { for (int i = 0; i < 15; ++i) { s.part[i] = uint8_t(i % 4); s.repeats[i] = 16; } s.part[15] = ouro::kStepLoop; }
+            uint8_t buf[12 * 16 + 64]; std::memset(buf, 0xA5, sizeof buf);
+            CHECK(ouro::renderSongWidget(s, 96, 16, buf) == 12 * 16);
+            bool guard = true; for (size_t i = 12 * 16; i < sizeof buf; ++i) guard &= buf[i] == 0xA5;
+            CHECK(guard);
+            CHECK(litIn(buf, 96, 0, 0, 96, 1) == 0 && litIn(buf, 96, 0, 15, 96, 16) == 0);
+            CHECK(litIn(buf, 96, 0, 12, 96, 15) > 0);                       // the edited step is always in the window
+        }
+    for (int sz : { 96, 128 })   // the whole range of edited steps at the natural size too
+        for (int e = 0; e < ouro::kSteps; ++e)
+        {
+            auto s = sixSteps(); s.edited = e; uint8_t buf[16 * 37 + 64]; std::memset(buf, 0xA5, sizeof buf);
+            const size_t n = ouro::renderSongWidget(s, uint16_t(sz), 37, buf);
+            bool guard = true; for (size_t i = n; i < sizeof buf; ++i) guard &= buf[i] == 0xA5;
+            CHECK(guard);
+        }
+}
+
 int main()
 {
     sizeIsMono1(); barFillsProportionally(); emptyBarWhenNoLoop(); elapsedShownWhileRecording();
@@ -410,5 +542,7 @@ int main()
     countsUnderTheirMarks(); countsAbove99Show99(); countRowsDontOverlap(); noCountsWhenShort();
     longTrackBarHasPassTicks(); crowdedTicksAreLeftOut(); recordingShowsPassesSoFar(); passMarksStayInsideTheBar(); passDotsStopAt18();
     emptyTrackShowsTheLoopNotItsOldLength();
+    loopWidgetShowsPartQueuedSongAndFull(); songWidgetDrawsEachStepsLabel(); songWidgetMarksPlayingAndEdited();
+    songWidgetDrawsNothingBehindTheEnd(); songWidgetNarrowStaysInItsBuffer();
     REPORT();
 }
