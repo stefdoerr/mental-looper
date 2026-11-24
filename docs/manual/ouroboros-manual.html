@@ -361,7 +361,7 @@ Recording or overdubbing again forgets what you could still redo.</p>
 <p>Ouroboros outputs <b>only the loops</b>. Your live sound is not passed through, so run the dry signal around the pedal on the pedalboard (a parallel path) and mix the two.
 If you run the pedal in series instead, switch <b>Dry thru</b> on and it adds your input to the output with no delay.
 <b>Bypass</b> mutes the loops, but they keep running in time and pick up where they are when you switch back on. While bypassed you get the dry signal only if Dry thru is on.</p>
-<p>The loop point is click-free, and a note still ringing when you close the loop carries into the next pass. The first loop can be up to 5 minutes. Loops are not saved with the pedalboard. Each track&rsquo;s on/off and volume are also in the web interface (On 1&ndash;4, Volume 1&ndash;4).</p>
+<p>The loop point is click-free, and a note still ringing when you close the loop carries into the next pass. The first loop can be up to 5 minutes. The pedalboard does not hold the loops; save them as a piece (see Saved pieces). Each track&rsquo;s on/off and volume are also in the web interface (On 1&ndash;4, Volume 1&ndash;4).</p>
 
 <h2>On the Dwarf screen (Starless 19 and later)</h2>
 <p>Ouroboros offers a <b>Loop</b> display widget. In Starless&rsquo; <b>Display</b> dialog, put it in the column above knob 1; it replaces knob 1&rsquo;s own text and keeps the footswitch labels visible.
@@ -394,9 +394,50 @@ Without the widget everything still works, just without the screen. On stock MOD
 <tr><td class="ctl">2</td><td>Part (A&ndash;D) and Song (off/on).</td></tr>
 <tr><td class="ctl">3</td><td>Step (1&ndash;16), Step Part (A&ndash;D, Loop, Stop), Step Repeats (1&ndash;16).</td></tr>
 </table>
-<p>The <b>Loop</b> widget labels the track with its part (<code>A1</code>). While the song plays it shows the position (<code>3/6</code>) instead of PLAY or <code>--</code>; REC, DUB, WAIT, ARM and STOP still show. In Starless&rsquo; Display dialog, also add the <b>Song</b> widget (symbol <code>song_steps</code>) and place it on knob subpage 3. It lists the steps with part and repeats, a triangle under the playing step and a bracket under the step you are editing. The arrangement is saved with the pedalboard; loops are not saved yet.</p>
+<p>The <b>Loop</b> widget labels the track with its part (<code>A1</code>). While the song plays it shows the position (<code>3/6</code>) instead of PLAY or <code>--</code>; REC, DUB, WAIT, ARM and STOP still show. In Starless&rsquo; Display dialog, also add the <b>Song</b> widget (symbol <code>song_steps</code>) and place it on knob subpage 3. It lists the steps with part and repeats, a triangle under the playing step and a bracket under the step you are editing. The arrangement is saved with the pedalboard; the loops are saved as a piece (next section).</p>
 <h3>Memory</h3>
 <p>All parts share one pool of memory, and loops win over undo history. When memory is full, a recording closes as at the 5-minute limit, an overdub punches out (it stays in the loop but cannot be undone), and the screen shows <b>FULL</b> (it wins over every other label). FULL stays until about a second of memory is free again; clearing a track gives its memory back.</p>
+
+<h2>Saved pieces</h2>
+<p>A <b>piece</b> is everything you hear: all four parts with their four tracks, each track&rsquo;s volume and on/off, the loop length, the arrangement and the current part. You can keep 16 pieces in numbered <b>slots</b>, save the one you built and load another between songs, all on the Dwarf. Undo history is not saved.</p>
+<h3>Where pieces live</h3>
+<p>A slot is a folder, <code>/data/user-files/Audio Loops/Ouroboros/01</code> to <code>16</code>. It holds one 32-bit float mono WAV per recorded track (<code>A1.wav</code> to <code>D4.wav</code>) and a small text file, <code>piece.txt</code>. Copy a slot folder to a computer to back it up, or into another slot or Dwarf with MOD&rsquo;s file manager. A slot you copy in or delete shows on the screen within about a second. On a desktop host the folder is <code>$MOD_USER_FILES_DIR/Audio Loops/Ouroboros</code>, else <code>$HOME/.ouroboros/Audio Loops/Ouroboros</code>. The Windows desktop build has no saved pieces.</p>
+<h3>Controls and screen</h3>
+<p>Press footswitch A to go to page 2 of the Dwarf.</p>
+<table>
+<tr><th style="width:23%">Page 2</th><th>Controls</th></tr>
+<tr><td class="ctl">Knob 1: Slot</td><td>Picks slot 1 to 16.</td></tr>
+<tr><td class="ctl">Knob 2: Save</td><td>Press to save the piece to the selected slot.</td></tr>
+<tr><td class="ctl">Knob 3: Load</td><td>Press to load the selected slot.</td></tr>
+</table>
+<p>Footswitches B and C do nothing on that page, so you can assign Save and Load to them instead. In Starless&rsquo; Display dialog, add the <b>Pieces</b> widget (symbol <code>piece_slots</code>) above the knobs of page 2. It shows the 16 slots, which ones hold a piece, the selected slot and the loaded one, and a status line. After a load, <code>LOADED M</code> stays at the right of the status line while there is room. The <b>Loop</b> widget shows <code>LOAD</code> while a load runs.</p>
+<h3>Save</h3>
+<p>Save works at any time, also while the loops play; the sound is not touched. If a recording or overdub is running, the save waits until it closes. Saving a piece with nothing recorded does nothing. A save that fails leaves the slot&rsquo;s old piece as it was.</p>
+<p>Save on a slot that already holds a piece asks first: the screen shows <code>SAVE 3?</code>, and a second Save within about 2 seconds confirms. Anything else cancels. Save on an empty slot writes at once. A second Save while one writes is ignored.</p>
+<h3>Load</h3>
+<p>Load is for between songs. It stops the loops, reads the piece and leaves it stopped at the start. B or Stop/Play starts it; with Song on, it plays the arrangement from step 1. Every track has one layer and no undo history. Load of an empty slot does nothing.</p>
+<p>If you have changed the piece since the last save or load, or a recording or overdub is still running, Load asks first: <code>LOAD 3?</code>, and a second Load within about 2 seconds confirms.</p>
+<p>While a piece loads, presses (B, C, Stop/Play and so on) and the controls the piece sets (Part, Song, the steps, On 1&ndash;4, Volume 1&ndash;4) are ignored. Any other setting you turn during a load (Dry thru, Track, Length, Sync, Click, Slot) takes effect when it finishes. After the load, the controls show the piece&rsquo;s values. Length stays as it is.</p>
+<p>A piece that cannot be loaded (a missing or unreadable file, another sample rate, a track longer than 5 minutes, too big for memory) leaves the current piece in place where that can be checked first. A read error later leaves every track empty.</p>
+<h3>The remembered piece</h3>
+<p>The pedalboard remembers the slot you saved or loaded last, when you save the pedalboard. Loading the pedalboard loads that piece, and sets Slot to it. If it cannot load, the pedalboard comes up with no piece and the screen shows why.</p>
+<h3>Tempo</h3>
+<p>With Sync on, a piece stores the tempo it was recorded at. After a load the screen shows it (<code>120 BPM 4 BARS</code>), so you can set MOD&rsquo;s tempo to match; a plugin cannot do that. Without a stored tempo it shows only the bars (<code>4 BARS</code>, <code>1 BAR</code>). Loops keep their length, so another tempo drifts.</p>
+<h3>Status line</h3>
+<table>
+<tr><th style="width:23%">Shows</th><th>Meaning</th></tr>
+<tr><td class="ctl"><code>3 FULL</code>, <code>3 EMPTY</code></td><td>The selected slot holds a piece, or not.</td></tr>
+<tr><td class="ctl"><code>SAVE 3?</code></td><td>Save again to overwrite slot 3.</td></tr>
+<tr><td class="ctl"><code>LOAD 3?</code></td><td>Load again to throw away the changes and load slot 3.</td></tr>
+<tr><td class="ctl"><code>SAVING</code>, <code>SAVED 3</code></td><td>A save is writing; it is done.</td></tr>
+<tr><td class="ctl"><code>LOADING 40%</code></td><td>A load is reading.</td></tr>
+<tr><td class="ctl"><code>120 BPM 4 BARS</code></td><td>The load is done: the piece&rsquo;s tempo (if it has one) and bars.</td></tr>
+<tr><td class="ctl"><code>EMPTY</code></td><td>Load of an empty slot.</td></tr>
+<tr><td class="ctl"><code>DISK FULL</code></td><td>The save did not fit on the disk.</td></tr>
+<tr><td class="ctl"><code>SAVE ERROR</code></td><td>The save failed for another reason.</td></tr>
+<tr><td class="ctl"><code>TOO BIG</code></td><td>The piece does not fit in memory; the current piece stays.</td></tr>
+<tr><td class="ctl"><code>LOAD ERROR</code></td><td>The piece could not be read.</td></tr>
+</table>
 
 <h2>Settings</h2>
 <table>
@@ -422,6 +463,9 @@ Without the widget everything still works, just without the screen. On stock MOD
 <tr><td class="ctl">Step</td><td>1&ndash;16</td><td>1</td><td>The step the next two settings edit.</td></tr>
 <tr><td class="ctl">Step Part</td><td>A&ndash;D, Loop, Stop</td><td>A</td><td>What the step plays. Loop sends the song back to step 1; Stop stops. A Loop step ignores Repeats.</td></tr>
 <tr><td class="ctl">Step Repeats</td><td>1&ndash;16</td><td>1</td><td>How many passes the step plays.</td></tr>
+<tr><td class="ctl">Slot</td><td>1&ndash;16</td><td>1</td><td>The slot Save and Load use.</td></tr>
+<tr><td class="ctl">Save</td><td>press</td><td></td><td>Saves the piece to the slot. See Saved pieces.</td></tr>
+<tr><td class="ctl">Load</td><td>press</td><td></td><td>Loads the slot&rsquo;s piece.</td></tr>
 </table>
 
 
