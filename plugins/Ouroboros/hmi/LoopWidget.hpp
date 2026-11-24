@@ -14,6 +14,9 @@ struct WidgetView {
     Transport transport; bool armed[kTracks]; bool waiting;   // waiting: a user action waits for the bar line
     uint32_t trackLength, trackPosition;   // selected track: length (0 = none or still recording onto the loop), samples since its start
     uint32_t layers[kTracks];              // layers heard per track (Looper::layerCount); 0 draws no count
+    int part, queuedPart;                  // current part 0-3; the part a switch waits for (-1: none)
+    int songStep, songLength;              // the song's playing step (-1: not playing) and its length
+    bool memoryFull;                       // the pool is full: FULL takes the state text's place
 };
 
 // Mono1: rows top->bottom, (w+7)/8 bytes per row, MSB = leftmost pixel, 1 = lit. Returns bytes written.
@@ -47,14 +50,29 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
     if (tall)
     {
         static const char* const names[] = { "--", "REC", "PLAY", "DUB" };   // by TrackState: Empty, Recording, Playing, Overdubbing
-        char t[3] = { 'T', char('1' + v.selected), '\0' };
+        // Part A with nothing queued and no song keeps the plain "T1" label; otherwise the label is the part letter and the
+        // track ("B1"; the selection frame below shows the track too), and the song position takes the state text's place.
+        const bool partInfo = v.part != 0 || v.queuedPart >= 0 || v.songStep >= 0;
+        char t[3] = { partInfo ? char('A' + v.part) : 'T', char('1' + v.selected), '\0' };
         drawText(bits, w, 0, textY, t);
         const char* txt = names[int(v.state[v.selected])];
         if (v.transport == Transport::Stopped) txt = "STOP";
         else if (v.transport == Transport::Stopping) txt = v.blinkOn ? "STOP" : "";
         else if (v.armed[v.selected]) txt = "ARM";
         if (v.waiting) txt = "WAIT";
-        drawText(bits, w, 14, textY, txt);
+        char pos[16];
+        int tx = 14;
+        if (v.songStep >= 0 && v.transport == Transport::Running && !v.waiting && !v.armed[v.selected])
+        {
+            std::snprintf(pos, sizeof pos, "%d/%d", v.songStep + 1, v.songLength);
+            txt = pos;
+            const int len = int(std::strlen(pos));
+            if (14 + len * 6 - 1 > w) tx = w - (len * 6 - 1);   // "10/16" is 29 px wide: keeps the whole text in 40 px
+        }
+        char sw[4] = { char('A' + v.part), '>', char('A' + v.queuedPart), '\0' };
+        if (v.queuedPart >= 0 && v.queuedPart < kParts && v.blinkOn) txt = sw;
+        if (v.memoryFull) txt = "FULL";
+        drawText(bits, w, tx, textY, txt);
 
         const int cell = w / kTracks;
         for (int i = 0; i < kTracks; ++i)

@@ -10,6 +10,7 @@
 #include "dsp/Looper.hpp"
 #include "hmi/HmiBridge.hpp"
 #include "hmi/LoopWidget.hpp"
+#include "hmi/SongWidget.hpp"
 #include "hmi/lv2-hmi.h"
 
 #include <algorithm>
@@ -120,7 +121,8 @@ public:
 
     void widgetShown(const char* symbol, ALABS_HMI_Widget w, const ALABS_HMI_WidgetArea* area)
     {
-        if (fWidgetDraw == nullptr || w == nullptr || area == nullptr || std::strcmp(symbol, "loop") != 0
+        const bool song = symbol != nullptr && std::strcmp(symbol, "song") == 0;
+        if (fWidgetDraw == nullptr || w == nullptr || area == nullptr || symbol == nullptr || (!song && std::strcmp(symbol, "loop") != 0)
             || area->pixelFormat != ALABS_HMI_PixelFormat_Mono1
             || area->width == 0 || area->width > kMaxW || area->height == 0 || area->height > kMaxH)
             return;
@@ -131,6 +133,7 @@ public:
             {
                 s.w.store(area->width, std::memory_order_relaxed);
                 s.h.store(area->height, std::memory_order_relaxed);
+                s.song.store(song, std::memory_order_relaxed);
                 s.handle.store(w, std::memory_order_release);
                 return;
             }
@@ -609,6 +612,12 @@ private:
         v.loopLength = fEngine.loopLength(); v.position = fEngine.position();
         v.trackLength = fEngine.trackLength(fSel); v.trackPosition = fEngine.trackPosition(fSel);
         v.recordedSamples = fEngine.recordedSamples(); v.sampleRate = fEngine.sampleRate(); v.blinkOn = fBlinkOn;
+        v.part = fEngine.part(); v.queuedPart = fEngine.queuedPart();
+        v.songStep = fEngine.songStep(); v.songLength = fEngine.songLength(); v.memoryFull = fEngine.memoryFull();
+        ouro::SongView sv = {};
+        for (int i = 0; i < ouro::kSteps; ++i) { sv.part[i] = uint8_t(fEngine.stepPart(i)); sv.repeats[i] = uint8_t(fEngine.stepRepeats(i)); }
+        sv.playing = fEngine.songStep(); sv.on = fEngine.songOn();
+        sv.edited = std::min(ouro::kSteps, std::max(1, int(std::lround(fVal[kParamStep])))) - 1;
 
         uint8_t bits[kMaxBytes];
         for (auto& s : fSlots)
@@ -618,7 +627,8 @@ private:
             if (w != nullptr)
             {
                 const uint16_t sw = s.w.load(std::memory_order_relaxed), sh = s.h.load(std::memory_order_relaxed);
-                const size_t n = ouro::renderLoopWidget(v, sw, sh, bits);
+                const size_t n = s.song.load(std::memory_order_relaxed) ? ouro::renderSongWidget(sv, sw, sh, bits)
+                                                                        : ouro::renderLoopWidget(v, sw, sh, bits);
                 if (w != s.drawn || std::memcmp(bits, s.last, n) != 0)
                 {
                     fWidgetDraw->draw_bitmap(fWidgetDraw->handle, w, 0, 0, sw, sh, bits);
@@ -661,6 +671,7 @@ private:
     struct WidgetSlot {
         std::atomic<ALABS_HMI_Widget> handle{nullptr};
         std::atomic<uint16_t> w{0}, h{0};
+        std::atomic<bool> song{false};      // the song widget (else the loop widget); written before the handle is published
         std::atomic<bool> drawing{false};   // run() is between loading the handle and finishing draw_bitmap
         ALABS_HMI_Widget drawn = nullptr;   // run() only: the handle last drawn (new handle = redraw all)
         uint8_t last[kMaxBytes] = {};       // run() only: the last bitmap drawn

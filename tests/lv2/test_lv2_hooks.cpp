@@ -166,6 +166,27 @@ static void widgetShownLeadsToDraw(const LV2_Descriptor* d)
 }
 
 // A host that shows the widget but gave no WidgetDraw feature: nothing to draw with, nothing crashes.
+// The song widget (128 x 37) is drawn too, whole and with a real bitmap.
+static void songWidgetShownLeadsToDraw(const LV2_Descriptor* d)
+{
+    gDraws.clear();
+    LV2_Handle h = d->instantiate(d, 48000, bundleDir.c_str(), fullFeatures);
+    connectAll(d, h);
+    d->activate(h);
+    auto wn = (const ALABS_HMI_WidgetNotification*)d->extension_data(ALABS_HMI__WidgetNotification);
+    CHECK(wn != nullptr);
+    if (wn == nullptr) { d->cleanup(h); return; }
+    ALABS_HMI_WidgetArea area = { sizeof(area), 128, 37, ALABS_HMI_PixelFormat_Mono1 };
+    wn->widget_shown(h, "song", (ALABS_HMI_Widget)0x5, &area);
+    for (int i = 0; i < 40; ++i)
+        d->run(h, 128);
+    CHECK(!gDraws.empty());
+    if (!gDraws.empty()) CHECK(gDraws[0].x == 0 && gDraws[0].y == 0 && gDraws[0].w == 128 && gDraws[0].h == 37 && !gDraws[0].nullBits);
+    wn->widget_hidden(h, (ALABS_HMI_Widget)0x5);
+    d->deactivate(h);
+    d->cleanup(h);
+}
+
 static void widgetShownWithoutDrawFeature(const LV2_Descriptor* d)
 {
     static const LV2_Feature* const noDraw[] = { &gOptionsFeature, &gMapFeature, &gHmiFeature, nullptr };
@@ -281,6 +302,7 @@ int main(int argc, char** argv)
     extensionDataForwarded(d);
     instantiateWithoutFeatures(d);
     widgetShownLeadsToDraw(d);
+    songWidgetShownLeadsToDraw(d);
     widgetShownWithoutDrawFeature(d);
     addressedRecGetsLabel(d, so.substr(0, so.size() - 3) + ".ttl");
     widgetRedrawsWhenProgressMoves(d, so.substr(0, so.size() - 3) + ".ttl");
