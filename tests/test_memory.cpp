@@ -18,6 +18,8 @@ static void trackBufSharesUntilWritten() {
     CHECK(p.used() == 2 && a.get(p, 9000) == 0.0f && b.get(p, 9000) == 2.0f);
     b.zero(p, 9000, 9001); CHECK(b.get(p, 9000) == 0.0f && p.used() == 2);   // part of a block: written
     a.clear(p); b.clear(p); CHECK(p.used() == 0);
+    ouro::TrackBuf c; CHECK(c.init(2 * K + 100)); *c.at(p, 2 * K) = 1.0f;   // a last block of 100 samples
+    c.zero(p, 2 * K, 2 * K + 100); CHECK(p.used() == 0);                // is all of that block: it goes back
 }
 // Audio blocks ignore the undo budget; a full pool refuses the write until a block comes back.
 static void audioIgnoresTheBudgetUntilThePoolIsFull() {
@@ -36,6 +38,16 @@ static void onlyRecordedAudioUsesThePool() {
     CHECK(r.lp.blocksUsed() - before <= 48000 / 4096 + 3);              // about one second's blocks, not 5 minutes
     r.lp.clearTrack(0); r.silence(4800);
     CHECK(r.lp.blocksUsed() == before);
+}
+// Nothing past the loop is read after a close: the first loop's folded tail and a recording's lead-in, kept aside at
+// the buffer's end, give their blocks back then.
+static void noBlocksStayPastTheLoop() {
+    Rig r; r.lp.setTriggerLatencyMs(100.0f);                            // D = 4800: the tail fills 2 blocks past L
+    r.lp.pressRec(0); r.feed(sine(220, 0.1f, 10 * 4096)); r.lp.pressRec(0);
+    CHECK(r.lp.loopLength() == 10 * 4096 && r.lp.blocksUsed() == 10);
+    r.lp.setTriggerLatencyMs(0.0f); r.lp.setAdvanceMs(10.0f);           // the Offset's 480 samples go aside
+    recordBaseOn(r, 1);
+    CHECK(r.lp.blocksUsed() == 20);
 }
 // A take thrown away (an abort, a clear while it records) gives its blocks back at once: none of it was heard.
 static void aThrownAwayTakeGivesItsBlocksBack() {
@@ -58,6 +70,20 @@ static void aFullPoolClosesARecordingOntoTheLoop() {
     recordBase(r, 20 * 48000, 0.1f);                                    // about half the pool
     r.lp.pressRec(1); r.feed(sine(330, 0.1f, 40 * 48000));              // a long track until the pool is full
     CHECK(r.lp.memoryFull() && r.lp.state(1) == TrackState::Playing && r.lp.trackLength(1) == 20 * 48000);   // rounded down
+    const uint32_t used = r.lp.blocksUsed(); r.silence(20 * 48000);     // the next pass adds the overshoot onto the top
+    CHECK(r.lp.blocksUsed() + 40 <= used && !r.lp.memoryFull());        // then its 3.6 s of blocks past len go back
+}
+// Clear Track makes room while the others play: once its ramp-out ends, the track's blocks go back to the pool.
+static void clearingATrackWhileOthersPlayFreesItsBlocks() {
+    Rig r(48000.0, 128, size_t(8) << 20);
+    recordBase(r, 10 * 48000, 0.1f); const uint32_t base = r.lp.blocksUsed();
+    r.lp.pressRec(1); r.feed(sine(330, 0.1f, 40 * 48000));              // until the pool is full
+    CHECK(r.lp.memoryFull() && r.lp.state(1) == TrackState::Playing);
+    r.lp.clearTrack(1); r.silence(4 * 4096);
+    CHECK(!r.lp.memoryFull() && r.lp.blocksUsed() == base && r.lp.state(0) == TrackState::Playing);
+    r.lp.pressRec(2); r.feed(sine(440, 0.1f, 10 * 48000)); r.lp.pressRec(2);
+    r.lp.setOn(0, false);
+    CHECK(r.lp.trackLength(2) == 10 * 48000 && !r.lp.memoryFull() && peak(r.settle()) > 0.05f);   // track 2 alone
 }
 static void loopsWinOverUndo() {
     Rig r(48000.0, 128, size_t(8) << 20); r.lp.setBudgetMb(16);
@@ -71,7 +97,7 @@ static void loopsWinOverUndo() {
 
 int main() {
     trackBufSharesUntilWritten(); audioIgnoresTheBudgetUntilThePoolIsFull();
-    onlyRecordedAudioUsesThePool(); aThrownAwayTakeGivesItsBlocksBack(); aFullPoolClosesTheFirstRecording(); aFullPoolClosesARecordingOntoTheLoop();
-    loopsWinOverUndo();
+    onlyRecordedAudioUsesThePool(); noBlocksStayPastTheLoop(); aThrownAwayTakeGivesItsBlocksBack(); aFullPoolClosesTheFirstRecording(); aFullPoolClosesARecordingOntoTheLoop();
+    loopsWinOverUndo(); clearingATrackWhileOthersPlayFreesItsBlocks();
     REPORT();
 }

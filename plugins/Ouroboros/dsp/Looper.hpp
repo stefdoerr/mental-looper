@@ -514,7 +514,7 @@ private:
         Writer dub, fade;
         TrackState state = TrackState::Empty;
         // The track's cycle (a whole number of loops, 0 = none) and playhead in buf. It outlives a clear or an abort
-        // until the next recording or reset(): the ramp-out and the pending ops still read it. Recording onto the loop
+        // until the ramp-out ends (see play()): the ramp-out and the pending ops still read it. Recording onto the loop
         // (and after its abort) len is cap_: buf is linear from the start press, index 0, and started empty.
         uint32_t len = 0, pos = 0;
         uint32_t xpos = 0;               // a retrigger's crossfade: the old playhead
@@ -680,10 +680,11 @@ private:
             tr.buf.zero(pool_, z, len);                 // [z, len) now, under the lead-in; [n, z) on the way
             addRaw(tr, n, z - n, false);
         } else if (n > len + a) {
-            addRaw(tr, 0, n - a - len, true);           // [len, n - a) onto [0, n - a - len)
+            addRaw(tr, 0, n - a - len, true);           // [len, n - a) onto [0, n - a - len); its end frees them (endOp)
         }
         for (uint32_t i = 0; i < b; ++i)                // index i - b
             if (float* s = sample(tr, (i + len - b % len) % len)) *s += tr.buf.get(pool_, cap_ - b + i);
+        if (n <= len + a) tr.buf.zero(pool_, len, cap_);   // past len nothing is read again: its blocks go back
     }
 
     // Without a grid the close is back-dated by the trigger latency: L = r - recD_. With one it lands on the last line
@@ -732,6 +733,7 @@ private:
         }
         for (uint32_t i = 0; i < lead; ++i)                           // just before the top
             if (float* s = sample(tr, L - lead + i)) *s += tr.buf.get(pool_, cap_ - lead + i);
+        tr.buf.zero(pool_, L, cap_);                                  // the tail and lead-in are in: past L is dead
         L_ = L;
         bars_ = bars;
         // D mod L (D can exceed L), or r if rounded up. After a tempo change during the recording D is not the
@@ -833,10 +835,14 @@ private:
     }
 
     // Commits the pending ops that owe the playhead (see commit()), then reads it through the track's gain.
+    // An empty track whose ramp-out has ended is no longer heard (its gain also mutes a retrigger's old read, and it has
+    // no writer): its ops and blocks go, the cycle with them. A base undone for redo stays.
     float play(Track& tr) {
         const float adj = commit(tr);
         const float g = tr.gain.next(target(tr), ramp_);
-        return g != 0.0f ? g * (tr.buf.get(pool_, tr.pos) + adj) : 0.0f;
+        if (g != 0.0f) return g * (tr.buf.get(pool_, tr.pos) + adj);
+        if (tr.len && tr.state == TrackState::Empty && !tr.baseUndone) { wipe(tr); tr.len = tr.pos = tr.phase = 0; }
+        return 0.0f;
     }
     // Applies the pending ops that owe the playhead. Returns what holds back their change during their ramp.
     // A recording onto the loop reads ahead of its writer: silence, as its buffer started empty (startDub()).
@@ -1030,8 +1036,12 @@ private:
         } else if (op.layer >= 0) {
             --tr.layers[op.layer].refs;
         }
+        const bool fold = op.fold;
         std::copy(tr.ops + k + 1, tr.ops + tr.nOps, tr.ops + k);   // keep start order
         --tr.nOps;
+        // A fold op's last part: the overshoot is in, nothing past len is read again, its blocks go back
+        if (fold && std::none_of(tr.ops, tr.ops + tr.nOps, [](const Op& o) { return o.fold; }))
+            tr.buf.zero(pool_, tr.len, cap_);
     }
 
     // The stop's end: every playhead goes to the top (see toTop()). A queued restart then starts.

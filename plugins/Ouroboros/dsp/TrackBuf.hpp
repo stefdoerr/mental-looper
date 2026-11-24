@@ -18,6 +18,7 @@ public:
 
     bool init(uint32_t cap) {                   // a block table for cap samples, no audio
         std::free(tab_);
+        cap_ = cap;
         n_ = cap / kB + (cap % kB != 0);
         tab_ = static_cast<int32_t*>(std::malloc(size_t(n_) * sizeof(int32_t)));
         if (!tab_) n_ = 0;
@@ -42,14 +43,14 @@ public:
         return p.data(b) + i % kB;
     }
 
-    // [from, to) reads 0: whole blocks go back to the pool, parts of one are written.
+    // [from, to) reads 0: whole blocks go back to the pool (the last one ends at cap), parts of one are written.
     // ponytail: a shared block's part needs a copy to write; a full pool leaves it unzeroed (parts only, unreached
     // before copies exist); drop its block instead if that is ever hit
     void zero(BlockPool& p, uint32_t from, uint32_t to) {
         while (from < to) {
             const uint32_t n = std::min(to - from, kB - from % kB);
             int32_t& b = tab_[from / kB];
-            if (b >= 0 && n == kB) { p.free(b); b = -1; }
+            if (b >= 0 && from % kB == 0 && (n == kB || from + n == cap_)) { p.free(b); b = -1; }
             else if (b >= 0) if (float* s = at(p, from)) std::fill(s, s + n, 0.0f);
             from += n;
         }
@@ -68,7 +69,7 @@ public:
 private:
     static constexpr uint32_t kB = BlockPool::kBlock;
     int32_t* tab_ = nullptr;                    // block per kB samples, -1 = none (reads 0)
-    uint32_t n_ = 0;
+    uint32_t n_ = 0, cap_ = 0;
 };
 
 } // namespace ouro
