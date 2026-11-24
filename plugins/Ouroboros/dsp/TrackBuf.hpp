@@ -23,6 +23,7 @@ public:
         std::free(tab_);
         cap_ = cap;
         rk_ = kNone;
+        hi_ = 0;
         n_ = cap / kB + (cap % kB != 0);
         tab_ = static_cast<int32_t*>(std::malloc(size_t(n_) * sizeof(int32_t)));
         if (!tab_) n_ = 0;
@@ -57,16 +58,19 @@ public:
         }
     }
 
+    // Both walk the table only up to the high-water mark: a snapshot clears and shares every track in one audio block.
     void clear(BlockPool& p) {
         rk_ = kNone;
-        for (uint32_t k = 0; k < n_; ++k) if (tab_[k] >= 0) { p.free(tab_[k]); tab_[k] = -1; }
+        for (uint32_t k = 0; k < hi_; ++k) if (tab_[k] >= 0) { p.free(tab_[k]); tab_[k] = -1; }
+        hi_ = 0;
     }
 
     // This buffer becomes a copy of src (same cap) by reference: no allocation.
     void shareFrom(BlockPool& p, const TrackBuf& src) {
         if (&src == this) return;
         clear(p);
-        for (uint32_t k = 0; k < n_; ++k) if ((tab_[k] = src.tab_[k]) >= 0) p.addRef(tab_[k]);
+        for (uint32_t k = 0; k < src.hi_; ++k) if ((tab_[k] = src.tab_[k]) >= 0) p.addRef(tab_[k]);
+        hi_ = src.hi_;
     }
 
 private:
@@ -83,10 +87,12 @@ private:
         if (b >= 0) { std::memcpy(p.data(c), p.data(b), kB * sizeof(float)); p.free(b); }
         b = c;
         rk_ = kNone;
+        hi_ = std::max(hi_, i / kB + 1);
         return p.data(b) + i % kB;
     }
     int32_t* tab_ = nullptr;                    // block per kB samples, -1 = none (reads 0)
     uint32_t n_ = 0, cap_ = 0;
+    uint32_t hi_ = 0;                           // no block at or past it (take() raises it; zero() leaves it high)
     mutable uint32_t rk_ = kNone;               // get()'s block number, kNone: none
     mutable const float* rp_ = nullptr;         // its audio (zeros for no block)
 };

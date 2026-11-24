@@ -157,7 +157,7 @@ static void importPlaysBackExactly() {
         const auto pa = a.passFromTheTop(), pb = b.passFromTheTop();
         CHECK(pa.size() == 48000 && maxAbsDiff(pa, pb) < 1e-6f && peak(pb) > 0.1f);
     }
-    b.lp.importBegin();                                                    // a failed load ends here: Clear All's engine
+    b.lp.importBegin();                                                    // a failed load ends here: every part empty
     CHECK(b.lp.transport() == ouro::Transport::Running && b.lp.empty() && b.lp.loopLength() == 0);
     recordBase(b, 24000, 0.1f); CHECK(b.lp.loopLength() == 24000);       // the first press records
 }

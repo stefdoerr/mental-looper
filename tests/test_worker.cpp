@@ -188,7 +188,8 @@ static void loadRestoresThePiece() {
     removeTree(root);
 }
 
-// Each refused before asking for the engine: an empty slot, another rate, a missing WAV, an L over the track limit.
+// Each refused before asking for the engine: an empty slot, another rate, a missing WAV, an L over the track limit, a
+// piece.txt with no audio (every len 0; with L 0 a restart would divide by zero), with and without an L.
 static void loadChecksBeforeTouching() {
     const std::string root = tmpRoot();
     Rig r; recordPiece(r);
@@ -204,9 +205,15 @@ static void loadChecksBeforeTouching() {
     CHECK(unlink((slotDir(root, 7) + "/B2.wav").c_str()) == 0);
     PieceMeta longL; longL.rate = 48000; longL.loop = r.lp.maxTrackLength() + 1;   // no track: nothing else to refuse
     mkdir(slotDir(root, 8).c_str(), 0777); put(slotDir(root, 8) + "/piece.txt", formatPiece(longL));
+    PieceMeta silent, parsed; silent.rate = 48000;
+    for (int s : {9, 10}) {
+        mkdir(slotDir(root, s).c_str(), 0777); put(slotDir(root, s) + "/piece.txt", formatPiece(silent));
+        CHECK(parsePiece(slurp(slotDir(root, s) + "/piece.txt"), parsed));   // a well-formed file
+        silent.loop = 24000;
+    }
     const auto image = r.settle();
     const std::pair<int, Result> cases[] = {{1, Result::Empty}, {6, Result::LoadError}, {7, Result::LoadError},
-                                            {8, Result::LoadError}};
+                                            {8, Result::LoadError}, {9, Result::LoadError}, {10, Result::LoadError}};
     for (const auto& c : cases) {
         w.startLoad(c.first);
         bool asked = false;

@@ -77,22 +77,27 @@ private:
     enum : int { Idle, Save, Load, WantEngine, Lent, Done };
     static constexpr uint32_t kChunk = 4096;
 
+    // An exception (a path's allocation) would end the thread in DPF's catch with the job never Done: each step catches.
     void run() override {
-        if (!root_.empty()) recoverSlots(root_);
+        try { if (!root_.empty()) recoverSlots(root_); } catch (...) {}
         rescan();
         for (int idle = 0; !shouldThreadExit();) {
             const int s = state_.load(std::memory_order_acquire);
             if (s != Save && s != Load) {
-                if (++idle == 50) { idle = 0; rescan(); }   // about every 1 s: slots copied or deleted by hand (file manager)
-                d_msleep(20);
+                if (++idle == 10) { idle = 0; rescan(); }   // about every 1 s: slots copied or deleted by hand (file manager)
+                d_msleep(100);
                 continue;
             }
-            result_ = s == Save ? save() : load();
+            try { result_ = s == Save ? save() : load(); }
+            catch (...) {
+                if (state_.load(std::memory_order_acquire) == Lent) engine_.importBegin();   // every part empty
+                result_ = s == Save ? Result::SaveError : Result::LoadError;
+            }
             rescan();                 // whatever the result: a commit can fail after its swap
             state_.store(Done, std::memory_order_release);
         }
     }
-    void rescan() { if (!root_.empty()) full_.store(scanSlots(root_), std::memory_order_relaxed); }
+    void rescan() { try { if (!root_.empty()) full_.store(scanSlots(root_), std::memory_order_relaxed); } catch (...) {} }
     bool saveStopped() const { return cancel_.load(std::memory_order_relaxed) || halt_.load(std::memory_order_relaxed); }
 
 #ifdef _WIN32
@@ -158,6 +163,7 @@ private:
                             wav[p][t].frames() != len)) return Result::LoadError;
                 total += len;
             }
+        if (!total) return Result::LoadError;   // no audio (L 0 would divide by zero at the restart): not a piece
         if (blocksFor(m) > capacity_) return Result::TooBig;
         if (!borrowEngine()) return Result::Cancelled;
         engine_.importBegin();

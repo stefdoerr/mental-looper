@@ -641,7 +641,9 @@ public:
     }
     // Worker thread, the engine lent. A load: importBegin(), each track's audio from its beginning (from + n <= its len,
     // checked against maxTrackLength() before), importEnd().
-    void importBegin() { reset(); }   // every part empty, L unset: Clear All's empty engine (a failed load ends here)
+    // Every part empty, L unset, running (a failed load ends here). Unlike Clear All, which goes to A (Song on: step 1's
+    // part), the current part stays (a queued part, or Song on: step 1's, is taken).
+    void importBegin() { reset(); }
     bool importTrack(int p, int t, uint32_t from, const float* src, uint32_t n) {   // false: the pool refused
         TrackBuf& b = parts_[p][t].buf;
         for (uint32_t i = 0; i < n; ++i) {

@@ -314,11 +314,11 @@ inline Err commitSlot(const std::string& root, int slot) {
         if (had) rename(o.c_str(), d.c_str());
         return e;
     }
-    removeTree(o);
-    int fd = ::open(root.c_str(), O_RDONLY);
+    int fd = ::open(root.c_str(), O_RDONLY);   // the renames on disk before NN.old goes (else recoverSlots finds it)
     if (fd < 0) return errFromErrno();
     Err e = fsync(fd) != 0 ? errFromErrno() : Err::None;
     ::close(fd);
+    if (e == Err::None) removeTree(o);
     return e;
 #endif
 }

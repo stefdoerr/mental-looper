@@ -1,6 +1,7 @@
 // CPU bench: time Looper::process() over a 4-track session. Build once against main's engine, once against the
 // tempo-sync branch's. SYNC=0: the plugin with Sync Off (no setSync/setGrid calls). SYNC=1: Sync = Bars, MOD playing.
 #include "dsp/Looper.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -72,17 +73,21 @@ int main() {
             for (int t = 0; t < 4; ++t) { sp.pressRec(t); go(2.0); sp.pressRec(t); go(0.2); }   // overdub each track
         }
         go(1.0);
-        double worst = 0.0; int ok = 0;
+        double take = 0.0, drop = 0.0; int ok = 0;   // worst of each, in us
+        const auto us = [](std::chrono::steady_clock::time_point a, std::chrono::steady_clock::time_point b) {
+            return 1e6 * std::chrono::duration<double>(b - a).count();
+        };
         for (int rep = 0; rep < 200; ++rep) {
             ouro::PieceMeta pm;
             const auto a = std::chrono::steady_clock::now();
             const bool got = sp.takeSnapshot(pm);
-            if (got) sp.dropSnapshot();
-            const double us = 1e6 * std::chrono::duration<double>(std::chrono::steady_clock::now() - a).count();
-            if (got) ++ok;
-            if (us > worst) worst = us;
+            const auto b = std::chrono::steady_clock::now();
+            if (got) { sp.dropSnapshot(); ++ok; }
+            const auto c = std::chrono::steady_clock::now();
+            take = std::max(take, us(a, b)); drop = std::max(drop, us(b, c));
+            go(0.01);                                         // a few blocks between, as in the plugin
         }
-        std::printf("SNAP take+drop worst of 200: %.1f us (%d ok) part=%d L=%u\n", worst, ok, sp.part(), unsigned(sp.loopLength()));
+        std::printf("SNAP worst of 200: take %.1f us, drop %.1f us (%d ok) part=%d L=%u\n", take, drop, ok, sp.part(), unsigned(sp.loopLength()));
     }
 #endif
 }
