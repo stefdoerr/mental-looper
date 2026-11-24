@@ -12,6 +12,7 @@
 #include "hmi/HmiBridge.hpp"
 #include "hmi/LoopWidget.hpp"
 #include "hmi/SongWidget.hpp"
+#include "hmi/PiecesWidget.hpp"
 #include "hmi/lv2-hmi.h"
 
 #include <algorithm>
@@ -142,8 +143,8 @@ public:
 
     void widgetShown(const char* symbol, ALABS_HMI_Widget w, const ALABS_HMI_WidgetArea* area)
     {
-        const bool song = symbol != nullptr && std::strcmp(symbol, "song_steps") == 0;
-        if (fWidgetDraw == nullptr || w == nullptr || area == nullptr || symbol == nullptr || (!song && std::strcmp(symbol, "loop") != 0)
+        const uint8_t kind = symbol == nullptr ? 0 : std::strcmp(symbol, "song_steps") == 0 ? 1 : std::strcmp(symbol, "piece_slots") == 0 ? 2 : 0;
+        if (fWidgetDraw == nullptr || w == nullptr || area == nullptr || symbol == nullptr || (kind == 0 && std::strcmp(symbol, "loop") != 0)
             || area->pixelFormat != ALABS_HMI_PixelFormat_Mono1
             || area->width == 0 || area->width > kMaxW || area->height == 0 || area->height > kMaxH)
             return;
@@ -154,7 +155,7 @@ public:
             {
                 s.w.store(area->width, std::memory_order_relaxed);
                 s.h.store(area->height, std::memory_order_relaxed);
-                s.song.store(song, std::memory_order_relaxed);
+                s.kind.store(kind, std::memory_order_relaxed);
                 s.handle.store(w, std::memory_order_release);
                 return;
             }
@@ -399,6 +400,8 @@ protected:
                 else if (on(kParamDryThru)) std::memmove(outputs[0], inputs[0], frames * sizeof(float));
                 else std::fill(outputs[0], outputs[0] + frames, 0.0f);
                 renderClick(outputs[1], frames);
+                fDrawAcc += frames;
+                if (fDrawAcc >= 960) { fDrawAcc %= 960; drawWidgets(); }
                 return;
             }
             fLoading = fLent = false;
@@ -772,24 +775,30 @@ private:
     void drawWidgets()
     {
         if (fWidgetDraw == nullptr) return;
-        ouro::WidgetView v = {};
-        v.selected = fSel;
-        v.transport = fEngine.transport();
-        v.waiting = fEngine.userWaiting(fSel);
-        for (int t = 0; t < ouro::kTracks; ++t)
+        ouro::WidgetView& v = fView;   // while the engine is lent (a load) the last view stands: no engine call
+        ouro::SongView& sv = fSongView;
+        if (!fLent)
         {
-            v.state[t] = fEngine.state(t); v.on[t] = fEngine.isOn(t); v.armed[t] = fEngine.armedTrack() == t;
-            v.layers[t] = fEngine.layerCount(t);   // the bitmap compare below redraws on a count change
+            v = {};
+            v.selected = fSel;
+            v.transport = fEngine.transport();
+            v.waiting = fEngine.userWaiting(fSel);
+            for (int t = 0; t < ouro::kTracks; ++t)
+            {
+                v.state[t] = fEngine.state(t); v.on[t] = fEngine.isOn(t); v.armed[t] = fEngine.armedTrack() == t;
+                v.layers[t] = fEngine.layerCount(t);   // the bitmap compare below redraws on a count change
+            }
+            v.loopLength = fEngine.loopLength(); v.position = fEngine.position();
+            v.trackLength = fEngine.trackLength(fSel); v.trackPosition = fEngine.trackPosition(fSel);
+            v.recordedSamples = fEngine.recordedSamples(); v.sampleRate = fEngine.sampleRate(); v.blinkOn = fBlinkOn;
+            v.part = fEngine.part(); v.queuedPart = fEngine.queuedPart();
+            v.songStep = fEngine.songStep(); v.songLength = fEngine.songLength(); v.memoryFull = fEngine.memoryFull();
+            sv = {};
+            for (int i = 0; i < ouro::kSteps; ++i) { sv.part[i] = uint8_t(fEngine.stepPart(i)); sv.repeats[i] = uint8_t(fEngine.stepRepeats(i)); }
+            sv.playing = fEngine.songStep(); sv.on = fEngine.songOn();
+            sv.edited = std::min(ouro::kSteps, std::max(1, int(std::lround(fVal[kParamStep])))) - 1;
         }
-        v.loopLength = fEngine.loopLength(); v.position = fEngine.position();
-        v.trackLength = fEngine.trackLength(fSel); v.trackPosition = fEngine.trackPosition(fSel);
-        v.recordedSamples = fEngine.recordedSamples(); v.sampleRate = fEngine.sampleRate(); v.blinkOn = fBlinkOn;
-        v.part = fEngine.part(); v.queuedPart = fEngine.queuedPart();
-        v.songStep = fEngine.songStep(); v.songLength = fEngine.songLength(); v.memoryFull = fEngine.memoryFull();
-        ouro::SongView sv = {};
-        for (int i = 0; i < ouro::kSteps; ++i) { sv.part[i] = uint8_t(fEngine.stepPart(i)); sv.repeats[i] = uint8_t(fEngine.stepRepeats(i)); }
-        sv.playing = fEngine.songStep(); sv.on = fEngine.songOn();
-        sv.edited = std::min(ouro::kSteps, std::max(1, int(std::lround(fVal[kParamStep])))) - 1;
+        v.loading = fLoading;
 
         uint8_t bits[kMaxBytes];
         for (auto& s : fSlots)
@@ -799,8 +808,15 @@ private:
             if (w != nullptr)
             {
                 const uint16_t sw = s.w.load(std::memory_order_relaxed), sh = s.h.load(std::memory_order_relaxed);
-                const size_t n = s.song.load(std::memory_order_relaxed) ? ouro::renderSongWidget(sv, sw, sh, bits)
-                                                                        : ouro::renderLoopWidget(v, sw, sh, bits);
+                const uint8_t kind = s.kind.load(std::memory_order_relaxed);
+                size_t n;
+                if (kind == 2)
+                {
+                    const int loaded = loadedPiece() - 1;
+                    const ouro::PiecesView pv = { uint16_t(fWorker.fullSlots()), std::min(16, std::max(1, int(std::lround(fVal[kParamSlot])))) - 1, loaded, pieceStatus() };
+                    n = ouro::renderPiecesWidget(pv, sw, sh, bits);
+                }
+                else n = kind == 1 ? ouro::renderSongWidget(sv, sw, sh, bits) : ouro::renderLoopWidget(v, sw, sh, bits);
                 if (w != s.drawn || std::memcmp(bits, s.last, n) != 0)
                 {
                     fWidgetDraw->draw_bitmap(fWidgetDraw->handle, w, 0, 0, sw, sh, bits);
@@ -813,6 +829,8 @@ private:
     }
 
     ouro::Looper fEngine;
+    ouro::WidgetView fView = {};            // the last loop widget view built (drawWidgets); a load redraws from it
+    ouro::SongView fSongView = {};
     ouro::pieces::PieceWorker fWorker{fEngine, ouro::pieces::piecesDir()};   // after fEngine: made after it, gone before
     float fVal[kNumParams] = {};            // current port values
     float fPrev[kParamBypass] = {};         // values as of the last run() (NaN: apply everything)
@@ -855,7 +873,7 @@ private:
     struct WidgetSlot {
         std::atomic<ALABS_HMI_Widget> handle{nullptr};
         std::atomic<uint16_t> w{0}, h{0};
-        std::atomic<bool> song{false};      // the song widget (else the loop widget); written before the handle is published
+        std::atomic<uint8_t> kind{0};       // 0 loop, 1 song, 2 pieces; written before the handle is published
         std::atomic<bool> drawing{false};   // run() is between loading the handle and finishing draw_bitmap
         ALABS_HMI_Widget drawn = nullptr;   // run() only: the handle last drawn (new handle = redraw all)
         uint8_t last[kMaxBytes] = {};       // run() only: the last bitmap drawn

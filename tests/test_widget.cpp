@@ -1,5 +1,6 @@
 #include "hmi/LoopWidget.hpp"
 #include "hmi/SongWidget.hpp"
+#include "hmi/PiecesWidget.hpp"
 #include "test_util.hpp"
 
 #include <cstdlib>
@@ -269,10 +270,13 @@ static void waitShowsWaitInPlaceOfTheState()
 // Every character the widget can draw has a glyph (showsText compares against the same font, so it can't catch a gap).
 static void everyWidgetStringHasGlyphs()
 {
-    static const char* const strings[] = { "--", "REC", "PLAY", "DUB", "STOP", "ARM", "WAIT", "T1", "T2", "T3", "T4", "0123456789:" };
+    static const char* const strings[] = { "--", "REC", "PLAY", "DUB", "STOP", "ARM", "WAIT", "T1", "T2", "T3", "T4", "0123456789:",
+                                            "3 FULL", "3 EMPTY", "SAVE 3?", "LOADING 40%", "SAVED 3", "120 BPM 4 BARS", "1 BAR", "DISK FULL",
+                                            "SAVE ERROR", "TOO BIG", "LOAD ERROR", "EMPTY", "SAVING", "LOAD", "LOADED 16" };
     for (const char* s : strings)
         for (const char* c = s; *c != '\0'; ++c)
         {
+            if (*c == ' ') continue;
             const uint8_t* g = ouro::glyph(*c);
             int lit = 0; for (int r = 0; r < 7; ++r) lit += g[r] != 0;
             if (lit == 0) std::printf("  no glyph for '%c' in \"%s\"\n", *c, s);
@@ -534,6 +538,104 @@ static void songWidgetNarrowStaysInItsBuffer()
         }
 }
 
+static ouro::PiecesView piecesView(const char* status)
+{
+    ouro::PiecesView v = {};
+    v.full = 1u << 0 | 1u << 1 | 1u << 4; v.selected = 2; v.loaded = 1; v.status = status;   // slots 1, 2, 5 full; 3 selected; 2 loaded
+    return v;
+}
+
+static bool sameRows(const uint8_t* a, const uint8_t* b, int w, int y0, int y1)
+{
+    for (int y = y0; y < y1; ++y) for (int x = 0; x < w; ++x) if (px(a, w, x, y) != px(b, w, x, y)) return false;
+    return true;
+}
+
+static void newGlyphsDrawAndDiffer()
+{
+    const char* all = "VNGK?%";
+    for (const char* c = all; *c; ++c)
+    {
+        const uint8_t* g = ouro::glyph(*c);
+        int lit = 0; for (int r = 0; r < 7; ++r) lit += g[r] != 0;
+        CHECK(lit > 0);
+        CHECK(std::memcmp(g, ouro::glyph(' '), 7) != 0);
+        for (const char* d = all; d < c; ++d) CHECK(std::memcmp(g, ouro::glyph(*d), 7) != 0);
+    }
+}
+
+static void piecesWidgetLayout()
+{
+    uint8_t b[1024];
+    CHECK(ouro::renderPiecesWidget(piecesView("SAVE 3?"), 128, 37, b) == 16 * 37);
+    CHECK(litIn(b, 128, 5, 8, 10, 13) == 25);        // slot 1 filled box, rows 8-12
+    CHECK(litIn(b, 128, 16 + 5, 8, 16 + 10, 13) == 25);                                  // slot 2 filled
+    CHECK(litIn(b, 128, 32 + 6, 9, 32 + 9, 12) == 0 && litIn(b, 128, 32 + 5, 8, 32 + 10, 13) == 16);   // slot 3 outline
+    CHECK(litIn(b, 128, 5, 23, 10, 28) == 16);                                           // slot 9 empty, second row at 23-27
+    CHECK(litIn(b, 128, 5, 13, 10, 14) == 0 && litIn(b, 128, 16 + 5, 13, 16 + 10, 14) == 5);   // underline under the loaded slot 2 only
+    CHECK(litIn(b, 128, 5, 28, 128, 29) == 0);
+    // selected number 3 inverted in a 13x9 box (rows 0-7 visible, the box row above the screen), the others plain
+    CHECK(litIn(b, 128, 32 + 1, 0, 32 + 14, 8) > 60 && litIn(b, 128, 16 + 1, 0, 16 + 14, 8) < 25);
+    CHECK(px(b, 128, 32 + 1, 0) == 1 && px(b, 128, 32 + 13, 7) == 1 && px(b, 128, 32 + 14, 4) == 0);
+    uint8_t ref[1024]; std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 128, 0, 30, "SAVE 3?"); ouro::drawText(ref, 128, 128 - 47, 30, "LOADED 2");
+    CHECK(sameRows(b, ref, 128, 30, 37));                                                // status at row 30, nothing else there
+    // numbers 9-16 at rows 15-21, "10" centred in its cell
+    std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 128, 16 + 2, 15, "10");
+    bool same = true;
+    for (int y = 15; y < 22; ++y) for (int x = 16; x < 32; ++x) same &= px(b, 128, x, y) == px(ref, 128, x, y);
+    CHECK(same);
+    // the selected slot moves the inversion; an unselected number is just text
+    auto v = piecesView(""); v.selected = 9; ouro::renderPiecesWidget(v, 128, 37, ref);
+    CHECK(px(ref, 128, 16 + 1, 14) == 1 && px(ref, 128, 16 + 13, 22) == 1);
+    CHECK(litIn(ref, 128, 32 + 1, 0, 32 + 14, 8) < 25);
+}
+
+static void piecesWidgetLoadedAndStatusFit()
+{
+    uint8_t b[1024], ref[1024];
+    auto v = piecesView("3 EMPTY"); v.loaded = 1;
+    ouro::renderPiecesWidget(v, 128, 37, b);
+    std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 128, 0, 30, "3 EMPTY"); ouro::drawText(ref, 128, 128 - 47, 30, "LOADED 2");
+    CHECK(sameRows(b, ref, 128, 30, 37));
+    v.loaded = -1; ouro::renderPiecesWidget(v, 128, 37, b);
+    std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 128, 0, 30, "3 EMPTY");
+    CHECK(sameRows(b, ref, 128, 30, 37));                                                // nothing loaded: no LOADED
+    CHECK(litIn(b, 128, 0, 13, 128, 14) == 0);                                           // and no underline
+    // fallback at 96x16: fits ("3 EMPTY" + "LOADED 2": 49 >= 48), and a long status leaves LOADED out
+    v.loaded = 1; ouro::renderPiecesWidget(v, 96, 16, b);
+    std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 96, 0, 1, "3 EMPTY"); ouro::drawText(ref, 96, 96 - 47, 1, "LOADED 2");
+    CHECK(sameRows(b, ref, 96, 0, 16));
+    v.status = "120 BPM 4 BARS"; ouro::renderPiecesWidget(v, 96, 16, b);
+    std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 96, 0, 1, "120 BPM 4 BARS");
+    CHECK(sameRows(b, ref, 96, 0, 16));
+    v.status = "1 BAR"; v.loaded = 15; ouro::renderPiecesWidget(v, 128, 37, b);           // "LOADED 16" is 53 px
+    std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 128, 0, 30, "1 BAR"); ouro::drawText(ref, 128, 128 - 53, 30, "LOADED 16");
+    CHECK(sameRows(b, ref, 128, 30, 37));
+}
+
+static void piecesWidgetSmallAreas()
+{
+    uint8_t b[1024];
+    auto v = piecesView("SAVE 3?"); v.loaded = -1;
+    CHECK(ouro::renderPiecesWidget(v, 96, 16, b) == 12 * 16);
+    uint8_t ref[1024]; std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 96, 0, 1, "SAVE 3?");
+    CHECK(std::memcmp(b, ref, 12 * 16) == 0);                                            // only the status, at row 1
+    CHECK(ouro::renderPiecesWidget(v, 96, 15, b) == 12 * 15);
+    CHECK(litIn(b, 96, 0, 0, 96, 15) == 0);                                              // below 16 rows: blank
+    uint8_t buf[12 * 16 + 8]; std::memset(buf, 0xA5, sizeof buf);
+    ouro::renderPiecesWidget(v, 96, 16, buf);
+    for (size_t i = 12 * 16; i < sizeof buf; ++i) CHECK(buf[i] == 0xA5);                 // guard bytes untouched
+    for (int h = 16; h < 37; ++h)
+        for (int w : {96, 100, 128}) { uint8_t t[1024]; CHECK(ouro::renderPiecesWidget(v, uint16_t(w), uint16_t(h), t) == size_t((w + 7) / 8) * h); }
+}
+
+static void loopWidgetShowsLoad()
+{
+    auto v = view(); v.loading = true; v.memoryFull = true; v.state[0] = TrackState::Playing;
+    CHECK(showsText(v, "LOAD"));                                                         // over FULL too
+    v.loading = false; CHECK(showsText(v, "FULL"));
+}
+
 int main()
 {
     sizeIsMono1(); barFillsProportionally(); emptyBarWhenNoLoop(); elapsedShownWhileRecording();
@@ -544,5 +646,6 @@ int main()
     emptyTrackShowsTheLoopNotItsOldLength();
     loopWidgetShowsPartQueuedSongAndFull(); songWidgetDrawsEachStepsLabel(); songWidgetMarksPlayingAndEdited();
     songWidgetDrawsNothingBehindTheEnd(); songWidgetNarrowStaysInItsBuffer();
+    newGlyphsDrawAndDiffer(); piecesWidgetLayout(); piecesWidgetLoadedAndStatusFit(); piecesWidgetSmallAreas(); loopWidgetShowsLoad();
     REPORT();
 }

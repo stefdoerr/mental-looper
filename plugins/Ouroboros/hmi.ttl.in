@@ -14,4 +14,7 @@
                  ahw:pixelFormat ahw:Mono1 ] ,
                [ a ahw:Widget ; lv2:symbol "song_steps" ; lv2:name "Song" ;
                  ahw:minWidth 96 ; ahw:minHeight 16 ; ahw:naturalWidth 128 ; ahw:naturalHeight 37 ;
+                 ahw:pixelFormat ahw:Mono1 ] ,
+               [ a ahw:Widget ; lv2:symbol "piece_slots" ; lv2:name "Pieces" ;
+                 ahw:minWidth 96 ; ahw:minHeight 16 ; ahw:naturalWidth 128 ; ahw:naturalHeight 37 ;
                  ahw:pixelFormat ahw:Mono1 ] .

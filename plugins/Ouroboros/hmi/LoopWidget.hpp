@@ -18,6 +18,7 @@ struct WidgetView {
     int part, queuedPart;                  // current part 0-3; the part a switch waits for (-1: none)
     int songStep, songLength;              // the song's playing step (-1: not playing) and its length
     bool memoryFull;                       // the pool is full: FULL takes the state text's place
+    bool loading;                          // a piece loads: LOAD takes the state text's place, FULL's too
 };
 
 // Mono1: rows top->bottom, (w+7)/8 bytes per row, MSB = leftmost pixel, 1 = lit. Returns bytes written.
@@ -78,6 +79,7 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
             }
         }
         if (v.memoryFull) txt = "FULL";
+        if (v.loading) txt = "LOAD";
         drawText(bits, w, tx, textY, txt);
 
         const int cell = w / kTracks;
