@@ -46,7 +46,7 @@ public:
         int32_t b;
         if (freeCount_ > 0) b = freeList_[--freeCount_];
         else if (highWater_ < reserved_) b = int32_t(highWater_++);
-        else { full_ = full_ || !undo; latch_ = latch_ || !undo; return -1; }
+        else { full_ = full_ || !undo; latch_ = latch_ || !undo; refusals_ += !undo; return -1; }
         std::memset(data(b), 0, kBlock * sizeof(float));
         meta_[b] = Meta{-1, 1, k};
         ++used_;
@@ -77,6 +77,8 @@ public:
     uint32_t usedBlocks() const { return used_; }          // the same (test_pool)
     uint32_t undoUsed() const { return undoUsed_; }
     uint32_t budgetBlocks() const { return budget_; }
+    uint32_t reserved() const { return reserved_; }        // every block there is
+    uint32_t refusals() const { return refusals_; }        // Audio blocks refused (no block left), since reserve()
     bool full() const { return full_; }                    // an Audio block was refused, and none came back since
     // Like full(), but held until margin free blocks are back (a lead-in or a dropped undo record is not enough).
     bool latched() const { return latch_; }
@@ -86,13 +88,13 @@ private:
     void release() {
         std::free(data_); std::free(meta_); std::free(freeList_);
         data_ = nullptr; meta_ = nullptr; freeList_ = nullptr;
-        reserved_ = budget_ = used_ = undoUsed_ = highWater_ = freeCount_ = 0;
+        reserved_ = budget_ = used_ = undoUsed_ = highWater_ = freeCount_ = refusals_ = 0;
         full_ = latch_ = false;
     }
     float*   data_ = nullptr;
     Meta*    meta_ = nullptr;
     int32_t* freeList_ = nullptr;
-    uint32_t reserved_ = 0, budget_ = 0, used_ = 0, undoUsed_ = 0, highWater_ = 0, freeCount_ = 0;
+    uint32_t reserved_ = 0, budget_ = 0, used_ = 0, undoUsed_ = 0, highWater_ = 0, freeCount_ = 0, refusals_ = 0;
     uint32_t margin_ = 1;
     bool full_ = false, latch_ = false;
 };

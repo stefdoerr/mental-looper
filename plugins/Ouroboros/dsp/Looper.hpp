@@ -2,6 +2,7 @@
 #include "BlockPool.hpp"
 #include "Constants.hpp"
 #include "Delta.hpp"
+#include "Piece.hpp"
 #include "TrackBuf.hpp"
 #include <algorithm>
 #include <cmath>
@@ -88,6 +89,9 @@ public:
         ramp_ = msToSamples(kRampMs, sr_);
         histLen_ = msToSamples(kHistoryMs, sr_);
         for (Part& pt : parts_)
+            for (Track& tr : pt)
+                if (!tr.buf.init(cap_)) return fail();
+        for (Part& pt : snap_)
             for (Track& tr : pt)
                 if (!tr.buf.init(cap_)) return fail();
         if (!(hist_ = static_cast<float*>(std::calloc(histLen_, sizeof(float))))) return fail();
@@ -276,10 +280,11 @@ public:
             tr.state = TrackState::Empty;                // (a recording onto the loop plays ahead of its writer): its
             tr.buf.clear(pool_);                         // blocks go back now
             if (recTrack_ == t) noFirstLoop();
+            ++changes_;
             return;
         }
         if (tr.state == TrackState::Overdubbing) {
-            endDub(tr, true);                            // cancel: subtracted, not kept for redo
+            endDub(tr, true);                            // cancel: subtracted, not kept for redo (counted there)
         } else if (tr.undoTop > 0) {
             if (tr.nOps >= kMaxPendingOps) return;       // layer undo/redo past the cap is ignored
             const uint32_t i = --tr.undoTop;
@@ -287,9 +292,11 @@ public:
             // a redo brings back; let the fade finish into the delta if that is heard
             if (tr.fade.left && tr.fade.layer == int32_t(i)) tr.fade.left = 0;   // stop writing into it
             addOp(tr, tr.layers[i].d, -1.0f, true, int32_t(i));
+            ++changes_;
         } else if (tr.state == TrackState::Playing) {    // the base: the output ramps out, the buffer stays for redo
             tr.state = TrackState::Empty;
             tr.baseUndone = true;
+            ++changes_;
         }
     }
 
@@ -301,9 +308,11 @@ public:
             tr.state = TrackState::Playing;
             if (armed_ == t) armed_ = -1;                // an arm is for an empty track only, and so is an action
             if (pend_.t == t) cancelWaiting();           // waiting for the line on it
+            ++changes_;
         } else if (tr.undoTop < tr.redoTop && tr.nOps < kMaxPendingOps) {
             addOp(tr, tr.layers[tr.undoTop].d, 1.0f, true, int32_t(tr.undoTop));
             ++tr.undoTop;
+            ++changes_;
         }
     }
 
@@ -311,6 +320,7 @@ public:
     void clearTrack(int t) {
         if (!valid(t)) return;
         Track& tr = cur()[t];
+        ++changes_;                                      // clearAll() counts here too
         if (armed_ == t) armed_ = -1;
         if (pend_.t == t) cancelWaiting();
         dropLayers(tr);                                  // an op still reading a layer keeps it: the ramp-out is smooth
@@ -360,13 +370,16 @@ public:
     void setSong(bool on) {
         if (on == song_) return;
         song_ = on; step_ = -1; pass_ = 0;
+        ++changes_;
         if (on) queued_ = -1;
         songHome();
     }
     // Step i (0-15): part 0-3, kStepLoop or kStepStop, played repeats (1-16) times. Default: A x1, then Loop.
     void setStep(int i, int part, uint32_t repeats) {
         if (i < 0 || i >= kSteps || part < 0 || part > kStepStop) return;
+        const Step was = steps_[i];
         steps_[i] = {int8_t(part), uint8_t(std::max(1u, std::min(repeats, 16u)))};
+        changes_ += was.part != steps_[i].part || was.reps != steps_[i].reps;
         if (i == 0) songHome();
     }
     // The Stop Mode a Stop step uses (stop() takes its own).
@@ -467,13 +480,16 @@ public:
     void modStopped(StopMode mode, float fadeMs) { stop(mode, fadeMs); }
 
     // Playback gains: settings, stored even while disabled; every gain ramps to its target over kRampMs.
-    void setOn(int t, bool on) { if (inRange(t)) cur()[t].on = on; }
-    void toggleOn(int t) { if (inRange(t)) cur()[t].on = !cur()[t].on; }
+    void setOn(int t, bool on) { if (inRange(t) && cur()[t].on != on) { cur()[t].on = on; ++changes_; } }
+    void toggleOn(int t) { if (inRange(t)) { cur()[t].on = !cur()[t].on; ++changes_; } }
     bool isOn(int t) const { return inRange(t) && cur()[t].on; }
     void setVolumeDb(int t, float db) {
         if (!inRange(t)) return;
-        cur()[t].volDb = std::max(-60.0f, std::min(db, 6.0f));     // NaN -> -60
-        cur()[t].vol = std::pow(10.0f, cur()[t].volDb / 20.0f);
+        db = std::max(-60.0f, std::min(db, 6.0f));                // NaN -> -60, +inf -> +6
+        if (db == cur()[t].volDb) return;
+        cur()[t].volDb = db;
+        cur()[t].vol = std::pow(10.0f, db / 20.0f);
+        ++changes_;
     }
     float volumeDb(int t) const { return inRange(t) ? cur()[t].volDb : 0.0f; }
     void setDryThru(bool on) { dryThru_ = on; }
@@ -568,6 +584,97 @@ public:
     uint32_t recordedSamples() const { return recTrack_ >= 0 && rec_ > recD_ ? rec_ - recD_ : 0; }
     double sampleRate() const { return sr_; }
     bool enabled() const { return enabled_; }
+
+    // Saved pieces. A save takes a snapshot here, and a worker thread writes it out while the audio thread plays on; a
+    // load lends the worker the whole engine (no process() or control call meanwhile), which imports the piece.
+    // Settled: nothing writes into a track (no take, first loop's tail or punch-out fade in any part, no outgoing part).
+    bool settled() const {
+        if (out_ >= 0) return false;
+        for (const Part& pt : parts_)
+            for (const Track& tr : pt) if (writing(tr) || tr.tailEnd || tr.fade.left) return false;
+        return true;
+    }
+    // Settled and none held: every track shared into the snapshot as copy on entry shares it (blocks and pending ops by
+    // reference, no allocation), m filled but for bpm. A base undone for redo is not heard: an empty track in m.
+    bool takeSnapshot(PieceMeta& m) {
+        if (snapHeld_ || !settled()) return false;
+        for (int p = 0; p < kParts; ++p)
+            for (int t = 0; t < kTracks; ++t) {
+                const Track& s = parts_[p][t];
+                copy(snap_[p][t], s);
+                m.track[p][t] = {s.state == TrackState::Empty ? 0 : s.len, s.volDb, s.on};
+            }
+        m.rate = uint32_t(std::lround(sr_)); m.loop = L_; m.bars = bars_; m.part = part_; m.song = song_;
+        for (int i = 0; i < kSteps; ++i) { m.stepPart[i] = steps_[i].part; m.stepReps[i] = steps_[i].reps; }
+        snapHeld_ = true;
+        return true;
+    }
+    bool snapshotHeld() const { return snapHeld_; }
+    // Worker thread, while held: n samples of track (p, t) (len > 0 in m) from sample `from` of its beginning (index
+    // len - phase), as heard once every pending op has passed. It touches only the snapshot's tracks, which nothing else
+    // touches while it is held, and blocks they hold a reference to (their buffers', their ops' deltas), which the audio
+    // thread never writes or frees meanwhile: a write copies a shared block first, a delta held is complete. It writes no
+    // refcount or free list; its delta cursors are its own, and get()'s cache is the snapshot buffer's.
+    void readSnapshot(int p, int t, uint32_t from, float* dst, uint32_t n) const {
+        const Track& tr = snap_[p][t];
+        const uint32_t len = tr.len;
+        DeltaCursor c[kOpSlots];
+        uint32_t i = (len - tr.phase + from % len) % len;
+        for (uint32_t k = 0; k < n; ++k) {
+            float v = tr.buf.get(pool_, i);
+            for (uint32_t j = 0; j < tr.nOps; ++j) {      // what each op still owes at i, added as commit() adds it
+                const Op& op = tr.ops[j];
+                if ((i + len - op.at) % len >= op.len - op.done) continue;
+                if (op.fold) v += tr.buf.get(pool_, i + len);
+                else {
+                    const uint32_t off = (i + len - op.d.start()) % len;
+                    if (off < op.d.length()) v += op.sign * op.d.read(pool_, c[j], off);
+                }
+            }
+            dst[k] = v;
+            if (++i == len) i = 0;
+        }
+    }
+    void dropSnapshot() {
+        for (Part& pt : snap_) for (Track& tr : pt) { drop(tr); tr.state = TrackState::Empty; }
+        snapHeld_ = false;
+    }
+    // Worker thread, the engine lent. A load: importBegin(), each track's audio from its beginning (from + n <= its len,
+    // checked against maxTrackLength() before), importEnd().
+    void importBegin() { reset(); tp_ = Transport::Stopped; }   // every part empty, L unset
+    bool importTrack(int p, int t, uint32_t from, const float* src, uint32_t n) {   // false: the pool refused
+        TrackBuf& b = parts_[p][t].buf;
+        for (uint32_t i = 0; i < n; ++i) {
+            float* s = b.at(pool_, from + i);
+            if (!s) return false;
+            *s = src[i];
+        }
+        return true;
+    }
+    // Every track at its beginning (pos, phase 0), one layer, stopped at the top: restart() plays the piece from there.
+    // On and volume through their setters (the clamp: the file is the user's to edit), which act on the current part.
+    void importEnd(const PieceMeta& m) {
+        L_ = m.loop; bars_ = m.bars;
+        for (int p = 0; p < kParts; ++p) {
+            cp_ = &parts_[p];
+            for (int t = 0; t < kTracks; ++t) {
+                cur()[t].len = m.track[p][t].len;
+                cur()[t].state = cur()[t].len ? TrackState::Playing : TrackState::Empty;
+                setOn(t, m.track[p][t].on);
+                setVolumeDb(t, m.track[p][t].volDb);
+            }
+        }
+        part_ = m.part; cp_ = &parts_[part_];
+        for (int i = 0; i < kSteps; ++i) setStep(i, m.stepPart[i], m.stepReps[i]);   // L set: no switch (songHome())
+        setSong(m.song);
+    }
+    uint32_t capacityBlocks() const { return pool_.reserved(); }
+    uint32_t maxTrackLength() const { return maxRec_; }
+    uint32_t audioRefusals() const { return pool_.refusals(); }
+    // +1 when what a save writes may have changed: a take's close, an accepted undo or redo, a clear, on, volume, a step
+    // or Song changed, a copy on entry. Not on playback, the song advancing, or a switch without a copy.
+    uint32_t changes() const { return changes_; }
+    bool empty() const { return allEmpty(); }
 
 private:
     static constexpr uint32_t kOpSlots = 2 * (kMaxPendingOps + 1);
@@ -843,6 +950,7 @@ private:
     // (cont); false if dropped, or if the tempo changed: D is then not that back-date, and the writer has to fade in
     // under the rest instead (trim).
     bool closeFirst(bool toDub) {
+        ++changes_;
         Track& tr = cur()[recTrack_];
         uint32_t L = recordedSamples(), bars = 1;        // rec_ - recD_, never below 0
         bool exact = true;                               // D is the press's back-date
@@ -961,6 +1069,7 @@ private:
     // Punch-out (a layer, then a 5 ms fade that is not back-dated), or cancel/silent (subtracted, no layer).
     // A recording onto the loop (no delta) just gets the fade: it is the base.
     void endDub(Track& tr, bool cancel) {
+        ++changes_;
         Writer& dub = tr.dub;
         tr.state = TrackState::Playing;
         if (dub.layer >= 0) {
@@ -1301,6 +1410,7 @@ private:
         const int from = part_;
         bool fill = true;
         for (const Track& tr : parts_[p]) fill = fill && tr.state == TrackState::Empty;
+        changes_ += fill;
         part_ = p;
         cp_ = &parts_[p];
         for (int u = 0; u < kTracks; ++u) {
@@ -1347,6 +1457,7 @@ private:
     bool fail() { release(); return false; }
     void release() {
         reset();                                         // returns the blocks while the pool still exists
+        dropSnapshot();
         for (Part& pt : parts_)                          // a buffer's table stays to its next init
             for (Track& tr : pt) { delete[] tr.layers; tr.layers = nullptr; }
         std::free(hist_); hist_ = nullptr;
@@ -1404,6 +1515,10 @@ private:
     float thr_ = 0.01f;              // auto-record threshold, linear (-40 dB)
     bool autoRec_ = false;
     bool recToDub_ = false, enabled_ = false, dryThru_ = false, bypass_ = false;
+    // Saved pieces, last: the members process() uses keep their places.
+    Part snap_[kParts];              // the snapshot a save reads (see takeSnapshot()): reset(), clearAll(), switches leave it
+    bool snapHeld_ = false;
+    uint32_t changes_ = 0;           // see changes()
 };
 
 } // namespace ouro
