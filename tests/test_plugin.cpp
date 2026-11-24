@@ -758,15 +758,42 @@ static void autoLoadOnFirstRun() {
     CHECK(hasReq(kParamSlot, 2) && eng().loopLength() == len && eng().state(0) == ouro::TrackState::Playing && stopped());
     CHECK(hasReq(kParamVolume1, -6) && hasReq(kParamVolume, -6));    // part A both before and after: pushed all the same
 }
+// The result lands while the Dwarf may show page 1: it stays until the next Slot change, Save or Load (5 s: 1875 blocks).
 static void autoLoadOfABrokenSlotShowsWhy() {
     freshPieces(); set(kParamPiece, 7); runN(1);                     // slot 7 holds nothing
     set(kParamSlot, 5);                                              // turned during the load: the status stays
     CHECK(waitPieces() && status() == "EMPTY" && eng().empty() && hasReq(kParamPiece, 0));
-    runN(1200); CHECK(status() == "5 EMPTY");                        // then the slot turned to
+    runN(1875); CHECK(status() == "EMPTY");
+    set(kParamSlot, 6); runN(1); CHECK(status() == "6 EMPTY");
     ouro::pieces::makeDirs(gRoot + "/07");
     if (FILE* f = std::fopen((gRoot + "/07/piece.txt").c_str(), "wb")) { std::fputs("ouroboros-piece 1\nrate 48000\n", f); std::fclose(f); }
     fresh(); set(kParamPiece, 7); runN(1);                           // a corrupt piece.txt
     CHECK(waitPieces() && status() == "LOAD ERROR" && eng().empty() && hasReq(kParamPiece, 0));
+    runN(1875); CHECK(status() == "LOAD ERROR");
+    set(kParamSlot, 2); runN(1); CHECK(status() == "2 EMPTY");
+}
+// A save fails while the user plays on page 1: the failure stays as a load's does; SAVED goes after 3 s.
+static void aFailedSaveStaysOnScreen() {
+    freshPieces(); recordLoop();
+    ouro::pieces::makeDirs(gRoot); chmod(gRoot.c_str(), 0555);       // no slot folder can be made
+    saveTo(2); CHECK(status() == "SAVE ERROR");
+    runN(1875); CHECK(status() == "SAVE ERROR");
+    set(kParamSlot, 3); runN(1); CHECK(status() == "3 EMPTY");
+    chmod(gRoot.c_str(), 0755);
+    saveTo(3); CHECK(status() == "SAVED 3");
+    runN(1200); CHECK(status() == "3 FULL");
+}
+// Load on an empty slot does nothing: the loops play on, sample for sample as without the press.
+static void loadOfAnEmptySlotKeepsPlaying() {
+    std::vector<float> out[2];
+    for (int k = 0; k < 2; ++k) {
+        freshPieces(); recordLoop(); set(kParamSlot, 3); runN(1);
+        if (k) press(kParamLoad);
+        else { runN(1); runN(1); }                                   // press()'s blocks, no press
+        if (k) CHECK(status() == "EMPTY" && !plug().pieceLoading() && eng().transport() == ouro::Transport::Running);
+        runN(400); out[k] = gOut;
+    }
+    CHECK(maxAbsDiff(out[0], out[1]) == 0.0f && peak(out[1]) > 0.05f);
 }
 static void saveStoresTheBpm() {
     freshPieces(); recordLoop();
@@ -844,6 +871,8 @@ int main()
     controlsFollowTheLoadedPiece();
     autoLoadOnFirstRun();
     autoLoadOfABrokenSlotShowsWhy();
+    aFailedSaveStaysOnScreen();
+    loadOfAnEmptySlotKeepsPlaying();
     saveStoresTheBpm();
     gPlugin.reset();
     ouro::pieces::removeTree(dir);

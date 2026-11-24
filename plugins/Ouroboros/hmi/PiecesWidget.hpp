@@ -16,16 +16,17 @@ struct PiecesView {
     const char* status;    // drawn as given
 };
 
-// Mono1 like renderSongWidget. From 37 rows: two rows of 8 cells 16 px wide (number at rows 0-6 / 15-21, a 5x5 box 2 rows
-// under it: filled = holds a piece, outline = empty); the selected number inverted in a 13x9 box (1 row above the number
-// to 1 below it, clipped at the top edge), the loaded slot's box underlined one row below it; the status line at rows 30-36
-// with "LOADED M" right-aligned when it fits after the status. Below 37 rows only the status line (row 1); below 16 nothing.
+// Mono1 like renderSongWidget. From 37 rows and 128 columns: two rows of 8 cells 16 px wide (number at rows 0-6 / 15-21,
+// a 5x5 box 2 rows under it: filled = holds a piece, outline = empty); the selected number inverted in a 13x9 box (1 row
+// above the number to 1 below it, clipped at the top edge), the loaded slot's box underlined one row below it; the status
+// line at rows 30-36 with "LOADED M" right-aligned when it fits after the status. Smaller, only the status line (row 1);
+// below 16 rows nothing.
 inline size_t renderPiecesWidget(const PiecesView& v, uint16_t w, uint16_t h, uint8_t* bits)
 {
     const size_t bytes = size_t((w + 7) / 8) * h;
     std::memset(bits, 0, bytes);
     if (h < 16) return bytes;
-    const bool full = h >= 37;
+    const bool full = h >= 37 && w >= 128;   // narrower, slots 7, 8, 15 and 16 would be cut
 
     if (full)
         for (int s = 0; s < 16; ++s)

@@ -598,7 +598,7 @@ protected:
                 if (r != Result::Saved) setStatus(r == Result::DiskFull ? "DISK FULL" : "SAVE ERROR");
                 else
                 {
-                    setStatus("SAVED %d", fSaveSlot);
+                    setStatus("SAVED %d", fSaveSlot, 0, true);
                     request(kParamPiece, float(fSaveSlot));
                     fBaseline = fSaveChanges;
                 }
@@ -681,14 +681,17 @@ private:
     }
     void startLoad(int slot)                        // run() lends the engine once stopped and the worker asks
     {
+        if (!fWorker.idle()) return;                // no job: nothing would end fLoading
         fEngine.stop(ouro::StopMode::Instant);
         fWorker.startLoad(slot);
         fLoadSlot = slot; fLoading = true;
     }
-    void setStatus(const char* text, int n = 0, int ask = 0)   // text: a format for n; a question shows 2 s, others 3 s
+    // text: a format for n. A question shows 2 s, a transient status (SAVED) 3 s; any other (a failure, seen perhaps only
+    // once the user is back on page 2) stays like a loaded piece's: until the next Slot change, Save or Load.
+    void setStatus(const char* text, int n = 0, int ask = 0, bool transient = false)
     {
         std::snprintf(fStatus, sizeof fStatus, text, n);
-        fStatusLeft = uint64_t((ask ? 2.0 : 3.0) * getSampleRate());
+        fStatusLeft = ask || transient ? uint64_t((ask ? 2.0 : 3.0) * getSampleRate()) : kUntilReplaced;
         fAsk = ask;
     }
 

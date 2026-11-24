@@ -627,6 +627,13 @@ static void piecesWidgetSmallAreas()
     for (size_t i = 12 * 16; i < sizeof buf; ++i) CHECK(buf[i] == 0xA5);                 // guard bytes untouched
     for (int h = 16; h < 37; ++h)
         for (int w : {96, 100, 128}) { uint8_t t[1024]; CHECK(ouro::renderPiecesWidget(v, uint16_t(w), uint16_t(h), t) == size_t((w + 7) / 8) * h); }
+    // narrower than the grid's 128 columns (piece_slots' minimum is 96): only the status, as below 37 rows
+    for (int w : {96, 127}) {
+        const int bpr = (w + 7) / 8;
+        CHECK(ouro::renderPiecesWidget(v, uint16_t(w), 37, b) == size_t(bpr) * 37);
+        std::memset(ref, 0, sizeof ref); ouro::drawText(ref, w, 0, 1, "SAVE 3?");
+        CHECK(std::memcmp(b, ref, size_t(bpr) * 37) == 0);
+    }
 }
 
 static void loopWidgetShowsLoad()
