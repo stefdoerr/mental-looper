@@ -378,9 +378,10 @@ protected:
         const auto request = [this](uint32_t i, float v) { fVal[i] = v; fPrev[i] = v; requestParameterValueChange(i, v); };
         const auto num = [this](uint32_t i, int lo, int hi) { return std::min(hi, std::max(lo, int(std::lround(fVal[i])))); };
 
-        // A load, from its start to its result: no control or press is applied, nor kept for after it (fPrev takes fVal,
-        // C's gesture ends). The worker checks the slot, then asks for the engine, lent once it has stopped; from then
-        // to the result run() makes no engine call: the output is the dry input (Dry Thru on) or silence.
+        // A load, from its start to its result: nothing reaches the engine. Presses, and the ports the load sets from the
+        // piece, are dropped (fPrev takes fVal, C's gesture ends); any other setting waits for the result (its fPrev
+        // stays). The worker checks the slot, then asks for the engine, lent once it has stopped; from then to the
+        // result run() makes no engine call: the output is the dry input (Dry Thru on) or silence.
         if (fLoading)
         {
             const Result r = fWorker.poll();
@@ -391,7 +392,7 @@ protected:
                     fWorker.lendEngine();
                     fLent = true;
                 }
-                std::copy(fVal, fVal + kParamBypass, fPrev);
+                for (uint32_t i = 0; i < kParamBypass; ++i) if (droppedDuringLoad(i)) fPrev[i] = fVal[i];
                 fTapPending = false; fHeld = on(kParamUndoRedo); fDone = true;
                 fClickAt = -1.0;                // no new tick (a running one ends)
                 if (!fLent) fEngine.process(inputs[0], outputs[0], frames);   // the Instant stop ramps out
@@ -401,7 +402,7 @@ protected:
                 return;
             }
             fLoading = fLent = false;
-            if (r == Result::Loaded)            // the controls follow the piece: Part and Song below, as the engine moves them
+            if (r == Result::Loaded)
             {
                 const ouro::PieceMeta& m = fWorker.loaded();   // valid until the next load
                 const char* bars = m.bars == 1 ? "BAR" : "BARS";
@@ -411,23 +412,26 @@ protected:
                 fStatusLeft = kUntilReplaced; fAsk = 0;
                 request(kParamPiece, float(fLoadSlot));
                 request(kParamSlot, float(fLoadSlot));
-                const auto follow = [&](uint32_t i, float v) { if (fVal[i] != v) request(i, v); };
-                for (int s = 0; s < ouro::kSteps; ++s)
-                {
-                    follow(kParamStep1Part + 2 * s, float(fEngine.stepPart(s)));
-                    follow(kParamStep1Part + 2 * s + 1, float(fEngine.stepRepeats(s)));
-                }
-                const uint32_t sp = kParamStep1Part + 2 * (num(kParamStep, 1, ouro::kSteps) - 1);
-                follow(kParamStepPart, fVal[sp]);
-                follow(kParamStepRepeats, fVal[sp + 1]);
-                fPart = -1;                     // On 1-4, Volume 1-4 and Volume: the part-change path below
                 fBaseline = fEngine.changes();  // after importEnd(), whose setters count
             }
             else
             {
                 setStatus(r == Result::Empty ? "EMPTY" : r == Result::TooBig ? "TOO BIG" : "LOAD ERROR");
                 if (fEngine.empty()) request(kParamPiece, 0.0f);   // no piece (the pedalboard's, or cleared by a read error)
+                fPrev[kParamSlot] = fVal[kParamSlot];   // a Slot turned during the load is selected, the status stays
             }
+            // The ports the load dropped show the engine (Loaded: the piece): the steps and their proxies here; On 1-4,
+            // Volume 1-4 and Volume through the part-change path below; Part and Song follow the engine there too.
+            const auto follow = [&](uint32_t i, float v) { if (fVal[i] != v) request(i, v); };
+            for (int s = 0; s < ouro::kSteps; ++s)
+            {
+                follow(kParamStep1Part + 2 * s, float(fEngine.stepPart(s)));
+                follow(kParamStep1Part + 2 * s + 1, float(fEngine.stepRepeats(s)));
+            }
+            const uint32_t sp = kParamStep1Part + 2 * (num(kParamStep, 1, ouro::kSteps) - 1);
+            follow(kParamStepPart, fVal[sp]);
+            follow(kParamStepRepeats, fVal[sp + 1]);
+            fPart = -1;
         }
 
         // Track selection first: it retargets everything below.
@@ -663,6 +667,13 @@ private:
         fWorker.halt();
         if (fEngine.snapshotHeld()) fEngine.dropSnapshot();
         fSave = kNoSave; fLoading = fLent = false; fStatusLeft = 0;
+    }
+    // Dropped during a load (R9): the presses, and the ports the load sets from the piece (On, Volume, Part, Song, the
+    // steps, and their proxies). Any other setting (Track, Step, Slot, Dry Thru, Sync, ...) waits for the result.
+    static bool droppedDuringLoad(uint32_t i)
+    {
+        return (i <= kParamVolume4 && i != kParamTrack) || i == kParamStopPlay
+            || (i >= kParamPart && i <= kParamStep16Repeats && i != kParamStep) || i == kParamSave || i == kParamLoad;
     }
     void startLoad(int slot)                        // run() lends the engine once stopped and the worker asks
     {

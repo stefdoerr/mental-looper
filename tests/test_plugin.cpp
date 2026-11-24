@@ -722,6 +722,15 @@ static void pressesDuringALoadAreIgnored() {
     tapC(); press(kParamLoad); CHECK(waitPieces()); runN(200);       // a tap's undo, pending at the load: dropped
     CHECK(eng().state(0) == ouro::TrackState::Playing);
 }
+static void settingsDuringALoadApplyAfter() {                      // R9: a setting waits for the engine, not dropped
+    freshPieces(); recordLoop(); saveTo(2);
+    set(kParamLoad, 1); runN(1); set(kParamLoad, 0); CHECK(plug().pieceLoading());
+    set(kParamDryThru, 1); set(kParamPart, 2); runN(1);              // during the load
+    CHECK(waitPieces() && stopped());
+    const std::vector<float> s = sine(220, 0.1f, 4800); run(P(), s);
+    CHECK(maxAbsDiff(slice(gOut, 2400, 4800), slice(s, 2400, 4800)) < 1e-6f);   // stopped: the dry input alone
+    CHECK(eng().part() == 0 && P().getParameterValue(kParamPart) == 0.0f);       // Part is the piece's: dropped
+}
 static void controlsFollowTheLoadedPiece() {
     freshPieces(); recordLoop();
     set(kParamPart, 1); CHECK(runUntil([] { return eng().part() == 1; }));   // B, filled from A on entry
@@ -746,7 +755,9 @@ static void autoLoadOnFirstRun() {
 }
 static void autoLoadOfABrokenSlotShowsWhy() {
     freshPieces(); set(kParamPiece, 7); runN(1);                     // slot 7 holds nothing
+    set(kParamSlot, 5);                                              // turned during the load: the status stays
     CHECK(waitPieces() && status() == "EMPTY" && eng().empty() && hasReq(kParamPiece, 0));
+    runN(1200); CHECK(status() == "5 EMPTY");                        // then the slot turned to
     ouro::pieces::makeDirs(gRoot + "/07");
     if (FILE* f = std::fopen((gRoot + "/07/piece.txt").c_str(), "wb")) { std::fputs("ouroboros-piece 1\nrate 48000\n", f); std::fclose(f); }
     fresh(); set(kParamPiece, 7); runN(1);                           // a corrupt piece.txt
@@ -824,6 +835,7 @@ int main()
     saveOnAFullSlotAsksFirst();
     loadWithChangesAsksFirst();
     pressesDuringALoadAreIgnored();
+    settingsDuringALoadApplyAfter();
     controlsFollowTheLoadedPiece();
     autoLoadOnFirstRun();
     autoLoadOfABrokenSlotShowsWhy();
