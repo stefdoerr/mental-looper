@@ -19,13 +19,6 @@ static std::vector<float> passAlone(Rig& r, int t) {
     r.lp.stop(ouro::StopMode::Instant); r.silence(2000);
     return o;
 }
-// Stopped: restart, then one pass of the current part (its fade-in included).
-static std::vector<float> passFromTheTop(Rig& r) {
-    r.lp.restart();
-    auto o = r.capture(r.lp.partLength());
-    r.lp.stop(ouro::StopMode::Instant); r.silence(2000);
-    return o;
-}
 // Snapshot in a, import into b in 4096-sample chunks, as a load would.
 static ouro::PieceMeta importInto(Rig& a, Rig& b) {
     ouro::PieceMeta m;
@@ -161,7 +154,7 @@ static void importPlaysBackExactly() {
             CHECK(b.lp.undoDepth(t) == 0 && b.lp.isOn(t) == a.lp.isOn(t) && b.lp.volumeDb(t) == a.lp.volumeDb(t));
         }
         if (p == 1) { a.lp.stop(ouro::StopMode::Instant); a.silence(2000); }
-        const auto pa = passFromTheTop(a), pb = passFromTheTop(b);
+        const auto pa = a.passFromTheTop(), pb = b.passFromTheTop();
         CHECK(pa.size() == 48000 && maxAbsDiff(pa, pb) < 1e-6f && peak(pb) > 0.1f);
     }
     b.lp.importBegin();                                                    // a failed load ends here: Clear All's engine

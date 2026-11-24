@@ -210,7 +210,7 @@ manual:
 # core — no host, no test framework. See "Testing the DSP" in
 # INSTRUCTIONS.md and the annotated demo test.
 
-TEST_CXXFLAGS := -std=gnu++14 -g -O0 -fsanitize=address \
+TEST_CXXFLAGS := -std=gnu++14 -g -O0 -fsanitize=address -pthread \
                  -I$(PLUGIN_DIR) -I$(PLUGIN_DIR)/hmi -Idpf/distrho
 TEST_SRCS     := $(wildcard $(PLUGIN_DIR)/*.cpp) dpf/distrho/src/DistrhoPlugin.cpp
 

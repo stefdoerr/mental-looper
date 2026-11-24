@@ -39,6 +39,12 @@ struct Rig {                                         // trigger latency forced t
         silence(std::max(lp.loopLength(), block));
         return loopImage();
     }
+    std::vector<float> passFromTheTop() {            // stopped: restart, one pass of the current part (its fade-in included)
+        lp.restart();
+        auto o = capture(lp.partLength());
+        lp.stop(ouro::StopMode::Instant); silence(2000);
+        return o;
+    }
 };
 
 // Drives a Looper with a virtual MOD transport: before each block it hands the engine the grid at that block start.

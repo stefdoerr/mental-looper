@@ -44,6 +44,9 @@ CXXFLAGS += $(EXTRA_CXXFLAGS)
 
 CXXFLAGS += -std=gnu++14   # DPF hard-codes gnu++11 before $(CXXFLAGS); the last -std wins
 CXXFLAGS += -Ihmi          # vendored lv2-hmi.h / alabs-hmi-widgets.h want <lv2/core/lv2.h>: hmi/lv2/core/lv2.h
+# The pieces worker is a DPF Thread: pthread is in libc from glibc 2.34, apart in the Dwarf's 2.27, and DPF links with
+# -Wl,--no-undefined (it adds -lpthread for CLAP only).
+EXTRA_DSP_LIBS += -lpthread
 
 # Source files (DPF's makefile expects FILES_DSP for DSP-only plugins,
 # FILES_UI when there's a native UI — but we use modgui for the MOD GUI,
