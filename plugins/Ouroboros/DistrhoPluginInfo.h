@@ -50,7 +50,7 @@
 #define DISTRHO_PLUGIN_HAS_UI         0    // 0 = no native UI; modgui supplies the GUI on MOD
 #define DISTRHO_PLUGIN_IS_RT_SAFE     1    // 1 = no allocs / locks / I/O in run()
 #define DISTRHO_PLUGIN_NUM_INPUTS     1    // mono input bus
-#define DISTRHO_PLUGIN_NUM_OUTPUTS    1    // mono output bus
+#define DISTRHO_PLUGIN_NUM_OUTPUTS    2    // the loops (mono), then the click
 
 #define DISTRHO_PLUGIN_WANT_PROGRAMS                          0
 #define DISTRHO_PLUGIN_WANT_STATE                             0

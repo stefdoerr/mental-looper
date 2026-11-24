@@ -140,6 +140,16 @@ public:
                 if (pend_.t == recTrack_) pend_ = {};
                 at_ = i; closeFirst(recToDub_); at_ = 0;
             }
+            // Length: the first recording closes on its Nth line, as a press waiting for it would. Sync off: flag tests.
+            if (fixedBars_ && recTrack_ >= 0 && gValid_) {
+                double ph;
+                at_ = i;
+                if (gridPhase(ph) && ph < 1.0 && std::lround((rec_ - ph) / spb_) >= long(fixedBars_)) {
+                    if (pend_.t == recTrack_) pend_ = {};
+                    closeFirst(recToDub_);
+                }
+                at_ = 0;
+            }
             for (int u = 0; u < kTracks; ++u) {          // a recording onto the loop at the most whole loops in 5 min:
                 const Track& tr = tracks_[u];            // close as if B were pressed
                 if (tr.state == TrackState::Recording && tr.len == cap_ && tr.pos == maxRec_ / L_ * L_)
@@ -373,6 +383,7 @@ public:
     // At most kMinLoopMs (kHistoryMs before it grew for Sync): startDub's write position needs a back-date within 2 L.
     void setTriggerLatencyMs(float ms) { trigMs_ = std::max(0.0f, std::min(ms, kMinLoopMs)); }
     void setRecToDub(bool on) { recToDub_ = on; }
+    void setFixedBars(uint32_t n) { fixedBars_ = n; }   // Length: 0 = free
     void setAdvanceMs(float ms) { advMs_ = std::max(0.0f, std::min(ms, 30.0f)); }   // earlier only (R7)
     void setAutoRec(bool on) {                           // off: nothing starts by itself
         autoRec_ = on;
@@ -1092,6 +1103,7 @@ private:
     uint32_t recLead_ = 0;           // first recording: its lead-in before buf[0], kept aside at the buffer's end
     uint32_t recFadeIn_ = 0;         // first recording: its fade-in length from buf[0] (fadeIn_, or 0 after a lead-in)
     uint32_t bars_ = 1;              // the first loop's bars
+    uint32_t fixedBars_ = 0;         // Length: the first loop closes itself after this many bars (0: free)
     bool sync_ = false, gValid_ = false, gPlaying_ = false;   // Sync = Bars; MOD's grid: usable, transport playing
     bool recFree_ = false;           // the first recording started on the free grid (MOD stopped): it keeps it
     bool recNoGrid_ = false;         // the first recording started with no grid: it keeps none

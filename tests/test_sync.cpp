@@ -470,7 +470,40 @@ static void freeGridFirstPressKeepsTheTriggerLatency() {
     CHECK(maxAbsDiff(take(true), take(false)) == 0.0f);
 }
 
+static void lengthClosesTheFirstLoopOnItsBar() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.lp.setFixedBars(2); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 2 * 96000 - 128));
+    CHECK(r.lp.state(0) == TrackState::Recording);
+    r.silenceSync(256);                                                 // bar 2's line
+    CHECK(r.lp.state(0) == TrackState::Playing && r.lp.loopLength() == 2 * 96000 && r.lp.bars() == 2);
+}
+static void lengthWithModStoppedUsesTheFreeGrid() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.lp.setFixedBars(1); r.playing = false; r.silenceSync(1280);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000 + 256));
+    CHECK(r.lp.state(0) == TrackState::Playing && r.lp.loopLength() == 96000);
+}
+static void lengthFollowsAfterRec() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.lp.setFixedBars(1); r.lp.setRecToDub(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000 + 256));
+    CHECK(r.lp.state(0) == TrackState::Overdubbing && r.lp.loopLength() == 96000);
+}
+static void lengthLetsAnEarlierPressClose() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.lp.setFixedBars(4); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000 + 1280)); r.lp.pressRec(0);   // within the grace after bar 1
+    CHECK(r.lp.state(0) == TrackState::Playing && r.lp.loopLength() == 96000);
+}
+static void lengthIsIgnoredWithSyncOffOrNoGrid() {
+    SyncRig r; r.lp.setFixedBars(1); r.toPhase(0);                      // Sync off
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 2 * 96000));
+    CHECK(r.lp.state(0) == TrackState::Recording);
+    SyncRig g; g.lp.setSync(true); g.lp.setFixedBars(1); g.valid = false; g.silenceSync(128);   // no usable tempo
+    g.lp.pressRec(0); g.feedSync(sine(220, 0.1f, 2 * 96000));
+    CHECK(g.lp.state(0) == TrackState::Recording);
+}
+
 int main() {
+    lengthClosesTheFirstLoopOnItsBar(); lengthWithModStoppedUsesTheFreeGrid(); lengthFollowsAfterRec();
+    lengthLetsAnEarlierPressClose(); lengthIsIgnoredWithSyncOffOrNoGrid();
     earlyPressWaitsForTheLine(); latePressIsBackDatedToTheLine(); pressPastTheGraceWaitsForTheNextLine();
     firstLoopIsWholeBars(); tempoChangeDuringTheFirstRecording(); cancelAWaitingPress(); noGridActsAtOnce();
     syncOffIsUnchanged(); freeGridStartsAtTheFirstPress();

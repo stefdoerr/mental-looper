@@ -15,7 +15,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <vector>
 #include <memory>
 
 START_NAMESPACE_DISTRHO
@@ -60,7 +62,7 @@ enum ParamIndex {
     kParamAfterRec, kParamDryThru, kParamTail, kParamHoldTime, kParamBudget,
     kParamOffset, kParamTriggerLatency,
     kParamStopPlay, kParamStopMode, kParamFadeTime, kParamAutoRec, kParamThreshold, kParamDoubleTap,
-    kParamSync,
+    kParamSync, kParamClick, kParamClickLevel, kParamLength,
     kParamBypass,
     kNumParams
 };
@@ -79,6 +81,7 @@ public:
             fVal[i] = p.ranges.def;
         }
         fEngine.init(getSampleRate(), getBufferSize());   // the only allocation: never in run()
+        buildTicks(getSampleRate());
         // LV2 only (null for VST3/CLAP): the host's optional HMI features.
         if (const auto* f = static_cast<const LV2_Feature* const*>(d_nextLv2Features))
             for (; *f != nullptr; ++f)
@@ -176,6 +179,11 @@ protected:
 
     void initAudioPort(bool input, uint32_t index, AudioPort& port) override
     {
+        if (!input && index == 1)               // the click, on its own output (ttl symbol lv2_click_out)
+        {
+            port.name = "Click"; port.symbol = "click_out"; port.groupId = kPortGroupNone;
+            return;
+        }
         port.groupId = kPortGroupMono;
         Plugin::initAudioPort(input, index, port);
     }
@@ -233,6 +241,9 @@ protected:
             {"threshold",       "Threshold",          Db, -60, -10, -40, "dB"},
             {"double_tap",      "Double-Tap",         Ms, 150, 600, 400, "ms"},
             {"sync",            "Sync",               Enum, 0, 1, 0, ""},
+            {"click",           "Click",              Bool, 0, 1, 0, ""},
+            {"click_level",     "Click Level",        Db, -40, 0, -10, "dB"},
+            {"length",          "Length",             Enum, 0, 16, 0, ""},
         };
         const Def& d = defs[index];
         p.symbol = d.symbol;
@@ -248,11 +259,13 @@ protected:
         case Int:  p.hints |= kParameterIsInteger; break;
         case Enum:
         {
-            const uint8_t n = index == kParamTrack ? 4 : index == kParamStopMode ? 3 : 2;
+            const uint8_t n = index == kParamTrack ? 4 : index == kParamStopMode ? 3 : index == kParamLength ? 17 : 2;
             static const char* const trackNames[] = {"Track 1", "Track 2", "Track 3", "Track 4"};
             static const char* const afterNames[] = {"Rec > Play", "Rec > Dub"};
             static const char* const stopNames[] = {"Instant", "End of loop", "Fade"};
             static const char* const syncNames[] = {"Off", "Bars"};
+            static const char* const lengthNames[] = {"Free", "1 bar", "2 bars", "3 bars", "4 bars", "5 bars", "6 bars",
+                "7 bars", "8 bars", "9 bars", "10 bars", "11 bars", "12 bars", "13 bars", "14 bars", "15 bars", "16 bars"};
             p.hints |= kParameterIsInteger;
             p.enumValues.count = n;
             p.enumValues.restrictedMode = true;
@@ -261,7 +274,8 @@ protected:
             {
                 p.enumValues.values[k].value = d.min + k;
                 p.enumValues.values[k].label = index == kParamTrack ? trackNames[k] : index == kParamStopMode ? stopNames[k]
-                                             : index == kParamSync ? syncNames[k] : afterNames[k];
+                                             : index == kParamSync ? syncNames[k] : index == kParamLength ? lengthNames[k]
+                                             : afterNames[k];
             }
             break;
         }
@@ -285,6 +299,7 @@ protected:
     void sampleRateChanged(double sr) override
     {
         fEngine.init(sr, getBufferSize());      // non-RT; re-reserves for the new rate
+        buildTicks(sr);
         fFirst = true;                          // the fresh engine takes every value again
     }
 
@@ -321,12 +336,16 @@ protected:
         if (changed(kParamTriggerLatency)) fEngine.setTriggerLatencyMs(fVal[kParamTriggerLatency]);
         if (changed(kParamAutoRec))       fEngine.setAutoRec(on(kParamAutoRec));
         if (changed(kParamThreshold))     fEngine.setThresholdDb(fVal[kParamThreshold]);
+        if (changed(kParamLength))        fEngine.setFixedBars(uint32_t(std::max(0L, std::lround(fVal[kParamLength]))));
+        if (changed(kParamClickLevel))    fClickGain = std::pow(10.0f, fVal[kParamClickLevel] / 20.0f);
+        if (!on(kParamClick))             fTickPos = kNoTick;   // turned off: silent at once
         fEngine.setBypass(on(kParamBypass));
 
         // Sync = Bars: MOD's bar grid, before the presses below so they see this block's grid, then its play/stop
         // edges. The first run and Sync turning on only take MOD's state: neither is an edge. Off: only the flag test.
+        fClickAt = -1.0;                        // no tick this block unless followMod finds one
         if (changed(kParamSync)) fEngine.setSync(on(kParamSync));
-        if (on(kParamSync)) followMod(changed(kParamSync));
+        if (on(kParamSync)) followMod(changed(kParamSync), on(kParamClick));
 
         // Volume proxy: follows the selected track; a different value written to it goes to that track.
         const uint32_t vn = kParamVolume1 + sel;
@@ -407,6 +426,7 @@ protected:
 
         if (fWasFirst) fEngine.snapGains();
         fEngine.process(inputs[0], outputs[0], frames);
+        renderClick(outputs[1], frames);        // after the engine: an output may share the input's buffer
 
         // Widgets: blink toggles every 250 ms of audio; slots are redrawn every 960 samples (20 ms at 48 kHz).
         fBlinkAcc += frames;
@@ -429,7 +449,7 @@ private:
 
     // MOD's grid at this block's start goes to the engine; a play/stop change with a valid grid is an edge, unless
     // init (the first run, or Sync just turned on). BBT fields are read only when valid (DPF: else unset).
-    void followMod(bool init)
+    void followMod(bool init, bool click)
     {
         const TimePosition& pos = getTimePosition();
         const TimePosition::BarBeatTick& b = pos.bbt;
@@ -442,11 +462,57 @@ private:
             if (toNext < 1.0 || toNext > spb - 1.0) toNext = 0.0;   // within a sample of the line: on it
         }
         fEngine.setGrid(b.valid, pos.playing, spb, toNext);
+        if (click && b.valid && pos.playing)    // the next beat line from the same position: the click can't drift
+        {
+            const double spBeat = 60.0 / b.beatsPerMinute * getSampleRate(), into = b.tick / b.ticksPerBeat * spBeat;
+            const bool onLine = into < 1.0 || into > spBeat - 1.0;
+            fClickBpb = std::max(1, int(std::lround(b.beatsPerBar)));
+            fClickBeat = onLine && into < 1.0 ? int(b.beat) : int(b.beat) % fClickBpb + 1;
+            fClickAt = onLine ? 0.0 : spBeat - into;
+            fClickSpBeat = spBeat;
+        }
         if (b.valid && !init && pos.playing != fModPlaying)
         {
             if (pos.playing) fEngine.modStarted(toNext == 0.0); else stopNow(true);
         }
         fModPlaying = pos.playing;
+    }
+
+    // The two ticks, 25 ms: a 1000 Hz beat at -6 dB and a 1500 Hz beat 1, decaying, faded to 0 at the end. Non-RT,
+    // after fEngine.init().
+    void buildTicks(double sr)
+    {
+        const size_t n = fEngine.enabled() ? size_t(std::lround(0.025 * sr)) : 0;   // a rate it refused: no ticks
+        for (int a = 0; a < 2; ++a)
+        {
+            fTick[a].assign(n, 0.0f);
+            const double hz = a ? 1500.0 : 1000.0, amp = a ? 1.0 : 0.5;
+            for (size_t i = 0; i < n; ++i)
+            {
+                const double t = double(i) / sr;
+                fTick[a][i] = float(amp * std::sin(2.0 * M_PI * hz * t) * std::exp(-t / 0.006) * (1.0 - double(i) / double(n)));
+            }
+        }
+        fTickPos = kNoTick;
+    }
+
+    // The Click output: a tick at each beat line followMod found for this block (fClickAt), a running one carried on.
+    void renderClick(float* out, uint32_t frames)
+    {
+        if (fClickAt < 0.0 && fTickPos == kNoTick) { std::fill(out, out + frames, 0.0f); return; }
+        double at = fClickAt;
+        const size_t len = fTick[0].size();
+        for (uint32_t i = 0; i < frames; ++i)
+        {
+            if (at >= 0.0 && double(i) >= at)
+            {
+                fTickPos = 0; fTickAccent = fClickBeat == 1;
+                fClickBeat = fClickBeat % fClickBpb + 1;
+                at += fClickSpBeat;
+            }
+            out[i] = fTickPos < len ? fClickGain * fTick[fTickAccent][fTickPos++] : 0.0f;
+            if (fTickPos == len) fTickPos = kNoTick;
+        }
     }
 
     // Renders each shown slot and draws it when the bitmap changed or the handle is new. No allocation: fixed buffers.
@@ -498,6 +564,13 @@ private:
     uint64_t fSinceTap = 0;
     int fTapTrack = 0;
     bool fModPlaying = false;               // MOD's transport as of the last run() with Sync on
+    static constexpr size_t kNoTick = SIZE_MAX;
+    std::vector<float> fTick[2];            // the beat's tick and beat 1's (buildTicks)
+    size_t fTickPos = kNoTick;              // the running tick's next sample, kNoTick: none
+    bool fTickAccent = false;
+    double fClickAt = -1.0, fClickSpBeat = 0.0;   // this block's next beat line (< 0: none) and the beat's samples
+    int fClickBeat = 1, fClickBpb = 4;      // the next beat line's beat (1 = accented) and the beats in a bar
+    float fClickGain = 1.0f;
 
     ouro::HmiBridge fHmi;                           // labels and LEDs; inert without the host's HMI
     const ALABS_HMI_WidgetDraw* fWidgetDraw = nullptr;  // null: host can't show widgets

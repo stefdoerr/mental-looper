@@ -61,7 +61,7 @@ static const LV2_Feature* const fullFeatures[] = { &gOptionsFeature, &gMapFeatur
 
 static std::string bundleDir;
 static int portIndex(const std::string& ttlPath, const std::string& symbol);
-static float gIn[128], gOut[128], gPorts[64];  // gPorts[i]: port i's lv2:default
+static float gIn[128], gOut[128], gClick[128], gPorts[64];  // gPorts[i]: port i's lv2:default
 static LV2_Atom_Sequence gEvents = { { sizeof(LV2_Atom_Sequence_Body), 0 }, { 0, 0 } };  // lv2_events_in: empty
 
 // Each control port's lv2:default, from the generated TTL next to the .so.
@@ -84,8 +84,9 @@ static void connectAll(const LV2_Descriptor* d, LV2_Handle h)
 {
     d->connect_port(h, 0, gIn);
     d->connect_port(h, 1, gOut);
-    d->connect_port(h, 2, &gEvents);   // DPF's events-in port (time position), before the parameters
-    for (uint32_t i = 3; i < 64; ++i)
+    d->connect_port(h, 2, gClick);     // the Click output
+    d->connect_port(h, 3, &gEvents);   // DPF's events-in port (time position), before the parameters
+    for (uint32_t i = 4; i < 64; ++i)
         d->connect_port(h, i, &gPorts[i]);
 }
 
@@ -187,7 +188,7 @@ static void widgetRedrawsWhenProgressMoves(const LV2_Descriptor* d, const std::s
 {
     gDraws.clear();
     const int rec = portIndex(ttlPath, "rec");
-    CHECK(rec == 3);
+    CHECK(rec == 4);                       // after audio in, loop out, click out and events in
     LV2_Handle h = d->instantiate(d, 48000, bundleDir.c_str(), fullFeatures);
     connectAll(d, h);
     d->activate(h);
@@ -242,7 +243,7 @@ static void addressedRecGetsLabel(const LV2_Descriptor* d, const std::string& tt
 {
     gHmiCalls.clear();
     const int idx = portIndex(ttlPath, "rec");
-    CHECK(idx == 3);
+    CHECK(idx == 4);
     LV2_Handle h = d->instantiate(d, 48000, bundleDir.c_str(), fullFeatures);
     connectAll(d, h);
     d->activate(h);

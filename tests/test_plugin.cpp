@@ -33,15 +33,16 @@ static const ouro::Looper& eng()
 
 // Process vec in 128-frame blocks into gOut. gOut is prefilled with a nonzero
 // sentinel so a run() that never writes its output fails the silence checks.
-static std::vector<float> gOut;
+static std::vector<float> gOut, gClick;                    // the loop output and the Click output
 static void run(PluginExporter& plugin, const std::vector<float>& vec)
 {
     gOut.assign(vec.size(), 0.777f);
+    gClick.assign(vec.size(), 0.777f);
     for (size_t i = 0; i < vec.size(); i += 128)
     {
         const uint32_t len = static_cast<uint32_t>(std::min<size_t>(128, vec.size() - i));
         const float* inputs[1]  = { vec.data() + i };
-        float*       outputs[1] = { gOut.data() + i };
+        float*       outputs[2] = { gOut.data() + i, gClick.data() + i };
         plugin.run(inputs, outputs, len);
     }
 }
@@ -65,13 +66,13 @@ static void portSymbolsAreFrozen()
     static const char* kSym[] = { "rec","undo_redo","track","onoff","volume","undo","redo","clear_track",
         "clear_all","on_1","on_2","on_3","on_4","volume_1","volume_2","volume_3","volume_4","after_rec",
         "dry_thru","tail","hold_time","budget","offset","trigger_latency",
-        "stop_play","stop_mode","fade_time","auto_rec","threshold","double_tap","sync" };
-    for (uint32_t i = 0; i < 31; ++i) CHECK(std::strcmp(P().getParameterSymbol(i), kSym[i]) == 0);
+        "stop_play","stop_mode","fade_time","auto_rec","threshold","double_tap","sync","click","click_level","length" };
+    for (uint32_t i = 0; i < 34; ++i) CHECK(std::strcmp(P().getParameterSymbol(i), kSym[i]) == 0);
     CHECK(P().getParameterDesignation(kParamBypass) == kParameterDesignationBypass);
-    CHECK(kParamBypass == 31 && P().getParameterCount() == 32);
+    CHECK(kParamBypass == 34 && P().getParameterCount() == 35);
     CHECK(std::strcmp(P().getLabel(), DISTRHO_PLUGIN_NAME) == 0);
-    // groups: g1_perform 0-8, g2_tracks 9-16, g3_settings 17-23,25-30; stop_play (24) in perform
-    for (uint32_t i = 0; i < 31; ++i)
+    // groups: g1_perform 0-8, g2_tracks 9-16, g3_settings 17-23,25-33; stop_play (24) in perform
+    for (uint32_t i = 0; i < 34; ++i)
     {
         const uint32_t g = P().getParameterGroupId(i);
         CHECK(g == (i <= 8 || i == 24 ? 0u : i <= 16 ? 1u : 2u));
@@ -87,15 +88,22 @@ static void portSymbolsAreFrozen()
     CHECK(P().getParameterEnumValues(kParamStopMode).count == 3 && P().getParameterRanges(kParamFadeTime).def == 3.0f);
     CHECK(P().getParameterRanges(kParamThreshold).def == -40.0f && P().getParameterRanges(kParamDoubleTap).def == 400.0f && P().getParameterRanges(kParamAutoRec).def == 0.0f);
     CHECK(P().getParameterEnumValues(kParamSync).count == 2 && P().getParameterRanges(kParamSync).def == 0.0f);
+    CHECK(P().getParameterRanges(kParamClick).def == 0.0f && P().getParameterRanges(kParamClickLevel).def == -10.0f);
+    CHECK(P().getParameterRanges(kParamClickLevel).min == -40.0f && P().getParameterRanges(kParamClickLevel).max == 0.0f);
+    CHECK(P().getParameterEnumValues(kParamLength).count == 17 && P().getParameterRanges(kParamLength).def == 0.0f);
+    CHECK(std::strcmp(P().getParameterEnumValues(kParamLength).values[0].label, "Free") == 0);
+    CHECK(std::strcmp(P().getParameterEnumValues(kParamLength).values[16].label, "16 bars") == 0);
 }
 
 static void silentAndMono()
 {
     fresh();
-    CHECK(DISTRHO_PLUGIN_NUM_INPUTS == 1 && DISTRHO_PLUGIN_NUM_OUTPUTS == 1);
+    CHECK(DISTRHO_PLUGIN_NUM_INPUTS == 1 && DISTRHO_PLUGIN_NUM_OUTPUTS == 2);   // the loops, then the click
+    CHECK(std::strcmp(P().getAudioPort(false, 1).symbol, "click_out") == 0 && P().getAudioPort(false, 1).groupId == kPortGroupNone);
+    CHECK(std::strcmp(P().getAudioPort(false, 0).symbol, "audio_out_1") == 0 && P().getAudioPort(false, 0).groupId == kPortGroupMono);
     P().activate();
     run(P(), sine(220, 0.1f, 4800));        // nothing recorded, dry_thru off -> silence
-    CHECK(peak(gOut) == 0.0f);
+    CHECK(peak(gOut) == 0.0f && peak(gClick) == 0.0f);
 }
 
 static void recActsOnRisingEdgeOnly()
@@ -458,6 +466,56 @@ static void tapCancelsAWaitOnAnotherTrack() {
     CHECK(eng().state(1) == ouro::TrackState::Playing && !eng().canRedo(1));
 }
 
+// k blocks of MOD's transport; the Click output of each block appended to `click`.
+static void runModClick(bool playing, int k, std::vector<float>& click) {
+    for (int i = 0; i < k; ++i) { runMod(playing, 1); click.insert(click.end(), gClick.begin(), gClick.end()); }
+}
+// Where each tick starts: the first sample above the floor after at least 1000 below it.
+static std::vector<size_t> tickStarts(const std::vector<float>& x) {
+    std::vector<size_t> s; size_t quiet = 1000;
+    for (size_t i = 0; i < x.size(); ++i) {
+        if (std::fabs(x[i]) > 1e-4f) { if (quiet >= 1000) s.push_back(i); quiet = 0; } else ++quiet;
+    }
+    return s;
+}
+static float peakFrom(const std::vector<float>& x, size_t at, size_t n) {
+    float p = 0.0f;
+    for (size_t i = at; i < std::min(x.size(), at + n); ++i) p = std::max(p, std::fabs(x[i]));
+    return p;
+}
+static void clickTicksOnModsBeats() {
+    fresh(); gT = 0; set(kParamSync, 1); set(kParamClick, 1); set(kParamClickLevel, 0);
+    std::vector<float> c; runModClick(true, 1500, c);                // 192000 samples: two bars
+    const std::vector<size_t> s = tickStarts(c);
+    CHECK(s.size() == 8);
+    for (size_t k = 0; k < s.size(); ++k) CHECK(s[k] >= 24000 * k && s[k] <= 24000 * k + 2);   // every beat, from bar 1's line
+    CHECK(peakFrom(c, 0, 1200) > 0.9f && peakFrom(c, 96000, 1200) > 0.9f);   // beat 1: full level
+    const float weak = peakFrom(c, 24000, 1200);
+    CHECK(weak > 0.4f && weak < 0.6f);                               // the other beats: -6 dB
+    CHECK(peakFrom(c, 1200, 24000 - 1200) == 0.0f);                  // 25 ms, then silence
+    fresh(); gT = 0; set(kParamSync, 1); set(kParamClick, 1); set(kParamClickLevel, -20);
+    c.clear(); runModClick(true, 10, c);
+    CHECK(peakFrom(c, 0, 1200) > 0.09f && peakFrom(c, 0, 1200) < 0.11f);   // Click Level
+}
+static void clickIsSilentUnlessOnSyncedAndPlaying() {
+    std::vector<float> c;
+    fresh(); gT = 0; set(kParamSync, 1); runModClick(true, 400, c);  // Click off
+    CHECK(peakFrom(c, 0, c.size()) == 0.0f);
+    fresh(); gT = 0; set(kParamSync, 1); set(kParamClick, 1); c.clear(); runModClick(false, 400, c);   // MOD stopped
+    CHECK(peakFrom(c, 0, c.size()) == 0.0f);
+    fresh(); gT = 0; set(kParamClick, 1); c.clear(); runModClick(true, 400, c);   // Sync off
+    CHECK(peakFrom(c, 0, c.size()) == 0.0f);
+    fresh(); gT = 0; set(kParamSync, 1); set(kParamClick, 1); c.clear(); runModClick(true, 10, c);
+    set(kParamClick, 0); c.clear(); runModClick(true, 400, c);      // turned off: silent from then on
+    CHECK(peakFrom(c, 0, c.size()) == 0.0f);
+}
+static void lengthReachesTheEngine() {
+    fresh(); gT = 0; set(kParamSync, 1); set(kParamLength, 1); runMod(true, 1);
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);          // on bar 1's line (back-dated)
+    runMod(true, 760);                                              // past bar 2's line, no second press
+    CHECK(eng().state(0) == ouro::TrackState::Playing && eng().loopLength() == 96000);
+}
+
 int main()
 {
     d_nextBufferSize = 128;
@@ -497,5 +555,8 @@ int main()
     pressSeesThisBlocksGrid();
     tapCancelsAWaitingActionAtOnce();
     tapCancelsAWaitOnAnotherTrack();
+    clickTicksOnModsBeats();
+    clickIsSilentUnlessOnSyncedAndPlaying();
+    lengthReachesTheEngine();
     REPORT();
 }
