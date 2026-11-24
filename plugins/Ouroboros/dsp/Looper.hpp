@@ -99,6 +99,7 @@ public:
             bytes = std::max(bytes / 2, least);
         }
         pool_.setBudgetBytes(size_t(200) << 20);   // reserve() reset it to everything; 200 MB is the default
+        pool_.setMarginBlocks(uint32_t(sr_ / BlockPool::kBlock) + 1);   // FULL holds until about 1 s is free again
         // A stacked layer holds at least one block, so a track has at most one layer per block (+1 in progress).
         const size_t layers = size_t(bytes / (BlockPool::kBlock * sizeof(float))) + 1;
         for (Part& pt : parts_)
@@ -518,7 +519,7 @@ public:
     void setBudgetMb(float mb) { pool_.setBudgetBytes(mb > 0.0f ? size_t(double(mb) * 1048576.0) : 0); }   // NaN -> 0
     size_t undoBytes() const { return size_t(pool_.undoUsed()) * BlockPool::kBlock * sizeof(float); }
     // A write of track audio found the pool full with no undo layer left to give up; until a block comes back.
-    bool memoryFull() const { return pool_.full(); }
+    bool memoryFull() const { return pool_.latched(); }
     uint32_t blocksUsed() const { return pool_.used(); }
 
     TrackState state(int t) const { return valid(t) ? cur()[t].state : TrackState::Empty; }
@@ -966,6 +967,7 @@ private:
             Delta& d = tr.layers[dub.layer].d;
             if (dub.lost) {                              // the pool was full: the audio stays, without undo
                 d.release(pool_);
+                pool_.markFull();                        // the release frees plenty, but FULL says why the take was cut
                 dub.layer = -1;
                 ++tr.baked;
             } else if (d.length() == 0) {
@@ -1101,7 +1103,7 @@ private:
         if (wr.n >= tr.len) tr.layers[wr.layer].d.accumulate(pool_, wr.c, wr.n % tr.len, v);
         else {
             while (!tr.layers[wr.layer].d.append(pool_, v))
-                if (!evict()) { wr.lost = true; break; }
+                if (!evict()) { wr.lost = true; pool_.markFull(); break; }
         }
     }
 

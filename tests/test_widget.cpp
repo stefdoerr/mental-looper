@@ -437,7 +437,10 @@ static void loopWidgetShowsPartQueuedSongAndFull()
     v.queuedPart = -1; v.armed[0] = true; CHECK(showsText(v, "ARM"));                // ARM, WAIT and STOP beat the position
     v.armed[0] = false; v.waiting = true; CHECK(showsText(v, "WAIT"));
     v.waiting = false; v.transport = ouro::Transport::Stopped; CHECK(showsText(v, "STOP"));
-    v.transport = ouro::Transport::Running; v.state[0] = TrackState::Empty; CHECK(showsText(v, "--"));   // the position replaces PLAY only
+    v.transport = ouro::Transport::Running; v.state[0] = TrackState::Empty; CHECK(showsText(v, "3/6"));   // the position replaces -- too
+    v.songStep = -1; CHECK(showsText(v, "--")); v.songStep = 2;   // no song, no position
+    v.songStep = 7; v.songLength = 2; CHECK(showsText(v, "2/2"));   // never past the length (a step before it was edited to Stop)
+    v.songStep = 2; v.songLength = 6;
     v.state[0] = TrackState::Playing;
     v.songStep = 9; v.songLength = 16;   // 5 characters still fit in 40 px
     ouro::renderLoopWidget(v, 40, 37, a);

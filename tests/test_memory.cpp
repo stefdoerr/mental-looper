@@ -111,7 +111,39 @@ static void anUndoneBaseGivesWayToLoops() {
     CHECK(!r.lp.memoryFull() && r.lp.trackLength(2) == 20 * 48000 && !r.lp.canRedo(1));
 }
 
+// FULL must outlive the close that a full pool forces: both closes below free blocks right after the cut, and the
+// widget reads memoryFull() once per block. Feeds in blocks, returns how many block ends after the cut saw it false.
+static int blocksNotFullAfterTheCut(Rig& r, int t, const std::vector<float>& in, bool& cut) {
+    std::vector<float> o(r.block); int notFull = 0; cut = false;
+    for (size_t i = 0; i + r.block <= in.size(); i += r.block) {
+        r.lp.process(in.data() + i, o.data(), r.block);
+        const TrackState s = r.lp.state(t);
+        if (s != TrackState::Recording && s != TrackState::Overdubbing) cut = true;
+        if (cut && !r.lp.memoryFull()) ++notFull;
+    }
+    return notFull;
+}
+static void fullStaysVisibleAfterARoundedUpCloseOntoTheLoop() {   // frees its lead-in block at the default 3 ms latency
+    Rig r(48000.0, 128, size_t(8) << 20);
+    recordBase(r, 10 * 48000, 0.1f);
+    r.lp.setTriggerLatencyMs(3.0f);
+    r.lp.pressRec(1);
+    bool cut; const int n = blocksNotFullAfterTheCut(r, 1, sine(330, 0.1f, 41 * 48000), cut);
+    CHECK(cut && r.lp.trackLength(1) == 40 * 48000 && n == 0 && r.lp.memoryFull());
+}
+static void fullStaysVisibleWhenAnOverdubOnACopyPunchesOut() {   // its lost undo delta is released at the punch-out
+    Rig r(48000.0, 128, size_t(8) << 20);
+    recordBase(r, 20 * 48000, 0.1f);
+    r.lp.setPart(1); r.silence(20 * 48000);
+    r.lp.pressRec(0);
+    bool cut; const int n = blocksNotFullAfterTheCut(r, 0, sine(330, 0.05f, 21 * 48000), cut);
+    CHECK(cut && r.lp.state(0) == TrackState::Playing && n == 0 && r.lp.memoryFull());
+    r.lp.clearTrack(0); r.silence(4 * 4096);                          // Clear Track frees plenty: the latch goes
+    CHECK(!r.lp.memoryFull());
+}
+
 int main() {
+    fullStaysVisibleAfterARoundedUpCloseOntoTheLoop(); fullStaysVisibleWhenAnOverdubOnACopyPunchesOut();
     trackBufSharesUntilWritten(); audioIgnoresTheBudgetUntilThePoolIsFull();
     onlyRecordedAudioUsesThePool(); noBlocksStayPastTheLoop(); aThrownAwayTakeGivesItsBlocksBack(); aFullPoolClosesTheFirstRecording(); aFullPoolClosesARecordingOntoTheLoop();
     loopsWinOverUndo(); clearingATrackWhileOthersPlayFreesItsBlocks();

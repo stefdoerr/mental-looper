@@ -121,7 +121,7 @@ public:
 
     void widgetShown(const char* symbol, ALABS_HMI_Widget w, const ALABS_HMI_WidgetArea* area)
     {
-        const bool song = symbol != nullptr && std::strcmp(symbol, "song") == 0;
+        const bool song = symbol != nullptr && std::strcmp(symbol, "song_steps") == 0;
         if (fWidgetDraw == nullptr || w == nullptr || area == nullptr || symbol == nullptr || (!song && std::strcmp(symbol, "loop") != 0)
             || area->pixelFormat != ALABS_HMI_PixelFormat_Mono1
             || area->width == 0 || area->width > kMaxW || area->height == 0 || area->height > kMaxH)

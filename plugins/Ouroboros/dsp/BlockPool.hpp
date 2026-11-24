@@ -46,7 +46,7 @@ public:
         int32_t b;
         if (freeCount_ > 0) b = freeList_[--freeCount_];
         else if (highWater_ < reserved_) b = int32_t(highWater_++);
-        else { full_ = full_ || !undo; return -1; }
+        else { full_ = full_ || !undo; latch_ = latch_ || !undo; return -1; }
         std::memset(data(b), 0, kBlock * sizeof(float));
         meta_[b] = Meta{-1, 1, k};
         ++used_;
@@ -62,7 +62,12 @@ public:
         --used_;
         undoUsed_ -= meta_[b].kind == Kind::Undo;
         full_ = false;
+        if (latch_ && freeCount_ + (reserved_ - highWater_) >= margin_) latch_ = false;
     }
+    // The engine reports a write it had to refuse (a delta that could not grow) when nothing could be evicted.
+    void markFull() { latch_ = true; }
+    // Blocks that must be free before the latch lets go: about 1 s of audio at this rate.
+    void setMarginBlocks(uint32_t n) { margin_ = n; }
 
     float* data(int32_t b) { return data_ + size_t(b) * kBlock; }
     const float* data(int32_t b) const { return data_ + size_t(b) * kBlock; }
@@ -73,6 +78,8 @@ public:
     uint32_t undoUsed() const { return undoUsed_; }
     uint32_t budgetBlocks() const { return budget_; }
     bool full() const { return full_; }                    // an Audio block was refused, and none came back since
+    // Like full(), but held until margin free blocks are back (a lead-in or a dropped undo record is not enough).
+    bool latched() const { return latch_; }
 
 private:
     struct Meta { int32_t next; uint16_t refs; Kind kind; };
@@ -80,13 +87,14 @@ private:
         std::free(data_); std::free(meta_); std::free(freeList_);
         data_ = nullptr; meta_ = nullptr; freeList_ = nullptr;
         reserved_ = budget_ = used_ = undoUsed_ = highWater_ = freeCount_ = 0;
-        full_ = false;
+        full_ = latch_ = false;
     }
     float*   data_ = nullptr;
     Meta*    meta_ = nullptr;
     int32_t* freeList_ = nullptr;
     uint32_t reserved_ = 0, budget_ = 0, used_ = 0, undoUsed_ = 0, highWater_ = 0, freeCount_ = 0;
-    bool full_ = false;
+    uint32_t margin_ = 1;
+    bool full_ = false, latch_ = false;
 };
 
 } // namespace ouro

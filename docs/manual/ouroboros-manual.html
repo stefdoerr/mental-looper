@@ -377,15 +377,15 @@ Without the widget everything still works, just without the screen. On stock MOD
 <p><b>Click and Length.</b> With Click on, Ouroboros ticks on MOD&rsquo;s beats while MOD plays, beat&nbsp;1 higher and louder, on its own <b>Click</b> output: route that to your headphones or a second output to keep it out of the mix. With MOD playing, B waits for the next bar line, so the click is your count-in. Set Length to a number of bars and the first loop closes by itself on that bar line, as a press would; B before then closes it as usual.</p>
 
 <h2>Song parts</h2>
-<p>Ouroboros has four <b>parts</b>, A to D. Each part is its own set of four tracks, so you can record a verse in A and a chorus in B. The Track, On/Off and Volume knobs act on the current part. Every part starts empty and takes its length from its first track; the parts do not have to match.</p>
+<p>Ouroboros has four <b>parts</b>, A to D. Each part is its own set of four tracks, so you can record a verse in A and a chorus in B. The Track, On/Off and Volume knobs act on the current part. The loop length L is set once, by the first recording, and every track in every part is a whole multiple of it. A part&rsquo;s pass is its longest track, so parts can last a different number of Ls.</p>
 <p><b>Copy on entry.</b> Switch to an empty part and it starts as a copy of the part you left: every track&rsquo;s audio as heard, with its on/off and volume, one layer each (no undo history). Clear what you do not want.</p>
 <p><b>Switching.</b> Turn <b>Part</b> and the switch waits for the end of the current part&rsquo;s pass (its longest track). The screen shows <code>A&gt;B</code> blinking, and the knob shows the queued part until the switch. The switch is a crossfade of a few ms on both sides, so the new part&rsquo;s downbeat keeps its attack.</p>
 <h3>The song</h3>
-<p>The song is up to 16 <b>steps</b>. Each step has a part (A&ndash;D, <b>Loop</b> or <b>Stop</b>) and repeats (1&ndash;16). A repeat is one pass of that part. At the end of the last repeat the song moves to the next step. <b>Loop</b> repeats the part for ever; <b>Stop</b> stops with the Stop Mode, and the song goes back to step 1 with Song still on.</p>
+<p>The song is up to 16 <b>steps</b>. Each step has a part (A&ndash;D, <b>Loop</b> or <b>Stop</b>) and repeats (1&ndash;16). A repeat is one pass of that part. At the end of the last repeat the song moves to the next step. <b>Loop</b> sends the song back to step 1 (so it repeats the part for ever only when that is the song&rsquo;s only step); <b>Stop</b> stops with the Stop Mode, and the song goes back to step 1 with Song still on.</p>
 <ul style="margin:0 0 5px 0;padding-left:16px">
 <li>Turn <b>Song</b> on. Clear All, or starting from nothing, goes to step 1&rsquo;s part. B during a song stop cancels it and sends the song back to step 1.</li>
 <li>Turn <b>Part</b> by hand while the song plays: Song turns off and that part is queued.</li>
-<li>Edit a step while the song plays: it takes effect when the song reaches it. A playing step edited to Loop or Stop finishes its repeats first.</li>
+<li>Edit a step while the song plays: it takes effect when the song reaches it, except that the playing step&rsquo;s Repeats apply at once. A playing step edited to Loop or Stop finishes its repeats first.</li>
 </ul>
 <h3>Controls and screen</h3>
 <table>
@@ -394,9 +394,9 @@ Without the widget everything still works, just without the screen. On stock MOD
 <tr><td class="ctl">2</td><td>Part (A&ndash;D) and Song (off/on).</td></tr>
 <tr><td class="ctl">3</td><td>Step (1&ndash;16), Step Part (A&ndash;D, Loop, Stop), Step Repeats (1&ndash;16).</td></tr>
 </table>
-<p>The <b>Loop</b> widget labels the track with its part (<code>A1</code>). While the song plays it shows the position (<code>3/6</code>) instead of PLAY; REC, DUB, WAIT, ARM and STOP still show. In Starless&rsquo; Display dialog, also add the <b>Song</b> widget (symbol <code>Song</code>) and place it on knob subpage 3. It lists the steps with part and repeats, a triangle under the playing step and a bracket under the step you are editing. The arrangement is saved with the pedalboard; loops are not saved yet.</p>
+<p>The <b>Loop</b> widget labels the track with its part (<code>A1</code>). While the song plays it shows the position (<code>3/6</code>) instead of PLAY or <code>--</code>; REC, DUB, WAIT, ARM and STOP still show. In Starless&rsquo; Display dialog, also add the <b>Song</b> widget (symbol <code>song_steps</code>) and place it on knob subpage 3. It lists the steps with part and repeats, a triangle under the playing step and a bracket under the step you are editing. The arrangement is saved with the pedalboard; loops are not saved yet.</p>
 <h3>Memory</h3>
-<p>All parts share one pool of memory, and loops win over undo history. When memory is full, a recording closes as at the 5-minute limit and the screen shows <b>FULL</b> (it wins over every other label). Clearing a track gives its memory back.</p>
+<p>All parts share one pool of memory, and loops win over undo history. When memory is full, a recording closes as at the 5-minute limit, an overdub punches out (it stays in the loop but cannot be undone), and the screen shows <b>FULL</b> (it wins over every other label). FULL stays until about a second of memory is free again; clearing a track gives its memory back.</p>
 
 <h2>Settings</h2>
 <table>
@@ -420,7 +420,7 @@ Without the widget everything still works, just without the screen. On stock MOD
 <tr><td class="ctl">Part</td><td>A&ndash;D</td><td>A</td><td>The current part. Changing it queues a switch at the end of the pass.</td></tr>
 <tr><td class="ctl">Song</td><td>off / on</td><td>off</td><td>Plays the steps in order. See Song parts.</td></tr>
 <tr><td class="ctl">Step</td><td>1&ndash;16</td><td>1</td><td>The step the next two settings edit.</td></tr>
-<tr><td class="ctl">Step Part</td><td>A&ndash;D, Loop, Stop</td><td>A</td><td>What the step plays. Loop repeats for ever; Stop stops.</td></tr>
+<tr><td class="ctl">Step Part</td><td>A&ndash;D, Loop, Stop</td><td>A</td><td>What the step plays. Loop sends the song back to step 1; Stop stops. A Loop step ignores Repeats.</td></tr>
 <tr><td class="ctl">Step Repeats</td><td>1&ndash;16</td><td>1</td><td>How many passes the step plays.</td></tr>
 </table>
 

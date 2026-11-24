@@ -3,6 +3,7 @@
 #include "Font.hpp"
 #include "../dsp/Looper.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -58,7 +59,7 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
         else if (v.transport == Transport::Stopping) txt = v.blinkOn ? "STOP" : "";
         else if (v.armed[v.selected]) txt = "ARM";
         if (v.waiting) txt = "WAIT";
-        // State slot, highest first: FULL, WAIT/ARM/STOP, REC/DUB, the queued "A>B" (blinking), the song position (instead of PLAY).
+        // State slot, highest first: FULL, WAIT/ARM/STOP, REC/DUB, the queued "A>B" (blinking), the song position (instead of PLAY or --).
         const TrackState st = v.state[v.selected];
         const bool special = v.transport != Transport::Running || v.armed[v.selected] || v.waiting;
         const bool writing = st == TrackState::Recording || st == TrackState::Overdubbing;
@@ -68,9 +69,9 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
         if (!special && !writing)
         {
             if (v.queuedPart >= 0 && v.queuedPart < kParts && v.blinkOn) txt = sw;
-            else if (v.songStep >= 0 && st == TrackState::Playing)
+            else if (v.songStep >= 0)
             {
-                std::snprintf(pos, sizeof pos, "%d/%d", v.songStep + 1, v.songLength);
+                std::snprintf(pos, sizeof pos, "%d/%d", std::min(v.songStep + 1, v.songLength), v.songLength);   // a step edited to Stop can leave songStep past the end
                 txt = pos;
                 const int len = int(std::strlen(pos));
                 if (14 + len * 6 - 1 > w) tx = w - (len * 6 - 1);   // "10/16" is 29 px wide: keeps the whole text in 40 px
