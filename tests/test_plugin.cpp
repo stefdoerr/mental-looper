@@ -3,8 +3,11 @@
 #include "signals.hpp"
 #include "test_util.hpp"
 
+#include <chrono>
+#include <cstdlib>
 #include <memory>
 #include <string>
+#include <sys/stat.h>
 
 USE_NAMESPACE_DISTRHO
 
@@ -27,10 +30,8 @@ static std::unique_ptr<PluginExporter> gPlugin;
 static PluginExporter& P() { return *gPlugin; }
 static void fresh() { gPlugin.reset(new PluginExporter(nullptr, nullptr, requestStub, nullptr)); gReqs.clear(); }
 static void set(uint32_t i, float v) { P().setParameterValue(i, v); }
-static const ouro::Looper& eng()
-{
-    return static_cast<OuroborosPlugin*>(P().getInstancePointer())->engine();
-}
+static OuroborosPlugin& plug() { return *static_cast<OuroborosPlugin*>(P().getInstancePointer()); }
+static const ouro::Looper& eng() { return plug().engine(); }
 
 // Process vec in 128-frame blocks into gOut. gOut is prefilled with a nonzero
 // sentinel so a run() that never writes its output fails the silence checks.
@@ -87,7 +88,16 @@ static void layout()
     CHECK(P().getParameterRanges(kParamStep).min == 1.0f && P().getParameterRanges(kParamStep).max == 16.0f);
     CHECK(P().getParameterRanges(kParamStepRepeats).max == 16.0f && P().getParameterRanges(kParamSong).def == 0.0f);
     CHECK(P().getParameterDesignation(kParamBypass) == kParameterDesignationBypass);
-    CHECK(kParamBypass == 71 && P().getParameterCount() == 72);
+    CHECK(kParamBypass == 75 && P().getParameterCount() == 76);
+    static const char* kPieceSym[] = { "slot", "save", "load", "piece" };   // before Bypass, in g5_pieces
+    for (uint32_t i = 0; i < 4; ++i)
+        CHECK(std::strcmp(P().getParameterSymbol(kParamSlot + i), kPieceSym[i]) == 0 && P().getParameterGroupId(kParamSlot + i) == 4);
+    CHECK(std::strcmp(P().getPortGroupById(4).symbol, "g5_pieces") == 0);
+    CHECK((P().getParameterHints(kParamPiece) & kParameterIsHidden) != 0 && (P().getParameterHints(kParamSlot) & kParameterIsHidden) == 0);
+    CHECK(P().isParameterTrigger(kParamSave) && P().isParameterTrigger(kParamLoad) && !P().isParameterTrigger(kParamSlot));
+    CHECK(P().getParameterRanges(kParamSlot).min == 1.0f && P().getParameterRanges(kParamSlot).max == 16.0f);
+    CHECK(P().getParameterRanges(kParamSlot).def == 1.0f && P().getParameterRanges(kParamPiece).def == 0.0f);
+    CHECK(P().getParameterRanges(kParamPiece).min == 0.0f && P().getParameterRanges(kParamPiece).max == 16.0f);
     CHECK(std::strcmp(P().getLabel(), DISTRHO_PLUGIN_NAME) == 0);
     // groups: g1_perform 0-8, g2_tracks 9-16, g3_settings 17-23,25-33; stop_play (24) in perform
     for (uint32_t i = 0; i < 34; ++i)
@@ -629,8 +639,137 @@ static void clearAllRequestsPartA() {
     CHECK(eng().part() == 0 && eng().loopLength() == 0 && hasReq(kParamPart, 0));
 }
 
+// Saved pieces. MOD_USER_FILES_DIR is a fresh folder (main()); each test starts with no slot. The worker thread is real:
+// waits are on conditions, with a wall-clock limit.
+static std::string gRoot;                                           // its "Audio Loops/Ouroboros"
+static void freshPieces() { ouro::pieces::removeTree(gRoot); fresh(); }
+static std::string status() { return plug().pieceStatus(); }
+static void press(uint32_t i) { set(i, 1); runN(1); set(i, 0); runN(1); }
+template <class F> static bool waitFor(F f)                         // blocks until f() holds; false after 5 s
+{
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!f()) { if (std::chrono::steady_clock::now() > end) return false; runN(1); }
+    return true;
+}
+static bool waitPieces() { return waitFor([] { return !plug().pieceLoading() && status() != "SAVING"; }); }
+static void saveTo(int slot) { set(kParamSlot, float(slot)); press(kParamSave); CHECK(waitPieces()); }
+static bool stopped() { return eng().transport() == ouro::Transport::Stopped; }
+// Stopped: Stop/Play plays the loop from the top; that pass, then stopped again.
+static std::vector<float> passFromTheTop()
+{
+    set(kParamStopPlay, 1); run(P(), sine(220, 0.1f, eng().loopLength()));
+    const std::vector<float> o = gOut;
+    set(kParamStopPlay, 0); runN(1); press(kParamStopPlay); CHECK(runUntil(stopped));
+    return o;
+}
+static std::string slurp(const std::string& path)
+{
+    std::string s;
+    if (FILE* f = std::fopen(path.c_str(), "rb")) { char b[4096]; size_t n; while ((n = std::fread(b, 1, sizeof b, f))) s.append(b, n); std::fclose(f); }
+    return s;
+}
+static std::string stamp(const std::string& path)                   // a save replaces the slot: a new file, a new inode
+{
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) return "";
+    return std::to_string(st.st_ino) + ":" + std::to_string(st.st_mtim.tv_sec) + "." + std::to_string(st.st_mtim.tv_nsec);
+}
+
+static void saveAndLoadRoundTrip() {
+    freshPieces(); recordBaseAndDub(); gReqs.clear();
+    saveTo(2); CHECK(status() == "SAVED 2" && hasReq(kParamPiece, 2));
+    press(kParamStopPlay); CHECK(runUntil(stopped));
+    const std::vector<float> want = passFromTheTop();
+    press(kParamClearAll); CHECK(eng().empty());
+    press(kParamLoad); CHECK(plug().pieceLoading() && status() != "LOAD 2?");   // nothing to lose: no question
+    CHECK(waitPieces() && stopped() && eng().undoDepth(0) == 0);
+    const std::vector<float> got = passFromTheTop();
+    CHECK(got.size() == want.size() && maxAbsDiff(got, want) < 1e-6f && peak(got) > 0.05f);
+}
+static void saveWaitsForTheTake() {
+    freshPieces(); recordLoop();
+    press(kParamRec); runN(10);                                      // an overdub runs
+    set(kParamSlot, 2); press(kParamSave); runN(100);
+    CHECK(status() == "SAVING" && stamp(gRoot + "/02/piece.txt").empty());
+    press(kParamRec); CHECK(waitPieces() && status() == "SAVED 2");  // closed: now the snapshot
+}
+static void saveOnAFullSlotAsksFirst() {
+    freshPieces(); recordLoop(); saveTo(2);
+    const std::string txt = gRoot + "/02/piece.txt", t0 = stamp(txt);
+    CHECK(!t0.empty());
+    press(kParamSave); CHECK(status() == "SAVE 2?");
+    set(kParamSlot, 3); runN(1); CHECK(status() == "3 EMPTY");      // a Slot change cancels
+    set(kParamSlot, 2); press(kParamSave); CHECK(status() == "SAVE 2?");   // so this asks again
+    CHECK(waitPieces() && stamp(txt) == t0);                         // nothing written
+    press(kParamSave); CHECK(waitPieces() && status() == "SAVED 2" && !stamp(txt).empty() && stamp(txt) != t0);
+}
+static void loadWithChangesAsksFirst() {
+    freshPieces(); recordLoop(); saveTo(2);
+    press(kParamRec); runN(40); press(kParamRec); runN(40);         // an overdub since the save
+    press(kParamLoad); CHECK(status() == "LOAD 2?" && !plug().pieceLoading());
+    runN(750); CHECK(status() == "2 FULL");                          // 2 s later the question has lapsed
+    press(kParamLoad); CHECK(status() == "LOAD 2?" && !plug().pieceLoading());
+    press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces() && eng().undoDepth(0) == 0 && stopped());
+    press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces());   // as loaded: nothing to lose, no question
+}
+static void pressesDuringALoadAreIgnored() {
+    freshPieces(); recordLoop(); saveTo(2);
+    set(kParamLoad, 1); runN(1); set(kParamLoad, 0); CHECK(plug().pieceLoading() && status() == "LOADING 0%");
+    set(kParamRec, 1); runN(1);                                      // pressed during the load, held past its end
+    CHECK(waitPieces()); runN(1); set(kParamRec, 0); runN(1);
+    for (int t = 0; t < 4; ++t) CHECK(eng().state(t) != ouro::TrackState::Recording);
+    CHECK(stopped());
+    tapC(); press(kParamLoad); CHECK(waitPieces()); runN(200);       // a tap's undo, pending at the load: dropped
+    CHECK(eng().state(0) == ouro::TrackState::Playing);
+}
+static void controlsFollowTheLoadedPiece() {
+    freshPieces(); recordLoop();
+    set(kParamPart, 1); CHECK(runUntil([] { return eng().part() == 1; }));   // B, filled from A on entry
+    set(kParamVolume1, -6); press(kParamStopPlay); CHECK(runUntil(stopped));
+    set(kParamStep2Part, 2); set(kParamStep2Repeats, 3); set(kParamSong, 1); runN(1);
+    CHECK(eng().part() == 1 && eng().songOn() && eng().volumeDb(0) == -6.0f);
+    saveTo(2);
+    fresh(); set(kParamSlot, 2); set(kParamStep, 2); CHECK(waitFor([] { return status() == "2 FULL"; }));   // the first scan
+    gReqs.clear(); press(kParamLoad); CHECK(waitPieces());
+    CHECK(hasReq(kParamPart, 1) && hasReq(kParamSong, 1) && hasReq(kParamStep2Part, 2) && hasReq(kParamStep2Repeats, 3));
+    CHECK(hasReq(kParamStepPart, 2) && hasReq(kParamStepRepeats, 3));   // the proxies show step 2
+    CHECK(hasReq(kParamVolume1, -6) && hasReq(kParamPiece, 2) && eng().part() == 1 && eng().songOn());
+    press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces());   // the load's own changes are no reason to ask
+}
+static void autoLoadOnFirstRun() {
+    freshPieces(); recordLoop(); set(kParamVolume1, -6); saveTo(2);
+    const uint32_t len = eng().loopLength();
+    fresh(); set(kParamPiece, 2); runN(1);                           // a pedalboard that remembers piece 2
+    CHECK(plug().pieceLoading() && waitPieces());
+    CHECK(hasReq(kParamSlot, 2) && eng().loopLength() == len && eng().state(0) == ouro::TrackState::Playing && stopped());
+    CHECK(hasReq(kParamVolume1, -6) && hasReq(kParamVolume, -6));    // part A both before and after: pushed all the same
+}
+static void autoLoadOfABrokenSlotShowsWhy() {
+    freshPieces(); set(kParamPiece, 7); runN(1);                     // slot 7 holds nothing
+    CHECK(waitPieces() && status() == "EMPTY" && eng().empty() && hasReq(kParamPiece, 0));
+    ouro::pieces::makeDirs(gRoot + "/07");
+    if (FILE* f = std::fopen((gRoot + "/07/piece.txt").c_str(), "wb")) { std::fputs("ouroboros-piece 1\nrate 48000\n", f); std::fclose(f); }
+    fresh(); set(kParamPiece, 7); runN(1);                           // a corrupt piece.txt
+    CHECK(waitPieces() && status() == "LOAD ERROR" && eng().empty() && hasReq(kParamPiece, 0));
+}
+static void saveStoresTheBpm() {
+    freshPieces(); recordLoop();
+    gT = 0; set(kParamSync, 1); runMod(true, 1);                     // MOD at 120 BPM
+    saveTo(2); CHECK(slurp(gRoot + "/02/piece.txt").find("\nbpm 120.000\n") != std::string::npos);
+    set(kParamSync, 0); saveTo(3); CHECK(slurp(gRoot + "/03/piece.txt").find("\nbpm 0.000\n") != std::string::npos);
+    set(kParamSlot, 2); press(kParamLoad); CHECK(waitPieces() && status() == "120 BPM 1 BAR");   // a free loop: 1 bar
+    runN(1200); CHECK(status() == "120 BPM 1 BAR");                  // until the next Slot change, Save or Load
+    set(kParamSlot, 3); runN(1); CHECK(status() == "3 FULL");
+    press(kParamLoad); CHECK(waitPieces() && status() == "1 BAR");
+}
+
 int main()
 {
+    char dir[] = "build/tests/pluginXXXXXX";                         // pieces go to a fresh folder, never $HOME
+    mkdir("build/tests", 0777);
+    if (!mkdtemp(dir)) { std::printf("mkdtemp failed\n"); return 1; }
+    setenv("MOD_USER_FILES_DIR", dir, 1);
+    gRoot = ouro::pieces::piecesDir();
     d_nextBufferSize = 128;
     d_nextSampleRate = 48000.0;
     d_nextCanRequestParameterValueChanges = true;
@@ -680,5 +819,16 @@ int main()
     onAndVolumePortsFollowThePart();
     loadWithSongOnStartsInStepOnesPart();
     clearAllRequestsPartA();
+    saveAndLoadRoundTrip();
+    saveWaitsForTheTake();
+    saveOnAFullSlotAsksFirst();
+    loadWithChangesAsksFirst();
+    pressesDuringALoadAreIgnored();
+    controlsFollowTheLoadedPiece();
+    autoLoadOnFirstRun();
+    autoLoadOfABrokenSlotShowsWhy();
+    saveStoresTheBpm();
+    gPlugin.reset();
+    ouro::pieces::removeTree(dir);
     REPORT();
 }

@@ -8,6 +8,7 @@
 #include "DistrhoPlugin.hpp"
 #include "hmi/alabs-hmi-widgets.h"
 #include "dsp/Looper.hpp"
+#include "pieces/PieceWorker.hpp"
 #include "hmi/HmiBridge.hpp"
 #include "hmi/LoopWidget.hpp"
 #include "hmi/SongWidget.hpp"
@@ -73,11 +74,13 @@ enum ParamIndex {
     kParamStep10Part, kParamStep10Repeats, kParamStep11Part, kParamStep11Repeats, kParamStep12Part, kParamStep12Repeats,
     kParamStep13Part, kParamStep13Repeats, kParamStep14Part, kParamStep14Repeats, kParamStep15Part, kParamStep15Repeats,
     kParamStep16Part, kParamStep16Repeats,
+    // Saved pieces; Piece (hidden) is the piece last saved or loaded, which the pedalboard's first run loads.
+    kParamSlot, kParamSave, kParamLoad, kParamPiece,
     kParamBypass,
     kNumParams
 };
 
-enum GroupId { kGroupPerform = 0, kGroupTracks, kGroupSettings, kGroupSong };
+enum GroupId { kGroupPerform = 0, kGroupTracks, kGroupSettings, kGroupSong, kGroupPieces };
 
 class OuroborosPlugin : public Plugin
 {
@@ -103,8 +106,26 @@ public:
             }
     }
 
+    ~OuroborosPlugin() override { haltPieces(); }
+
     const ouro::Looper& engine() const { return fEngine; }
     int selectedTrack() const { return fSel; }   // 0-3
+
+    // The pieces status line (the audio thread: a fixed buffer, integers only): a load's progress, SAVING, a status or
+    // question set by run(), else the selected slot's.
+    const char* pieceStatus() const
+    {
+        if (fSave != kNoSave) return "SAVING";
+        if (fLoading) std::snprintf(fStatus, sizeof fStatus, "LOADING %d%%", int(fWorker.progress() * 100.0f));
+        else if (!fStatusLeft)
+        {
+            const int slot = std::min(16, std::max(1, int(std::lround(fVal[kParamSlot]))));
+            std::snprintf(fStatus, sizeof fStatus, "%d %s", slot, fWorker.fullSlots() >> (slot - 1) & 1u ? "FULL" : "EMPTY");
+        }
+        return fStatus;
+    }
+    bool pieceLoading() const { return fLoading; }   // from Load (the stop) to the result
+    int loadedPiece() const { return std::min(16, std::max(0, int(std::lround(fVal[kParamPiece])))); }   // 0: none
 
     // LV2 extension callbacks (OuroborosPlugin.cpp), from non-RT host threads,
     // possibly while run() runs: share state with run() through atomics only.
@@ -209,6 +230,7 @@ protected:
         case kGroupTracks:   pg.name = "Tracks";   pg.symbol = "g2_tracks";   break;
         case kGroupSettings: pg.name = "Settings"; pg.symbol = "g3_settings"; break;
         case kGroupSong:     pg.name = "Song";     pg.symbol = "g4_song";     break;
+        case kGroupPieces:   pg.name = "Pieces";   pg.symbol = "g5_pieces";   break;
         default: Plugin::initPortGroup(groupId, pg); break;
         }
     }
@@ -220,7 +242,7 @@ protected:
             p.initDesignation(kParameterDesignationBypass);
             return;
         }
-        if (index >= kParamStep1Part)           // step1_part, step1_repeats, ...: A x1, then Loop
+        if (index >= kParamStep1Part && index <= kParamStep16Repeats)   // step1_part, step1_repeats, ...: A x1, then Loop
         {
             const unsigned s = (index - kParamStep1Part) / 2 + 1;
             const bool reps = (index - kParamStep1Part) % 2;
@@ -278,14 +300,21 @@ protected:
             {"step_part",       "Step Part",          Enum, 0, 5, 0, ""},
             {"step_repeats",    "Step Repeats",       Int,  1, 16, 1, ""},
         };
-        const Def& d = defs[index];
+        static const Def pieces[] = {           // after the steps
+            {"slot",            "Slot",               Int,  1, 16, 1, ""},
+            {"save",            "Save",               Trig, 0, 1, 0, ""},
+            {"load",            "Load",               Trig, 0, 1, 0, ""},
+            {"piece",           "Piece",              Int,  0, 16, 0, ""},
+        };
+        const Def& d = index >= kParamSlot ? pieces[index - kParamSlot] : defs[index];
         p.symbol = d.symbol;
         p.name = d.name;
         p.unit = d.unit;
         p.ranges.min = d.min; p.ranges.max = d.max; p.ranges.def = d.def;
-        p.groupId = index <= kParamClearAll || index == kParamStopPlay ? kGroupPerform
+        p.groupId = index >= kParamSlot ? kGroupPieces : index <= kParamClearAll || index == kParamStopPlay ? kGroupPerform
                   : index <= kParamVolume4 ? kGroupTracks : index >= kParamPart ? kGroupSong : kGroupSettings;
         p.hints = kParameterIsAutomatable;
+        if (index == kParamPiece) p.hints |= kParameterIsHidden;   // saved with the pedalboard, never shown
         switch (d.kind)
         {
         case Trig: p.hints |= kParameterIsTrigger | kParameterIsInteger; break;   // includes boolean
@@ -325,6 +354,7 @@ protected:
 
     void activate() override
     {
+        haltPieces();
         fEngine.reset();
         fFirst = true;
         fHold = 0;
@@ -334,6 +364,7 @@ protected:
 
     void sampleRateChanged(double sr) override
     {
+        haltPieces();
         fEngine.init(sr, getBufferSize());      // non-RT; re-reserves for the new rate
         buildTicks(sr);
         fFirst = true;                          // the fresh engine takes every value again
@@ -346,6 +377,58 @@ protected:
         const auto on = [this](uint32_t i) { return fVal[i] > 0.5f; };
         const auto request = [this](uint32_t i, float v) { fVal[i] = v; fPrev[i] = v; requestParameterValueChange(i, v); };
         const auto num = [this](uint32_t i, int lo, int hi) { return std::min(hi, std::max(lo, int(std::lround(fVal[i])))); };
+
+        // A load, from its start to its result: no control or press is applied, nor kept for after it (fPrev takes fVal,
+        // C's gesture ends). The worker checks the slot, then asks for the engine, lent once it has stopped; from then
+        // to the result run() makes no engine call: the output is the dry input (Dry Thru on) or silence.
+        if (fLoading)
+        {
+            const Result r = fWorker.poll();
+            if (r == Result::None)
+            {
+                if (!fLent && fWorker.wantsEngine() && (fEngine.transport() == ouro::Transport::Stopped || fEngine.empty()))
+                {
+                    fWorker.lendEngine();
+                    fLent = true;
+                }
+                std::copy(fVal, fVal + kParamBypass, fPrev);
+                fTapPending = false; fHeld = on(kParamUndoRedo); fDone = true;
+                fClickAt = -1.0;                // no new tick (a running one ends)
+                if (!fLent) fEngine.process(inputs[0], outputs[0], frames);   // the Instant stop ramps out
+                else if (on(kParamDryThru)) std::memmove(outputs[0], inputs[0], frames * sizeof(float));
+                else std::fill(outputs[0], outputs[0] + frames, 0.0f);
+                renderClick(outputs[1], frames);
+                return;
+            }
+            fLoading = fLent = false;
+            if (r == Result::Loaded)            // the controls follow the piece: Part and Song below, as the engine moves them
+            {
+                const ouro::PieceMeta& m = fWorker.loaded();   // valid until the next load
+                const char* bars = m.bars == 1 ? "BAR" : "BARS";
+                if (std::isfinite(m.bpm) && m.bpm > 0.0f)
+                    std::snprintf(fStatus, sizeof fStatus, "%d BPM %u %s", int(std::lround(std::min(m.bpm, 999.0f))), m.bars, bars);
+                else std::snprintf(fStatus, sizeof fStatus, "%u %s", m.bars, bars);
+                fStatusLeft = kUntilReplaced; fAsk = 0;
+                request(kParamPiece, float(fLoadSlot));
+                request(kParamSlot, float(fLoadSlot));
+                const auto follow = [&](uint32_t i, float v) { if (fVal[i] != v) request(i, v); };
+                for (int s = 0; s < ouro::kSteps; ++s)
+                {
+                    follow(kParamStep1Part + 2 * s, float(fEngine.stepPart(s)));
+                    follow(kParamStep1Part + 2 * s + 1, float(fEngine.stepRepeats(s)));
+                }
+                const uint32_t sp = kParamStep1Part + 2 * (num(kParamStep, 1, ouro::kSteps) - 1);
+                follow(kParamStepPart, fVal[sp]);
+                follow(kParamStepRepeats, fVal[sp + 1]);
+                fPart = -1;                     // On 1-4, Volume 1-4 and Volume: the part-change path below
+                fBaseline = fEngine.changes();  // after importEnd(), whose setters count
+            }
+            else
+            {
+                setStatus(r == Result::Empty ? "EMPTY" : r == Result::TooBig ? "TOO BIG" : "LOAD ERROR");
+                if (fEngine.empty()) request(kParamPiece, 0.0f);   // no piece (the pedalboard's, or cleared by a read error)
+            }
+        }
 
         // Track selection first: it retargets everything below.
         const int sel = num(kParamTrack, 1, 4) - 1;
@@ -480,6 +563,62 @@ protected:
             if (!fTapCancels) fEngine.undo(fTapTrack);
         }
 
+        // Pieces. Save: once no take runs, a snapshot the worker writes while the loops play on (a refusal by the pool
+        // cancels it). Load: an Instant stop, then the worker reads the slot (above). A full slot's Save, and a Load
+        // losing changes since the last save or load, ask first: the same press within 2 s confirms; a Slot change, the
+        // other press or the 2 s passing cancels. The pedalboard's piece loads on the first run, without asking.
+        if (fSave == kSettling && fEngine.settled())
+        {
+            ouro::PieceMeta m;
+            if (!fEngine.empty() && fEngine.takeSnapshot(m))   // empty: the take was undone, nothing to save
+            {
+                const TimePosition::BarBeatTick& b = getTimePosition().bbt;
+                m.bpm = on(kParamSync) && b.valid ? float(b.beatsPerMinute) : 0.0f;
+                fWorker.startSave(fSaveSlot, m, fEngine.audioRefusals());
+                fSaveChanges = fEngine.changes();
+                fSave = kWriting;
+            }
+            else fSave = kNoSave;
+        }
+        else if (fSave == kWriting)
+        {
+            fWorker.watch(fEngine.audioRefusals());
+            const Result r = fWorker.poll();
+            if (r != Result::None)
+            {
+                fEngine.dropSnapshot();
+                fSave = kNoSave;
+                if (r != Result::Saved) setStatus(r == Result::DiskFull ? "DISK FULL" : "SAVE ERROR");
+                else
+                {
+                    setStatus("SAVED %d", fSaveSlot);
+                    request(kParamPiece, float(fSaveSlot));
+                    fBaseline = fSaveChanges;
+                }
+            }
+        }
+        if (changed(kParamSlot)) fStatusLeft = 0;   // a status or question is about the slot it names
+        const bool save = rising(kParamSave), load = rising(kParamLoad);
+        if ((save || load) && fSave == kNoSave && fWorker.idle())   // while a save runs: ignored
+        {
+            const int slot = num(kParamSlot, 1, 16), asked = fStatusLeft ? fAsk : 0;
+            const bool full = fWorker.fullSlots() >> (slot - 1) & 1u;
+            fStatusLeft = 0;
+            if (load)
+            {
+                if (!full) setStatus("EMPTY");
+                else if (asked != kAskLoad && fEngine.changes() != fBaseline && !fEngine.empty()) setStatus("LOAD %d?", slot, kAskLoad);
+                else startLoad(slot);
+            }
+            else if (!fEngine.empty())          // an empty piece is not saved
+            {
+                if (full && asked != kAskSave) setStatus("SAVE %d?", slot, kAskSave);
+                else { fSave = kSettling; fSaveSlot = slot; }
+            }
+        }
+        else if (fFirst && num(kParamPiece, 0, 16) > 0) startLoad(num(kParamPiece, 1, 16));
+        if (fStatusLeft) fStatusLeft -= std::min<uint64_t>(fStatusLeft, frames);
+
         for (uint32_t i = 0; i < kParamBypass; ++i) fPrev[i] = fVal[i];
         const bool fWasFirst = fFirst;
         fFirst = false;
@@ -517,6 +656,27 @@ protected:
     }
 
 private:
+    // Non-RT, run() not running (activate, sampleRateChanged, the destructor): the worker's job stops, its result is
+    // dropped (a load stopped while lent leaves the engine empty), and a save's snapshot goes.
+    void haltPieces()
+    {
+        fWorker.halt();
+        if (fEngine.snapshotHeld()) fEngine.dropSnapshot();
+        fSave = kNoSave; fLoading = fLent = false; fStatusLeft = 0;
+    }
+    void startLoad(int slot)                        // run() lends the engine once stopped and the worker asks
+    {
+        fEngine.stop(ouro::StopMode::Instant);
+        fWorker.startLoad(slot);
+        fLoadSlot = slot; fLoading = true;
+    }
+    void setStatus(const char* text, int n = 0, int ask = 0)   // text: a format for n; a question shows 2 s, others 3 s
+    {
+        std::snprintf(fStatus, sizeof fStatus, text, n);
+        fStatusLeft = uint64_t((ask ? 2.0 : 3.0) * getSampleRate());
+        fAsk = ask;
+    }
+
     ouro::StopMode stopMode() const
     {
         return ouro::StopMode(std::min(2, std::max(0, int(std::lround(fVal[kParamStopMode])))));
@@ -641,6 +801,7 @@ private:
     }
 
     ouro::Looper fEngine;
+    ouro::pieces::PieceWorker fWorker{fEngine, ouro::pieces::piecesDir()};   // after fEngine: made after it, gone before
     float fVal[kNumParams] = {};            // current port values
     float fPrev[kParamBypass] = {};         // values as of the last run() (NaN: apply everything)
     int fSel = 0;                           // selected track, 0-3
@@ -660,6 +821,17 @@ private:
     double fClickAt = -1.0, fClickSpBeat = 0.0;   // this block's next beat line (< 0: none) and the beat's samples
     int fClickBeat = 1, fClickBpb = 4;      // the next beat line's beat (1 = accented) and the beats in a bar
     float fClickGain = 1.0f;
+
+    // Saved pieces (run()).
+    using Result = ouro::pieces::PieceWorker::Result;
+    enum { kNoSave, kSettling, kWriting };  // fSave: none, waiting for every take to close, the worker writing
+    enum { kAskSave = 1, kAskLoad };        // fAsk: the status asks to confirm a Save or a Load (0: no question)
+    static constexpr uint64_t kUntilReplaced = UINT64_MAX;
+    int fSave = kNoSave, fSaveSlot = 0, fLoadSlot = 0, fAsk = 0;
+    bool fLoading = false, fLent = false;   // a load from its start to its result; the engine lent to the worker
+    uint32_t fBaseline = 0, fSaveChanges = 0;   // changes() as of the last save or load; at the save's snapshot
+    uint64_t fStatusLeft = 0;               // samples the status still shows; 0: the selected slot's
+    mutable char fStatus[24] = {};          // pieceStatus() writes the live ones here
 
     ouro::HmiBridge fHmi;                           // labels and LEDs; inert without the host's HMI
     const ALABS_HMI_WidgetDraw* fWidgetDraw = nullptr;  // null: host can't show widgets

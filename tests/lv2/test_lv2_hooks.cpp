@@ -1,6 +1,9 @@
 // A fake LV2 host: dlopens the built plugin and drives it through the LV2 C API,
 // to check the DPF patch (features in, extension data out). `make test-lv2`.
 #include <dlfcn.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cstdlib>
 #include <fstream>
 #include <atomic>
 #include <chrono>
@@ -260,6 +263,18 @@ static void onlyVolumePortsHaveRangeSteps(const std::string& ttlPath)
     CHECK(withSteps == "\"volume\"=133 \"volume_1\"=133 \"volume_2\"=133 \"volume_3\"=133 \"volume_4\"=133 ");
 }
 
+// The pieces ports go before Bypass: slot at kLv2FirstParam (4) + kParamSlot (71), piece at + kParamPiece (74); 76
+// parameters in all.
+static void piecePortsBeforeBypass(const std::string& ttlPath)
+{
+    CHECK(portIndex(ttlPath, "slot") == 4 + 71 && portIndex(ttlPath, "piece") == 4 + 74);
+    std::ifstream ttl(ttlPath);
+    std::string tok;
+    int controls = 0;
+    while (ttl >> tok) controls += tok == "lv2:ControlPort";
+    CHECK(controls == 76);
+}
+
 static void addressedRecGetsLabel(const LV2_Descriptor* d, const std::string& ttlPath)
 {
     gHmiCalls.clear();
@@ -285,6 +300,10 @@ static void addressedRecGetsLabel(const LV2_Descriptor* d, const std::string& tt
 int main(int argc, char** argv)
 {
     if (argc != 2) { std::printf("usage: %s <bundle>/<plugin>.so\n", argv[0]); return 2; }
+    char pieces[] = "build/tests/lv2XXXXXX";   // the plugin's pieces folder: a fresh one, never $HOME
+    mkdir("build/tests", 0777);
+    if (!mkdtemp(pieces)) { std::printf("mkdtemp failed\n"); return 1; }
+    setenv("MOD_USER_FILES_DIR", pieces, 1);
     const std::string so = argv[1];
     bundleDir = so.substr(0, so.rfind('/') + 1);
     readDefaults(so.substr(0, so.size() - 3) + ".ttl");
@@ -307,5 +326,7 @@ int main(int argc, char** argv)
     addressedRecGetsLabel(d, so.substr(0, so.size() - 3) + ".ttl");
     widgetRedrawsWhenProgressMoves(d, so.substr(0, so.size() - 3) + ".ttl");
     onlyVolumePortsHaveRangeSteps(so.substr(0, so.size() - 3) + ".ttl");
+    piecePortsBeforeBypass(so.substr(0, so.size() - 3) + ".ttl");
+    rmdir(pieces);   // nothing saved: still empty
     REPORT();
 }
