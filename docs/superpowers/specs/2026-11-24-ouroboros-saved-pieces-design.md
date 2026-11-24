@@ -1,6 +1,6 @@
 # Saved pieces (design)
 
-Status: draft for approval, 2026-11-24. Decisions marked *my call* were proposed by me and not argued; they are open to
+Status: approved, 2026-11-24. Decisions marked *my call* were proposed by me and not argued; they are open to
 correction.
 
 ## Why
