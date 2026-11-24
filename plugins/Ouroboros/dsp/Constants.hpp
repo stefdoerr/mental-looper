@@ -3,6 +3,7 @@
 
 namespace ouro {
 constexpr int      kTracks = 4, kParts = 4;   // parts A-D, each with its own kTracks tracks
+constexpr int      kSteps = 16, kStepLoop = 4, kStepStop = 5;   // the song's steps: a part (0-3), Loop or Stop
 constexpr float    kFadeInMs = 3.0f, kPunchOutFadeMs = 5.0f, kRampMs = 15.0f;
 constexpr float    kMinLoopMs = 100.0f, kMaxLoopSeconds = 300.0f, kHistoryMs = 250.0f;
 constexpr float    kPreRollMs = 10.0f;      // an auto-record start keeps this much before the crossing

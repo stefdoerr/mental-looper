@@ -102,7 +102,8 @@ public:
     }
 
     // Every track of every part empty, L unset, all undo/redo gone. Settings (on, volume, dry, bypass, ...) and the part
-    // stay; a queued switch acts now, as it would with nothing recorded (see setPart()).
+    // stay; a queued switch acts now, as it would with nothing recorded (see setPart()). With Song on: step 1's part,
+    // the song back to not playing.
     void reset() {
         for (Part& pt : parts_)
             for (Track& tr : pt) {                       // hand every delta back to the pool
@@ -111,7 +112,9 @@ public:
                 tr.gain.snap(0.0f);
             }
         if (queued_ >= 0) part_ = queued_;
-        queued_ = out_ = -1;
+        if (songPart() >= 0) part_ = songPart();
+        queued_ = out_ = step_ = -1;
+        pass_ = 0;
         L_ = pos_ = rec_ = recD_ = 0;
         recTrack_ = armed_ = -1;
         pend_ = {};
@@ -198,7 +201,7 @@ public:
                 for (Track& tr : P) if (writing(tr)) used += writeIn(tr, x, used);   // recording takes the rest
                 if (++pos_ == L_) pos_ = 0;
                 for (Track& tr : P) if (tr.len && ++tr.pos == tr.len) tr.pos = 0;   // every playhead in step
-                if (queued_ >= 0) partEnd();             // a queued switch (R2: else only this test)
+                if (queued_ >= 0 || song_) partEnd();    // a queued switch or the song (R2: else only these tests)
                 // Tails and fades done too. A queued restart then asks the grid at the next sample, its first.
                 if (tp_ == Transport::Stopping && lg_.ended() && !overlap()) { at_ = i + 1; park(); at_ = 0; }
             }
@@ -303,31 +306,68 @@ public:
         tr.state = TrackState::Empty;
         if (recTrack_ == t) noFirstLoop();
     }
-    // Every track of every part, then part A. The parts still heard (the current one, a switch's outgoing one) ramp out
-    // and A is queued: L's reset (see reset()) goes there; with nothing recorded, at once.
+    // Every track of every part, then part A (Song on: step 1's part, the song rewound). The parts still heard (the
+    // current one, a switch's outgoing one) ramp out and A is queued: L's reset (see reset()) goes there; with nothing
+    // recorded, at once.
     void clearAll() {
         if (!enabled_) return;
         for (int t = 0; t < kTracks; ++t) clearTrack(t);
         for (int p = 0; p < kParts; ++p)                 // frozen at gain 0, the others give their blocks back now
             for (Track& tr : parts_[p])
                 if (p != part_) { dropLayers(tr); tr.state = TrackState::Empty; if (p != out_) drop(tr); }
-        queued_ = part_ ? 0 : -1;
+        step_ = -1; pass_ = 0;
+        const int to = std::max(songPart(), 0);
+        queued_ = to != part_ ? to : -1;
         if (!L_ && queued_ >= 0) switchPart(queued_);
     }
 
     // Parts: kParts sets of kTracks tracks; every per-track call acts on the current part's track t. Part p plays next:
     // from the current part's end (see switchPart()); stopped or with nothing recorded, at once; during the first
     // recording, at the first part end after its close. The current part cancels a queued switch.
+    // Another part turns the song off (the song's own switches don't come here).
     void setPart(int p) {
         if (!enabled_ || p < 0 || p >= kParts) return;
-        if (p == part_) queued_ = -1;
-        else if (tp_ == Transport::Stopped || (!L_ && recTrack_ < 0)) switchPart(p);
+        if (p == part_) { queued_ = -1; return; }
+        song_ = false; step_ = -1; pass_ = 0;
+        if (tp_ == Transport::Stopped || (!L_ && recTrack_ < 0)) switchPart(p);
         else queued_ = p;
     }
     int part() const { return part_; }
     int queuedPart() const { return queued_; }           // -1: none
     // A pass of the current part: its longest track; L if it has none; 0 before L.
     uint32_t partLength() const { uint32_t len; longest(len); return len; }
+
+    // The song (Song on): kSteps steps of a part played for repeats (1-16) passes, up to the first Loop (back to step
+    // 1) or Stop. At each part end it counts a pass; once a step's repeats are done the next step's part plays (see
+    // switchPart(), copy on entry included; a step on the part playing just goes on). A Stop step stops with the Stop
+    // Mode kRampMs before the last pass ends (Instant and End of loop end on it, Fade fades out from there); once
+    // stopped, the song is back to not playing, Song still on. Turned on while playing, the song starts at the next
+    // part end; any restart (from stopped, or MOD's start) starts it from the top. From nothing, the first loop is
+    // recorded in step 1's part and the song starts at its close. Clear All rewinds it. On, it drops a queued switch.
+    void setSong(bool on) {
+        if (on == song_) return;
+        song_ = on; step_ = -1; pass_ = 0;
+        if (on) queued_ = -1;
+        songHome();
+    }
+    // Step i (0-15): part 0-3, kStepLoop or kStepStop, played repeats (1-16) times. Default: A x1, then Loop.
+    void setStep(int i, int part, uint32_t repeats) {
+        if (i < 0 || i >= kSteps || part < 0 || part > kStepStop) return;
+        steps_[i] = {int8_t(part), uint8_t(std::max(1u, std::min(repeats, 16u)))};
+        if (i == 0) songHome();
+    }
+    // The Stop Mode a Stop step uses (stop() takes its own).
+    void setStopMode(StopMode m, float fadeMs) { songStop_ = m; songFadeMs_ = fadeMs; }
+    bool songOn() const { return song_; }
+    int songStep() const { return step_; }               // the step playing, -1: not playing
+    uint32_t songPass() const { return pass_; }          // its passes done
+    uint32_t songLength() const {                        // the steps before the first Loop or Stop
+        uint32_t n = 0;
+        while (n < kSteps && steps_[n].part < kParts) ++n;
+        return n;
+    }
+    int stepPart(int i) const { return i >= 0 && i < kSteps ? steps_[i].part : kStepLoop; }
+    uint32_t stepRepeats(int i) const { return i >= 0 && i < kSteps ? steps_[i].reps : 1; }
 
     // Closes every writer and cancels an arm or a waiting action, then fades the loops out (stopped: it only cancels a
     // waiting restart). Stopping never changes the loop: the engine parks (see park()) once the fade, every tail and
@@ -597,15 +637,48 @@ private:
                 for (const Track& tr : parts_[p]) if (tr.tailEnd || tr.fade.left) return true;
         return false;
     }
-    // Per sample while a switch is queued: it happens on the sample the current part's pass ends, its longest track (or
-    // the loop) back at its beginning. Stopping, the park does it. Out of line: inlined, it costs ~3% in the bench.
+    // Per sample while a switch is queued or the song is on, running. The part end is the sample the current part's
+    // pass ends, its longest track (or the loop) back at its beginning: a queued switch happens there, and the song goes
+    // on (see songNext()). kRampMs before it, the song stops when a Stop step follows. Stopping, the park does a queued
+    // switch and the song waits. Out of line: inlined, it costs ~3% in the bench.
     [[gnu::noinline]] void partEnd() {
+        if (tp_ != Transport::Running) return;
         uint32_t len;
-        if (!pos_ && tp_ == Transport::Running && longest(len) == 0) switchPart(queued_);
+        if (!pos_) {
+            if (longest(len)) return;
+            if (song_) songNext(); else switchPart(queued_);
+        } else if (song_ && pos_ == L_ - ramp_) {        // L_ >= minLoop_ > ramp_
+            const int i = nextStep();
+            if (i >= 0 && steps_[i].part == kStepStop && longest(len) == len - ramp_) stop(songStop_, songFadeMs_);
+        }
     }
+    // The step after this pass: -1 while the step playing has repeats to go, else the next one (step 1 after a Loop or
+    // the last step, and when not playing).
+    int nextStep() const {
+        if (step_ >= 0 && pass_ + 1 < steps_[step_].reps) return -1;
+        const int i = (step_ + 1) % kSteps;
+        return steps_[i].part == kStepLoop ? 0 : i;
+    }
+    // At a part end, or a restart from not playing: the song goes on to nextStep() and plays its part (switchPart(): the
+    // part playing is no switch). A Stop there was done kRampMs before (see partEnd()); missed (the step edited since,
+    // or that stop cancelled), the part plays one more pass. A Loop first: no steps, the song plays nothing.
+    void songNext() {
+        const int i = nextStep();
+        if (i < 0) { ++pass_; return; }
+        const int p = steps_[i].part;
+        if (p == kStepStop) return;
+        step_ = p == kStepLoop ? -1 : i;
+        pass_ = 0;
+        if (p < kParts) switchPart(p);
+    }
+    int songPart() const { return song_ && steps_[0].part < kParts ? steps_[0].part : -1; }   // step 1's, Song on
+    // Song on with nothing recorded: the current part is step 1's, so the first loop is recorded there (R1).
+    void songHome() { if (enabled_ && songPart() >= 0 && !L_ && recTrack_ < 0) switchPart(songPart()); }
 
-    // Stopped: plays from the top, every playhead since samples on (see restart()); the loops fade in.
+    // Stopped: plays from the top, every playhead since samples on (see restart()); the loops fade in. Song on: from its
+    // top, step 1's part (switched to at once).
     void start(uint32_t since) {
+        if (song_) { step_ = -1; songNext(); }
         if (since) { advance(since); pos_ = (pos_ + since) % L_; }   // stopped: L_ is set
         tp_ = Transport::Running;
         for (Track& tr : cur()) tr.gain.snap(target(tr));
@@ -627,6 +700,12 @@ private:
     void retrigger() {
         if (allEmpty()) return;                          // every track cleared while it waited
         for (int u = 0; u < kTracks; ++u) if (writing(cur()[u])) close(u, false);
+        if (song_) {                                     // the song from its top: step 1's part, if another, from its
+            const int from = part_;                      // beginning, crossfaded in as at a switch (see switchPart())
+            step_ = -1;
+            songNext();
+            if (part_ != from) { pos_ = 0; return; }
+        }
         for (Track& tr : cur()) {
             tr.xpos = tr.pos;
             for (uint32_t k = 0; tr.len && k < fadeOut_; ++k) { commit(tr); if (++tr.pos == tr.len) tr.pos = 0; }
@@ -790,6 +869,7 @@ private:
         tr.pos = tr.tailAt = pos_;                                    // the tail, if any, starts here (pos_ = D)
         tr.phase = 0;                                                 // laid out by base phase
         tr.state = TrackState::Playing;
+        if (songPart() == part_) { step_ = 0; pass_ = 0; }           // the song counts from here; else at the part end
         // No track ramp: the loops fade in instead. Rounded up onto the lead-in's middle, though, the track ramps in.
         tr.gain.snap(rec_ < L && rec_ + lead > L ? 0.0f : target(tr));
         // Playback starts D past the recording's own fade-in: the loops fade in over the part it skips, the restart's
@@ -1114,10 +1194,12 @@ private:
     }
 
     // The stop's end: every playhead goes to the top (see toTop()). A switch's outgoing part freezes (its fades ended
-    // too, see overlap()); a queued switch then happens, as stopped; a queued restart then starts.
+    // too, see overlap()); a queued switch then happens, as stopped; a queued restart then starts. The song is back to
+    // not playing.
     void park() {
         toTop();
         tp_ = Transport::Stopped;
+        step_ = -1; pass_ = 0;
         if (out_ >= 0) freeze(out_);
         if (queued_ >= 0) switchPart(queued_);
         if (restartQueued_) { restartQueued_ = false; restart(); }
@@ -1183,7 +1265,8 @@ private:
         for (int u = 0; u < kTracks; ++u) if (writing(cur()[u])) close(u, false);
         armed_ = -1;
         if (pend_.kind == Pending::Press || pend_.kind == Pending::Arm) cancelWaiting();
-        if (out_ >= 0) freeze(out_);                     // an earlier switch's outgoing part (a clear-all right after)
+        if (out_ >= 0) freeze(out_);                     // an earlier switch's outgoing part (within kFadeInMs)
+        xf_ = 0;                                         // a retrigger's crossfade reads this part: it ramps out instead
         const int from = part_;
         bool fill = true;
         for (const Track& tr : parts_[p]) fill = fill && tr.state == TrackState::Empty;
@@ -1243,6 +1326,13 @@ private:
     Part parts_[kParts];
     int part_ = 0, queued_ = -1;     // the current part; a switch queued to its end (-1: none)
     int out_ = -1;                   // the part a switch left, while it finishes (see finishOut()), else -1
+    struct Step { int8_t part = kStepLoop; uint8_t reps = 1; };
+    Step steps_[kSteps] = {{0, 1}};  // the song: A x1, then Loop
+    bool song_ = false;              // Song on: the steps drive the part
+    int step_ = -1;                  // the step playing, -1: not playing
+    uint32_t pass_ = 0;              // its passes done
+    StopMode songStop_ = StopMode::Instant;   // the Stop Mode and Fade Time a Stop step uses
+    float songFadeMs_ = 3000.0f;
     BlockPool pool_;                 // the tracks' audio (Audio) and the overdub layer deltas for undo/redo (Undo)
     float* hist_ = nullptr;          // input history ring, for back-dating presses
     float* histUsed_ = nullptr;      // per history input: the envelope share already written somewhere (splits)

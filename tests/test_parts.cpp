@@ -170,6 +170,18 @@ static void theSwitchCrossfadesOverTheFadeIn() {
     CHECK(maxAbsDiff(slice(in, 0, f), slice(steady, 0, f)) > 1e-3f);     // B fading out under A
     CHECK(maxAbsDiff(slice(in, f, 2000), slice(steady, f, 2000)) < 1e-6f);
 }
+// M4: a song step on the part already playing is no switch: the part plays on exactly as without the song.
+static void aSongStepOnTheCurrentPartIsNoSwitch() {
+    auto run = [](bool song) {
+        Rig r; recordBase(r, 24000, 0.1f); r.silence(4800); recordBaseOn(r, 1, 0.2f, 471.0);
+        r.silence(24000 - r.lp.position());                              // A's part end
+        r.lp.setStep(0, 0, 1); r.lp.setStep(1, 0, 2); r.lp.setSong(song);
+        r.silence(3 * 24000 + 64);
+        if (song) CHECK(r.lp.part() == 0 && r.lp.songStep() == 1 && r.lp.songPass() == 1);
+        return slice(r.out, r.out.size() - (3 * 24000 + 64), r.out.size());
+    };
+    CHECK(maxAbsDiff(run(true), run(false)) < 1e-6f);
+}
 
 int main() {
     switchWaitsForThePartEnd(); copyIsIndependentAndKeepsOnAndVolume(); copyOnEntryAllocatesNothing();
@@ -179,5 +191,6 @@ int main() {
     modStartKeepsAQueuedSwitch(); aPendingUndoReachesTheCopy(); theSwitchIntoACopyIsSeamless();
     aPartLeftWhileStoppedLetsLReset(); aFirstRecordingEndingWithoutALoopSwitchesAtOnce();
     clearAllInsideTheSwitchCrossfadeDoesNotClick(); theSwitchCrossfadesOverTheFadeIn();
+    aSongStepOnTheCurrentPartIsNoSwitch();
     REPORT();
 }
