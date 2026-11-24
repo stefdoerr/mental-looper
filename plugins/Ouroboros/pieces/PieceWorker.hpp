@@ -62,7 +62,7 @@ public:
     }
     float progress() const { return progress_.load(std::memory_order_relaxed); }   // 0..1 of the load's samples
     const PieceMeta& loaded() const { return loaded_; }                            // after Loaded, until the next load
-    uint32_t fullSlots() const { return full_.load(std::memory_order_relaxed); }   // as of the last job (bit s-1)
+    uint32_t fullSlots() const { return full_.load(std::memory_order_relaxed); }   // bit s-1; rescanned after each job, ~1 s idle
 
     // Non-RT, no audio thread running (activate, sampleRateChanged, destructor): the job stops (a save drops NN.new, a
     // load not lent ends untouched, a lent one empties the engine), its result is dropped; returns once idle.
@@ -80,9 +80,13 @@ private:
     void run() override {
         if (!root_.empty()) recoverSlots(root_);
         rescan();
-        while (!shouldThreadExit()) {
+        for (int idle = 0; !shouldThreadExit();) {
             const int s = state_.load(std::memory_order_acquire);
-            if (s != Save && s != Load) { d_msleep(20); continue; }
+            if (s != Save && s != Load) {
+                if (++idle == 50) { idle = 0; rescan(); }   // about every 1 s: slots copied or deleted by hand (file manager)
+                d_msleep(20);
+                continue;
+            }
             result_ = s == Save ? save() : load();
             rescan();                 // whatever the result: a commit can fail after its swap
             state_.store(Done, std::memory_order_release);

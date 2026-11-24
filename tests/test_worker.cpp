@@ -274,6 +274,25 @@ static void haltEndsALoadWaitingForTheEngine() {
     removeTree(root);
 }
 
+// R11: idle, the worker rescans about every second, so a slot restored or deleted with MOD's file manager shows.
+static void idleRescanSeesTheFileManager() {
+    const std::string root = tmpRoot();
+    Rig r;
+    PieceWorker w(r.lp, root);
+    const auto within3s = [&](uint32_t want) {
+        const auto end = Clock::now() + std::chrono::seconds(3);
+        while (w.fullSlots() != want && Clock::now() < end) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return w.fullSlots() == want;
+    };
+    w.startLoad(9);                                                   // a job: the startup scan is behind us
+    CHECK(finish(r, w) == Result::Empty && w.fullSlots() == 0);
+    putMarker(root, 9);                                               // a slot copied in by hand
+    CHECK(within3s(1u << 8));
+    removeTree(slotDir(root, 9));                                     // and deleted
+    CHECK(within3s(0));
+    removeTree(root);
+}
+
 // No pieces folder (Windows): a save fails, a load finds nothing.
 static void noRootDoesNothing() {
     Rig r; recordPiece(r);
@@ -286,6 +305,6 @@ static void noRootDoesNothing() {
 int main() {
     saveWritesTheSlot(); saveWhilePlayingChangesNothingHeard(); cancelLeavesTheSlot(); refusalCancelsTheSave();
     saveToAReadOnlyRootFails(); loadRestoresThePiece(); loadChecksBeforeTouching(); tooBigLeavesTheEngine();
-    haltStopsASave(); haltEndsALoadWaitingForTheEngine(); noRootDoesNothing();
+    haltStopsASave(); haltEndsALoadWaitingForTheEngine(); noRootDoesNothing(); idleRescanSeesTheFileManager();
     REPORT();
 }

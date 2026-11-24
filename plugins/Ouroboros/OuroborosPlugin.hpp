@@ -611,7 +611,8 @@ protected:
             if (load)
             {
                 if (!full) setStatus("EMPTY");
-                else if (asked != kAskLoad && fEngine.changes() != fBaseline && !fEngine.empty()) setStatus("LOAD %d?", slot, kAskLoad);
+                else if (asked != kAskLoad && (fEngine.changes() != fBaseline || !fEngine.settled()) && !fEngine.empty())
+                    setStatus("LOAD %d?", slot, kAskLoad);   // a take still running is a change too
                 else startLoad(slot);
             }
             else if (!fEngine.empty())          // an empty piece is not saved

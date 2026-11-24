@@ -711,6 +711,11 @@ static void loadWithChangesAsksFirst() {
     press(kParamLoad); CHECK(status() == "LOAD 2?" && !plug().pieceLoading());
     press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces() && eng().undoDepth(0) == 0 && stopped());
     press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces());   // as loaded: nothing to lose, no question
+    press(kParamRec); runN(10); press(kParamRec); runN(10);         // R10: B plays, B dubs; the take still runs
+    CHECK(eng().state(0) == ouro::TrackState::Overdubbing);
+    press(kParamLoad); CHECK(status() == "LOAD 2?" && !plug().pieceLoading() && eng().state(0) == ouro::TrackState::Overdubbing);
+    press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces() && eng().undoDepth(0) == 0 && stopped());
+    CHECK(eng().state(0) == ouro::TrackState::Playing);
 }
 static void pressesDuringALoadAreIgnored() {
     freshPieces(); recordLoop(); saveTo(2);
