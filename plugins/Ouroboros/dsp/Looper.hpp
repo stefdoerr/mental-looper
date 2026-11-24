@@ -641,7 +641,7 @@ public:
     }
     // Worker thread, the engine lent. A load: importBegin(), each track's audio from its beginning (from + n <= its len,
     // checked against maxTrackLength() before), importEnd().
-    void importBegin() { reset(); tp_ = Transport::Stopped; }   // every part empty, L unset
+    void importBegin() { reset(); }   // every part empty, L unset: Clear All's empty engine (a failed load ends here)
     bool importTrack(int p, int t, uint32_t from, const float* src, uint32_t n) {   // false: the pool refused
         TrackBuf& b = parts_[p][t].buf;
         for (uint32_t i = 0; i < n; ++i) {
@@ -654,6 +654,7 @@ public:
     // Every track at its beginning (pos, phase 0), one layer, stopped at the top: restart() plays the piece from there.
     // On and volume through their setters (the clamp: the file is the user's to edit), which act on the current part.
     void importEnd(const PieceMeta& m) {
+        tp_ = Transport::Stopped;
         L_ = m.loop; bars_ = m.bars;
         for (int p = 0; p < kParts; ++p) {
             cp_ = &parts_[p];
