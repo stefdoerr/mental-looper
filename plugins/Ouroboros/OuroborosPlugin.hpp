@@ -278,7 +278,7 @@ protected:
         fEngine.reset();
         fFirst = true;
         fHold = 0;
-        fHeld = fDone = fTapPending = fStoppedPress = fTapStopped = false;
+        fHeld = fDone = fTapPending = fStoppedPress = fTapStopped = fTapCancels = false;
         fSinceTap = 0; fTapTrack = 0;
     }
 
@@ -341,7 +341,11 @@ protected:
         // Triggers and the footswitch act on rising edges only; a trigger held high from the
         // start (previous value NaN on the first run) counts as a press.
         const auto rising = [&](uint32_t i) { return on(i) && !(fPrev[i] > 0.5f); };
-        if (fTapPending && rising(kParamRec)) { fTapPending = false; fEngine.undo(fTapTrack); }   // B after a tap: the undo first
+        if (fTapPending && rising(kParamRec))         // B after a tap: the undo first
+        {
+            fTapPending = false;
+            if (!fTapCancels) fEngine.undo(fTapTrack);
+        }
         if (rising(kParamRec))        fEngine.pressRec(sel);
         if (rising(kParamUndo))       fEngine.undo(sel);
         if (rising(kParamRedo))       fEngine.redo(sel);
@@ -357,9 +361,9 @@ protected:
             request(kParamOn1 + sel, fEngine.isOn(sel) ? 1.0f : 0.0f);
         }
 
-        // C footswitch: a tap undoes once the double-tap window passes; a second tap within it stops, or,
-        // if the first tap was released while stopped, starts again from the top. A hold of hold_time redoes
-        // once, and a hold of 2x hold_time while stopped clears all.
+        // C footswitch: a tap undoes once the double-tap window passes (a wait for the line it cancels on its press);
+        // a second tap within it stops, or, if the first tap was released while stopped, starts again from the top.
+        // A hold of hold_time redoes once, and a hold of 2x hold_time while stopped clears all.
         // ponytail: timed in whole blocks (<= one block of error); sample-exact if it matters.
         const uint64_t hold = uint64_t(fVal[kParamHoldTime] * 0.001 * getSampleRate());
         const uint64_t window = uint64_t(fVal[kParamDoubleTap] * 0.001 * getSampleRate());
@@ -374,6 +378,9 @@ protected:
                     fTapPending = false; fDone = true; fStoppedPress = false;
                     if (fTapStopped) fEngine.restart(); else stopNow();
                 }
+                // A wait shown on this track is cancelled now: after the window the line may have acted. The tap
+                // then undoes nothing, but a second tap still stops.
+                else if ((fTapCancels = fEngine.userWaiting(sel))) fEngine.undo(sel);
             }
             fHold += frames;
             if (!fDone && !fStoppedPress && fHold >= hold) { fDone = true; fEngine.redo(sel); }
@@ -391,7 +398,7 @@ protected:
         else if (fTapPending && (fSinceTap += frames) >= window)
         {
             fTapPending = false;
-            fEngine.undo(fTapTrack);
+            if (!fTapCancels) fEngine.undo(fTapTrack);
         }
 
         for (uint32_t i = 0; i < kParamBypass; ++i) fPrev[i] = fVal[i];
@@ -487,6 +494,7 @@ private:
     uint64_t fHold = 0;                     // samples undo_redo has been held
     bool fHeld = false, fDone = false, fTapPending = false, fStoppedPress = false;
     bool fTapStopped = false;               // the pending tap was released while stopped: a double-tap resumes
+    bool fTapCancels = false;               // the tap's press cancelled a wait: it undoes nothing
     uint64_t fSinceTap = 0;
     int fTapTrack = 0;
     bool fModPlaying = false;               // MOD's transport as of the last run() with Sync on

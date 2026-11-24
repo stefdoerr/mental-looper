@@ -413,6 +413,34 @@ static void pressSeesThisBlocksGrid() {                             // setGrid c
     gT = 97000; set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);   // MOD jumped to 1000 past a line: in grace
     CHECK(eng().state(0) == ouro::TrackState::Recording);
 }
+// A tap on C cancels a waiting action on its press, not when the double-tap window ends: a late undo would act on
+// what the line did (here undo the first loop it closed, and the take is lost). A second tap still stops, and B
+// after the tap acts without an undo first.
+static void runTo(double t) { while (gT < t) runMod(true, 1); }
+static void waitingClose() {                                        // a first recording from the line; B early for bar 3
+    fresh(); gT = 0; set(kParamSync, 1); runMod(true, 1);
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);
+    runTo(192000 - 40000); set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);
+    CHECK(eng().userWaiting(0));
+}
+static void tapCancelsAWaitingActionAtOnce() {
+    for (double before : {14400.0, 1280.0}) {                       // 300 ms before the line; 27 ms (released after it)
+        waitingClose(); runTo(192000 - before);
+        set(kParamUndoRedo, 1); runMod(true, 1); CHECK(!eng().waiting() && eng().state(0) == ouro::TrackState::Recording);
+        runMod(true, 19); set(kParamUndoRedo, 0); runMod(true, 200);  // a 53 ms tap; the line and the window pass
+        CHECK(eng().state(0) == ouro::TrackState::Recording && eng().loopLength() == 0 && !eng().waiting());
+        CHECK(eng().recordedSamples() > 192000);                    // still recording
+    }
+    waitingClose(); runTo(192000 - 14400);                          // a double-tap stops: whole bars kept
+    set(kParamUndoRedo, 1); runMod(true, 2); set(kParamUndoRedo, 0); runMod(true, 2);
+    set(kParamUndoRedo, 1); runMod(true, 1); set(kParamUndoRedo, 0); runMod(true, 40);
+    CHECK(eng().transport() == ouro::Transport::Stopped && eng().loopLength() == 96000);
+    waitingClose(); runTo(192000 - 30000);                          // B within the window: no undo, it closes again
+    set(kParamUndoRedo, 1); runMod(true, 2); set(kParamUndoRedo, 0); runMod(true, 20);
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);
+    CHECK(eng().state(0) == ouro::TrackState::Recording && eng().userWaiting(0));
+    runTo(192000 + 128 * 200); CHECK(eng().loopLength() == 192000 && eng().state(0) == ouro::TrackState::Playing);
+}
 
 int main()
 {
@@ -451,5 +479,6 @@ int main()
     modPlayAndStopEdgesFollow();
     syncSwitchedOnWhilePlayingIsNoEdge();
     pressSeesThisBlocksGrid();
+    tapCancelsAWaitingActionAtOnce();
     REPORT();
 }
