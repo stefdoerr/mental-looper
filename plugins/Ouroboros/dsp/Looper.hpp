@@ -2,6 +2,7 @@
 #include "BlockPool.hpp"
 #include "Constants.hpp"
 #include "Delta.hpp"
+#include "TrackBuf.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -61,7 +62,10 @@ public:
     ~Looper() { release(); }
 
     // False => disabled: process() outputs only the dry path, and the actions (rec, undo, redo, clear) are ignored.
-    bool init(double sampleRate, uint32_t /*maxBlock: the engine runs per sample, no block scratch*/) {
+    // poolBytes: the pool for the tracks' audio and the undo layers; 0 = as much as was reserved before they shared
+    // it (kTracks full-length tracks plus kMaxBudgetMb), halving on failure down to one full-length track plus 16 MB.
+    // A size given (tests) is used as it is.
+    bool init(double sampleRate, uint32_t /*maxBlock: the engine runs per sample, no block scratch*/, size_t poolBytes = 0) {
         release();
         // Positions are uint32_t: reject rates whose reservation would not fit (also NaN and absurdly low rates).
         const double bufLen = (double(kMaxLoopSeconds) + 1.0) * sampleRate;   // 5 min + 1 s slack (tail, history)
@@ -75,17 +79,18 @@ public:
         ramp_ = msToSamples(kRampMs, sr_);
         histLen_ = msToSamples(kHistoryMs, sr_);
         for (Track& tr : tracks_)
-            if (!(tr.buf = static_cast<float*>(std::calloc(cap_, sizeof(float))))) return fail();
+            if (!tr.buf.init(cap_)) return fail();
         if (!(hist_ = static_cast<float*>(std::calloc(histLen_, sizeof(float))))) return fail();
         if (!(histUsed_ = static_cast<float*>(std::calloc(histLen_, sizeof(float))))) return fail();
-        size_t mb = size_t(kMaxBudgetMb);
-        while (!pool_.reserve(mb << 20)) {
-            if (mb == 16) return fail();
-            mb = std::max<size_t>(mb / 2, 16);
+        const uint64_t track = uint64_t(cap_) * sizeof(float), least = track + (uint64_t(16) << 20);
+        uint64_t bytes = poolBytes ? poolBytes : kTracks * track + (uint64_t(kMaxBudgetMb) << 20);
+        while (bytes > SIZE_MAX || !pool_.reserve(size_t(bytes))) {
+            if (poolBytes || bytes == least) return fail();
+            bytes = std::max(bytes / 2, least);
         }
         pool_.setBudgetBytes(size_t(200) << 20);   // reserve() reset it to everything; 200 MB is the default
         // A stacked layer holds at least one block, so a track has at most one layer per block (+1 in progress).
-        const size_t layers = (mb << 20) / (BlockPool::kBlock * sizeof(float)) + 1;
+        const size_t layers = size_t(bytes / (BlockPool::kBlock * sizeof(float))) + 1;
         for (Track& tr : tracks_)
             if (!(tr.layers = new (std::nothrow) Layer[layers]())) return fail();
         histW_ = 0;
@@ -134,9 +139,10 @@ public:
                 armed_ = -1;
                 at_ = i; fireArm(t); at_ = 0;
             }
-            // Max length: close as if B were pressed, but at once (with a grid, on the last line passed). A press
-            // waiting to close it goes; one waiting on another track starts that track on the next line.
-            if (recTrack_ >= 0 && rec_ == maxRec_) {
+            // Max length, or memory full (the last write was refused, see below): close as if B were pressed, but at
+            // once (with a grid, on the last line passed). A press waiting to close it goes; one waiting on another
+            // track starts that track on the next line.
+            if (recTrack_ >= 0 && (rec_ == maxRec_ || pool_.full())) {
                 if (pend_.t == recTrack_) pend_ = {};
                 at_ = i; closeFirst(recToDub_); at_ = 0;
             }
@@ -150,10 +156,11 @@ public:
                 }
                 at_ = 0;
             }
-            for (int u = 0; u < kTracks; ++u) {          // a recording onto the loop at the most whole loops in 5 min:
-                const Track& tr = tracks_[u];            // close as if B were pressed
-                if (tr.state == TrackState::Recording && tr.len == cap_ && tr.pos == maxRec_ / L_ * L_)
-                    close(u, recToDub_);
+            // A recording onto the loop at the most whole loops in 5 min, or a take whose write was refused (memory full,
+            // see write()): close as if B were pressed.
+            for (int u = 0; u < kTracks; ++u) {
+                const Track& tr = tracks_[u];
+                if (writing(tr) && (tr.dub.full || (tr.len == cap_ && tr.pos == maxRec_ / L_ * L_))) close(u, recToDub_);
             }
             // The last track went empty and its ramp ended: L resets. Stopped, the gains don't move: empty is enough.
             // An arm stays, and so does a track's waiting action: it then starts the first loop. MOD's retrigger goes.
@@ -166,10 +173,13 @@ public:
             hist_[h] = x;
             if (++histW_ == histLen_) histW_ = 0;
             float y = dry_.next(dryTo, ramp_) * x, used = 0.0f;
-            if (recTrack_ >= 0) {                        // first recording: overwrite (reused pages hold old audio)
-                // closeFirst() rewrites the last D. fadeInGain(rec_), over recFadeIn_ (0 after a lead-in).
-                tracks_[recTrack_].buf[rec_] = x * (used = rec_ < recFadeIn_ ? float(rec_) / float(fadeIn_) : 1.0f);
-                ++rec_;
+            if (recTrack_ >= 0) {                        // first recording, into an empty buffer (see startFirst)
+                // closeFirst() rewrites the last D. fadeInGain(rec_), over recFadeIn_ (0 after a lead-in). Refused
+                // (memory full), x is not recorded: the next sample closes the loop at rec_.
+                if (float* s = sample(tracks_[recTrack_], rec_)) {
+                    *s = x * (used = rec_ < recFadeIn_ ? float(rec_) / float(fadeIn_) : 1.0f);
+                    ++rec_;
+                }
             } else if (L_ && tp_ != Transport::Stopped) {   // stopped: only the dry path, nothing moves
                 float wet = 0.0f;
                 for (Track& tr : tracks_) wet += play(tr);   // read before write: the player hears the dry path
@@ -237,8 +247,9 @@ public:
         if (armed_ >= 0) { armed_ = -1; return; }       // a tap on C cancels the arm, and only that; likewise the
         if (userWaiting()) { cancelWaiting(); return; } // user's wait, on any track (not MOD's)
         Track& tr = tracks_[t];
-        if (tr.state == TrackState::Recording) {         // abort: the track is empty again
-            tr.state = TrackState::Empty;
+        if (tr.state == TrackState::Recording) {         // abort: the track is empty again. None of the take was heard
+            tr.state = TrackState::Empty;                // (a recording onto the loop plays ahead of its writer): its
+            tr.buf.clear(pool_);                         // blocks go back now
             if (recTrack_ == t) recTrack_ = -1;
             return;
         }
@@ -279,6 +290,7 @@ public:
         if (armed_ == t) armed_ = -1;
         if (pend_.t == t) cancelWaiting();
         dropLayers(tr);                                  // an op still reading a layer keeps it: the ramp-out is smooth
+        if (tr.state == TrackState::Recording) tr.buf.clear(pool_);   // a take none of which was heard (see undo())
         tr.state = TrackState::Empty;
     }
     void clearAll() { for (int t = 0; t < kTracks; ++t) clearTrack(t); }
@@ -413,7 +425,10 @@ public:
     // Not clamped here (the plugin's parameter range does that); the pool clamps to what it reserved.
     // Lowering it below the current use only takes effect at the next allocation.
     void setBudgetMb(float mb) { pool_.setBudgetBytes(mb > 0.0f ? size_t(double(mb) * 1048576.0) : 0); }   // NaN -> 0
-    size_t undoBytes() const { return size_t(pool_.usedBlocks()) * BlockPool::kBlock * sizeof(float); }
+    size_t undoBytes() const { return size_t(pool_.undoUsed()) * BlockPool::kBlock * sizeof(float); }
+    // A write of track audio found the pool full with no undo layer left to give up; until a block comes back.
+    bool memoryFull() const { return pool_.full(); }
+    uint32_t blocksUsed() const { return pool_.used(); }
 
     TrackState state(int t) const { return valid(t) ? tracks_[t].state : TrackState::Empty; }
     NextAction nextAction(int t) const {
@@ -484,9 +499,10 @@ private:
         DeltaCursor c;
         bool cont = false, lost = false; // cont: envelope = 1 - what others write (Rec->Dub, handover); lost: pool full
         bool offset = true;              // written at the Offset behind the playhead (see startDub)
+        bool full = false;               // a write was refused: memory full (see write())
     };
     struct Track {
-        float* buf = nullptr;            // the base, plus every layer still in the undo stack
+        TrackBuf buf;                    // the base, plus every layer still in the undo stack
         Layer* layers = nullptr;         // [0, undoTop) undo stack, [undoTop, redoTop) redo stack, top at undoTop
         uint32_t undoTop = 0, redoTop = 0;
         uint32_t baked = 0;              // dubs left in buf without a layer (evicted, or not stored): layerCount() keeps them
@@ -499,7 +515,7 @@ private:
         TrackState state = TrackState::Empty;
         // The track's cycle (a whole number of loops, 0 = none) and playhead in buf. It outlives a clear or an abort
         // until the next recording or reset(): the ramp-out and the pending ops still read it. Recording onto the loop
-        // (and after its abort) len is cap_: buf is linear from the start press, index 0, and the playhead zeroes it.
+        // (and after its abort) len is cap_: buf is linear from the start press, index 0, and started empty.
         uint32_t len = 0, pos = 0;
         uint32_t xpos = 0;               // a retrigger's crossfade: the old playhead
         uint32_t phase = 0;              // the base phase at index 0: the track's beginning is phase samples before it
@@ -576,7 +592,7 @@ private:
         const float g = float(xf_--) / float(fadeIn_);
         float old = 0.0f;
         for (Track& tr : tracks_) {
-            old += tr.gain.v * tr.buf[tr.xpos];
+            old += tr.gain.v * tr.buf.get(pool_, tr.xpos);
             if (++tr.xpos == tr.len) tr.xpos = 0;
         }
         return (1.0f - g) * wet + g * old;
@@ -617,12 +633,11 @@ private:
     // the close is back-dated by the trigger latency recD_ whatever back was (a press: the same; an arm: the pre-roll).
     // lead: the first lead of them are a lead-in before the start line (an arm's pre-roll on a grid). They go aside to
     // the buffer's end, so buf[0] is the line, and closeFirst() adds them just before the loop's end. The fade-in is
-    // theirs.
+    // theirs. The buffer is empty: L unset, every track was reset or threw its take away (see undo()).
     void startFirst(int t, uint32_t back, uint32_t lead = 0) {
-        float* buf = tracks_[t].buf;
         for (uint32_t i = 0; i < back; ++i) {
             const float v = hist_[(histW_ + histLen_ - back + i) % histLen_] * fadeInGain(i);
-            buf[i < lead ? cap_ - lead + i : i - lead] = v;
+            if (float* s = sample(tracks_[t], i < lead ? cap_ - lead + i : i - lead)) *s = v;
         }
         rec_ = back - lead;
         recLead_ = lead;
@@ -662,12 +677,13 @@ private:
         if (n >= from) tr.gain.snap(0.0f);              // the playhead lands on recorded audio, mid-wave: ramp in (R7)
         if (n < len) {                                  // rounded up: [n, len) was never recorded
             const uint32_t z = std::max(n, from);
-            std::fill(tr.buf + z, tr.buf + len, 0.0f);  // [z, len) now, under the lead-in; [n, z) on the way
+            tr.buf.zero(pool_, z, len);                 // [z, len) now, under the lead-in; [n, z) on the way
             addRaw(tr, n, z - n, false);
         } else if (n > len + a) {
             addRaw(tr, 0, n - a - len, true);           // [len, n - a) onto [0, n - a - len)
         }
-        for (uint32_t i = 0; i < b; ++i) tr.buf[(i + len - b % len) % len] += tr.buf[cap_ - b + i];   // index i - b
+        for (uint32_t i = 0; i < b; ++i)                // index i - b
+            if (float* s = sample(tr, (i + len - b % len) % len)) *s += tr.buf.get(pool_, cap_ - b + i);
     }
 
     // Without a grid the close is back-dated by the trigger latency: L = r - recD_. With one it lands on the last line
@@ -694,10 +710,10 @@ private:
             exact = L == span;
         }
         recTrack_ = -1;
-        if (L < minLoop_) { tr.state = TrackState::Empty; return false; }   // an accidental double press
+        if (L < minLoop_) { tr.state = TrackState::Empty; tr.buf.clear(pool_); return false; }   // an accidental double press
         const uint32_t D = rec_ > L ? rec_ - L : 0, T = std::min(std::max(msToSamples(tailMs_, sr_), fadeIn_), L / 2);
         for (uint32_t i = 0; i < std::min(D, T); ++i)                 // fold the tail recorded so far (tail 0: 3 ms)
-            tr.buf[i] += tr.buf[L + i] * float(T - i) / float(T);
+            if (float* s = sample(tr, i)) *s += tr.buf.get(pool_, L + i) * float(T - i) / float(T);
         const uint32_t n = std::min(D, histLen_);                     // the share the last n inputs went to the base
         for (uint32_t i = 0; i < n; ++i) {
             const uint32_t k = D - n + i;
@@ -708,13 +724,14 @@ private:
         if (rec_ < L) {                                 // rounded up: fade out, shares too; a zero op clears the rest
             for (uint32_t i = 0; i < std::min(fadeIn_, rec_); ++i) {
                 const float g = float(i) / float(fadeIn_);
-                tr.buf[rec_ - 1 - i] *= g;
+                if (float* s = sample(tr, rec_ - 1 - i)) *s *= g;
                 histUsed_[(histW_ + histLen_ - 1 - i) % histLen_] *= g;   // fadeIn_ <= histLen_
             }
-            std::fill(tr.buf + z, tr.buf + L, 0.0f);                  // [z, L) now, under the lead-in; [r, z) later
+            tr.buf.zero(pool_, z, L);                                 // [z, L) now, under the lead-in; [r, z) later
             addRaw(tr, rec_, z - rec_, false);                        // (no ops are left on a track while L is unset)
         }
-        for (uint32_t i = 0; i < lead; ++i) tr.buf[L - lead + i] += tr.buf[cap_ - lead + i];   // just before the top
+        for (uint32_t i = 0; i < lead; ++i)                           // just before the top
+            if (float* s = sample(tr, L - lead + i)) *s += tr.buf.get(pool_, cap_ - lead + i);
         L_ = L;
         bars_ = bars;
         // D mod L (D can exceed L), or r if rounded up. After a tempo change during the recording D is not the
@@ -742,13 +759,13 @@ private:
     // fades in, capped by the complement of a tail or punch-out fade still writing, so it never steps where it starts.
     // base: a recording onto the loop (L set, track Empty). It becomes the track's base, with no delta, written
     // linearly from index 0 at the press (len = cap_) until close() picks its length. The part back-dated before index
-    // 0 goes aside to the buffer's end. The playhead zeroes the reused buffer as it goes: the track plays silence.
+    // 0 goes aside to the buffer's end. The buffer starts empty (see wipe()): the track plays silence.
     // offset: written at the Offset. A cont writer takes the offset of the one it complements, so a one-press chain
     // stays aligned: none after the first recording (Rec->Dub, handover before L), which has no offset.
     // trim: an arm's pre-roll. Its start is apart from the press that closed the last writer, so it always takes only
     // the history's remaining share: it never re-records input that writer took, whether or not its tail still runs.
     // Likewise a writer after a first loop whose close did not match its back-date (closeFirst): it fades in under it.
-    // ponytail: the zeroing does not ramp; a re-record within kRampMs of a clear or base undo cuts that ramp-out
+    // ponytail: the emptying does not ramp; a re-record within kRampMs of a clear or base undo cuts that ramp-out
     // ponytail: a cancel or abort leaves its shares in the history; an arm firing within the pre-roll after one trims
     // that part of its pre-roll (not reachable by foot); take the shares back out on a cancel if that is hit
     void startDub(Track& tr, uint32_t D, bool cont, bool base = false, bool offset = true, bool trim = false) {
@@ -765,9 +782,7 @@ private:
         dub.w = (p + 2 * len - back) % len;
         dub.cont = cont;
         dub.offset = offset;
-        if (base) {
-            std::fill(tr.buf + cap_ - back, tr.buf + cap_, 0.0f);   // the aside: the writer starts there and wraps to 0
-        } else {
+        if (!base) {                                     // base: the writer starts in the aside and wraps to 0
             dub.layer = int32_t(tr.undoTop);
             Layer& ly = tr.layers[tr.undoTop];
             ly.d.begin(dub.w);
@@ -821,24 +836,24 @@ private:
     float play(Track& tr) {
         const float adj = commit(tr);
         const float g = tr.gain.next(target(tr), ramp_);
-        return g != 0.0f ? g * (tr.buf[tr.pos] + adj) : 0.0f;
+        return g != 0.0f ? g * (tr.buf.get(pool_, tr.pos) + adj) : 0.0f;
     }
     // Applies the pending ops that owe the playhead. Returns what holds back their change during their ramp.
+    // A recording onto the loop reads ahead of its writer: silence, as its buffer started empty (startDub()).
     float commit(Track& tr) {
-        if (tr.len == cap_) tr.buf[tr.pos] = 0.0f;       // recording onto the loop: never stale, never itself
         float adj = 0.0f;                                // holds back the ops' change during their ramp
         for (uint32_t k = 0; k < tr.nOps;) {
             Op& op = tr.ops[k];
             if (op.at != tr.pos) { ++k; continue; }      // a split part waiting for its stretch
             if (op.zero) {
-                tr.buf[tr.pos] = 0.0f;
+                tr.buf.zero(pool_, tr.pos, tr.pos + 1);
             } else if (op.fold) {
-                tr.buf[tr.pos] += tr.buf[tr.pos + tr.len];
+                if (float* s = sample(tr, tr.pos)) *s += tr.buf.get(pool_, tr.pos + tr.len);
             } else {
                 const uint32_t off = (tr.pos + tr.len - op.d.start()) % tr.len;
                 if (off < op.d.length()) {
                     const float v = op.sign * op.d.read(pool_, op.c, off);
-                    tr.buf[tr.pos] += v;
+                    if (float* s = sample(tr, tr.pos)) *s += v;
                     if (op.ramp && op.done < ramp_) adj -= v * (1.0f - float(op.done) / float(ramp_));
                 }
             }
@@ -852,7 +867,7 @@ private:
     float writeOut(Track& tr, float x) {
         float used = 0.0f;
         if (tr.tailEnd) {                                // tail of the first recording, g: 1 -> 0 over T = tailEnd
-            tr.buf[tr.tailAt] += x * float(tr.tailEnd - tr.tailAt) / float(tr.tailEnd);
+            if (float* s = sample(tr, tr.tailAt)) *s += x * float(tr.tailEnd - tr.tailAt) / float(tr.tailEnd);
             used += float(tr.tailEnd - tr.tailAt) / float(tr.tailEnd);
             if (++tr.tailAt == tr.tailEnd) tr.tailEnd = 0;
         }
@@ -874,12 +889,23 @@ private:
         return e;
     }
 
+    // Refused (memory full), v is not written (nor stored: the delta stays in step) and the take ends at the next
+    // sample (see process()); a punch-out fade just goes on.
     void write(Track& tr, Writer& wr, float v) {
-        tr.buf[wr.w] += v;
+        if (float* s = sample(tr, wr.w)) *s += v;
+        else { v = 0.0f; wr.full = true; }
         if (wr.layer >= 0 && !wr.lost) store(tr, wr, v);
         wr.peak = std::max(wr.peak, std::fabs(v));
         if (++wr.w == tr.len) wr.w = 0;
         ++wr.n;
+    }
+
+    // Sample i of tr's buffer, writable (see TrackBuf::at). Loops win over undo: a full pool gives up undo layers for
+    // it (evict()). nullptr when none is left to give up: memory full (memoryFull()).
+    float* sample(Track& tr, uint32_t i) {
+        float* s;
+        while (!(s = tr.buf.at(pool_, i)) && evict()) {}
+        return s;
     }
 
     // The one place deltas grow: append on the first pass, accumulate after. If the pool is full the writer
@@ -958,11 +984,12 @@ private:
         tr.baseUndone = false;
     }
 
-    // dropLayers, and the pending ops too (the buffer they would change is about to be zeroed or dropped).
+    // dropLayers, the pending ops too, and the buffer: the track is empty and holds no blocks.
     void wipe(Track& tr) {
         dropLayers(tr);                                  // first: it hands layers still read to their ops
         for (uint32_t k = 0; k < tr.nOps; ++k) if (tr.ops[k].owns) tr.ops[k].d.release(pool_);
         tr.nOps = 0;
+        tr.buf.clear(pool_);
     }
 
     // layer >= 0: d is that layer's delta; -1: the op owns d.
@@ -1064,11 +1091,8 @@ private:
 
     bool fail() { release(); return false; }
     void release() {
-        reset();                                         // returns the deltas while the pool still exists
-        for (Track& tr : tracks_) {
-            std::free(tr.buf); tr.buf = nullptr;
-            delete[] tr.layers; tr.layers = nullptr;
-        }
+        reset();                                         // returns the blocks while the pool still exists
+        for (Track& tr : tracks_) { delete[] tr.layers; tr.layers = nullptr; }   // a buffer's table stays to its next init
         std::free(hist_); hist_ = nullptr;
         std::free(histUsed_); histUsed_ = nullptr;
         pool_.reserve(0);                                // frees the pool, reserves nothing
@@ -1076,7 +1100,7 @@ private:
     }
 
     Track tracks_[kTracks];
-    BlockPool pool_;                 // overdub layer deltas for undo/redo
+    BlockPool pool_;                 // the tracks' audio (Audio) and the overdub layer deltas for undo/redo (Undo)
     float* hist_ = nullptr;          // input history ring, for back-dating presses
     float* histUsed_ = nullptr;      // per history input: the envelope share already written somewhere (splits)
     uint32_t histLen_ = 0, histW_ = 0;

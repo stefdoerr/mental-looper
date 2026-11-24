@@ -15,7 +15,7 @@ public:
     bool append(BlockPool& p, float v) {
         const uint32_t i = length_ % BlockPool::kBlock;
         if (i == 0) {
-            int32_t b = p.alloc();
+            int32_t b = p.alloc(BlockPool::Kind::Undo);
             if (b < 0) return false;
             if (tail_ >= 0) p.next(tail_) = b; else head_ = b;
             tail_ = b;

@@ -8,8 +8,8 @@
 struct Rig {                                         // trigger latency forced to 0 unless a test sets it
     ouro::Looper lp; double sr; uint32_t block; std::vector<float> out;
 
-    explicit Rig(double rate = 48000.0, uint32_t blockSize = 128) : sr(rate), block(blockSize) {
-        lp.init(sr, block);
+    explicit Rig(double rate = 48000.0, uint32_t blockSize = 128, size_t poolBytes = 0) : sr(rate), block(blockSize) {
+        lp.init(sr, block, poolBytes);              // 0: the default pool
         lp.setTriggerLatencyMs(0.0f);
     }
     void feed(const std::vector<float>& in) {        // block-sized process() calls; appends to out
