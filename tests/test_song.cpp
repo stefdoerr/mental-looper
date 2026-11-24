@@ -124,7 +124,32 @@ static void aStopStepUsesTheStopMode() {
     f.silence(48000); CHECK(f.lp.transport() == ouro::Transport::Stopped && f.lp.songStep() == -1);
 }
 
+// R10 (T3 M1): the song ends where its steps now end. B, playing, is edited to Stop: the loops stop at B's end.
+static void editingThePlayingStepToStopStopsAtItsEnd() {
+    Rig r; twoParts(r);
+    r.lp.setStep(1, 1, 1); r.lp.setStep(2, 0, 2); r.lp.setStep(3, ouro::kStepLoop, 1);   // A, B, A x2, Loop
+    r.lp.setSong(true); r.silence(2 * 24000 + 64); CHECK(r.lp.songStep() == 1 && r.lp.part() == 1);
+    r.lp.setStep(1, ouro::kStepStop, 1);
+    r.silence(24000 - 64 + 128);
+    CHECK(r.lp.transport() == ouro::Transport::Stopped && r.lp.songStep() == -1);
+}
+// R10 (T3 M2): B cancelling the song's Stop (End of loop, Fade) rewinds the song: step 1 starts at the next part end.
+static void cancellingTheSongsStopRewindsIt() {
+    for (ouro::StopMode m : {ouro::StopMode::EndOfLoop, ouro::StopMode::Fade}) {
+        Rig r; twoParts(r); r.lp.setStopMode(m, 1000.0f);
+        r.lp.setStep(1, 1, 1); r.lp.setStep(2, ouro::kStepStop, 1);    // A, B, Stop
+        r.lp.setSong(true);
+        const uint32_t at = m == ouro::StopMode::Fade ? 3 * 24000 + 2000 : 3 * 24000 - 360;   // in the stop's fade
+        r.silence(at); CHECK(r.lp.transport() == ouro::Transport::Stopping);
+        r.lp.pressRec(0); CHECK(r.lp.transport() == ouro::Transport::Running);
+        r.silence((at / 24000 + 1) * 24000 - at + 64);                 // the next part end
+        CHECK(r.lp.transport() == ouro::Transport::Running && r.lp.part() == 0 && r.lp.songStep() == 0);
+        r.silence(24000); CHECK(r.lp.part() == 1 && r.lp.songStep() == 1);
+    }
+}
+
 int main() {
+    editingThePlayingStepToStopStopsAtItsEnd(); cancellingTheSongsStopRewindsIt();
     songPlaysItsStepsInOrder(); aStopStepStopsAndRewinds(); songFromNothingCountsFromTheFirstClose();
     stepsAfterTheFirstLoopAreNotPlayed(); aHandOnPartTurnsTheSongOff(); repeatsCountPassesOfTheWholePart();
     clearAllRewindsTheSong(); theDefaultSongRepeatsA(); songOnWithNothingRecordedMovesToStepOnesPart();

@@ -341,9 +341,10 @@ public:
     // 1) or Stop. At each part end it counts a pass; once a step's repeats are done the next step's part plays (see
     // switchPart(), copy on entry included; a step on the part playing just goes on). A Stop step stops with the Stop
     // Mode kRampMs before the last pass ends (Instant and End of loop end on it, Fade fades out from there); once
-    // stopped, the song is back to not playing, Song still on. Turned on while playing, the song starts at the next
-    // part end; any restart (from stopped, or MOD's start) starts it from the top. From nothing, the first loop is
-    // recorded in step 1's part and the song starts at its close. Clear All rewinds it. On, it drops a queued switch.
+    // stopped, or that stop cancelled by B, the song is back to not playing, Song still on. Turned on while playing,
+    // the song starts at the next part end; any restart (from stopped, or MOD's start) starts it from the top. From
+    // nothing, the first loop is recorded in step 1's part and the song starts at its close. Clear All rewinds it. On,
+    // it drops a queued switch.
     void setSong(bool on) {
         if (on == song_) return;
         song_ = on; step_ = -1; pass_ = 0;
@@ -379,6 +380,7 @@ public:
     // gain. A stop that closes the first recording parks silently in every mode (R7): Instant from loop gain 0.
     void stop(StopMode mode, float fadeMs = 3000.0f) {
         if (!enabled_) return;
+        songStopping_ = false;                           // the song's own sets it after (see partEnd())
         pend_ = {};
         if (tp_ == Transport::Stopped) return;
         if (tp_ == Transport::Stopping) {
@@ -410,11 +412,15 @@ public:
     // With a grid it goes on a line, as a press does: up to kSyncGraceMs after one it starts now, every playhead
     // advanced by the samples since, as if it had started on the line; earlier, it waits for the next line. MOD
     // stopped, the loop's own grid is at its top (the park put it there), so at once. Again while it waits: cancelled.
-    // Stopping: a pending End of loop or Fade stop is cancelled (the loops ramp back up); otherwise the restart waits
-    // for the park.
+    // Stopping: a pending End of loop or Fade stop is cancelled (the loops ramp back up; the song's Stop rewinds the
+    // song: step 1 at the next part end, as the park would); otherwise the restart waits for the park.
     void restart() {
         if (tp_ == Transport::Stopping) {
-            if (stopMode_ != StopMode::Instant && !lg_.ended()) { tp_ = Transport::Running; lg_.start(true, 0, ramp_); }
+            if (stopMode_ != StopMode::Instant && !lg_.ended()) {
+                tp_ = Transport::Running;
+                lg_.start(true, 0, ramp_);
+                if (songStopping_) { step_ = -1; pass_ = 0; }
+            }
             else restartQueued_ = true;
             return;
         }
@@ -649,19 +655,23 @@ private:
             if (song_) songNext(); else switchPart(queued_);
         } else if (song_ && pos_ == L_ - ramp_) {        // L_ >= minLoop_ > ramp_
             const int i = nextStep();
-            if (i >= 0 && steps_[i].part == kStepStop && longest(len) == len - ramp_) stop(songStop_, songFadeMs_);
+            if (i >= 0 && steps_[i].part == kStepStop && longest(len) == len - ramp_) {
+                stop(songStop_, songFadeMs_);
+                songStopping_ = true;
+            }
         }
     }
-    // The step after this pass: -1 while the step playing has repeats to go, else the next one (step 1 after a Loop or
-    // the last step, and when not playing).
+    // The step after this pass: -1 while the step playing has repeats to go, else the next one. Past the song's end
+    // (after step 16, a Loop, or a Stop, edited in at or before the step playing too): that Stop, else step 1. Step 1
+    // when not playing.
     int nextStep() const {
         if (step_ >= 0 && pass_ + 1 < steps_[step_].reps) return -1;
-        const int i = (step_ + 1) % kSteps;
-        return steps_[i].part == kStepLoop ? 0 : i;
+        const int i = step_ + 1, n = int(songLength());
+        return i < n ? i : n < kSteps && steps_[n].part == kStepStop ? n : 0;
     }
     // At a part end, or a restart from not playing: the song goes on to nextStep() and plays its part (switchPart(): the
-    // part playing is no switch). A Stop there was done kRampMs before (see partEnd()); missed (the step edited since,
-    // or that stop cancelled), the part plays one more pass. A Loop first: no steps, the song plays nothing.
+    // part playing is no switch). A Stop there was done kRampMs before (see partEnd()); missed (the step edited within
+    // kRampMs of the part end), the part plays one more pass. A Loop first: no steps, the song plays nothing.
     void songNext() {
         const int i = nextStep();
         if (i < 0) { ++pass_; return; }
@@ -1331,6 +1341,7 @@ private:
     bool song_ = false;              // Song on: the steps drive the part
     int step_ = -1;                  // the step playing, -1: not playing
     uint32_t pass_ = 0;              // its passes done
+    bool songStopping_ = false;      // the stop under way is the song's Stop step (B cancelling it rewinds the song)
     StopMode songStop_ = StopMode::Instant;   // the Stop Mode and Fade Time a Stop step uses
     float songFadeMs_ = 3000.0f;
     BlockPool pool_;                 // the tracks' audio (Audio) and the overdub layer deltas for undo/redo (Undo)
