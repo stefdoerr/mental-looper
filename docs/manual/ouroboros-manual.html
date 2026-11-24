@@ -374,6 +374,7 @@ Without the widget everything still works, just without the screen. On stock MOD
 <p><b>MOD stopped.</b> Your first press sets bar 1. Once a loop exists, presses use the loop&rsquo;s own bars, counted from its top. A loop recorded with Sync Off or with no tempo counts as one bar, so B on an empty track can show WAIT for up to a whole loop.</p>
 <p><b>MOD&rsquo;s play and stop.</b> When MOD starts playing, the loops start from their top on the bar line (if MOD starts mid-bar, loops that are playing jump on the next line with no WAIT shown; stopped loops show WAIT until the line). If you are recording or overdubbing, that take closes first and every track jumps to its start with a short crossfade. During the very first recording, MOD&rsquo;s play is ignored. When MOD stops, the loops stop too, following Stop Mode. If MOD stops during the first recording, or you stop it with a double-tap, you keep the whole bars recorded so far; less than one bar is discarded.</p>
 <p><b>Tempo changes.</b> Loops keep their length, so if the tempo changes after you record they drift from the drums.</p>
+<p><b>Click and Length.</b> With Click on, Ouroboros ticks on MOD&rsquo;s beats while MOD plays, beat&nbsp;1 higher and louder, on its own <b>Click</b> output: route that to your headphones or a second output to keep it out of the mix. With MOD playing, B waits for the next bar line, so the click is your count-in. Set Length to a number of bars and the first loop closes by itself on that bar line, as a press would; B before then closes it as usual.</p>
 
 <h2>Settings</h2>
 <table>
@@ -391,6 +392,9 @@ Without the widget everything still works, just without the screen. On stock MOD
 <tr><td class="ctl">Threshold</td><td>&minus;60&hellip;&minus;10&nbsp;dB</td><td>&minus;40&nbsp;dB</td><td>How loud your first note must be to start an armed recording.</td></tr>
 <tr><td class="ctl">Double-Tap</td><td>150&ndash;600&nbsp;ms</td><td>400&nbsp;ms</td><td>The window for a second tap on C. A single tap undoes once it has passed.</td></tr>
 <tr><td class="ctl">Sync</td><td>Off / Bars</td><td>Off</td><td>Bars: recording starts and the first loop closes on MOD&rsquo;s bar lines, and the loops follow MOD&rsquo;s play and stop. See Tempo sync.</td></tr>
+<tr><td class="ctl">Click</td><td>off / on</td><td>off</td><td>With Sync on and MOD playing, a tick on each beat on the Click output.</td></tr>
+<tr><td class="ctl">Click Level</td><td>&minus;40&hellip;0&nbsp;dB</td><td>&minus;10&nbsp;dB</td><td>How loud the click is.</td></tr>
+<tr><td class="ctl">Length</td><td>Free, 1&ndash;16 bars</td><td>Free</td><td>With Sync on, the first loop closes by itself after this many bars.</td></tr>
 </table>
 
 
