@@ -22,6 +22,7 @@ public:
         assert(std::none_of(tab_, tab_ + n_, [](int32_t b) { return b >= 0; }));
         std::free(tab_);
         cap_ = cap;
+        rk_ = kNone;
         n_ = cap / kB + (cap % kB != 0);
         tab_ = static_cast<int32_t*>(std::malloc(size_t(n_) * sizeof(int32_t)));
         if (!tab_) n_ = 0;
@@ -29,27 +30,24 @@ public:
         return tab_ != nullptr;
     }
 
+    // Per sample for every playhead (the Dwarf's in-order core feels each step): the block last read is kept, looked up
+    // again only in another block or after the table changed. Single-threaded, like the pool.
     float get(const BlockPool& p, uint32_t i) const {
-        const int32_t b = tab_[i / kB];
-        return b < 0 ? 0.0f : p.data(b)[i % kB];
+        if (i / kB != rk_) seek(p, i / kB);
+        return rp_[i % kB];
     }
 
     // Sample i, writable: its block is taken (zeroed) or unshared first. nullptr if the pool refuses.
     float* at(BlockPool& p, uint32_t i) {
-        int32_t& b = tab_[i / kB];
-        if (b < 0 || p.shared(b)) {
-            const int32_t c = p.alloc(BlockPool::Kind::Audio);
-            if (c < 0) return nullptr;
-            if (b >= 0) { std::memcpy(p.data(c), p.data(b), kB * sizeof(float)); p.free(b); }
-            b = c;
-        }
-        return p.data(b) + i % kB;
+        const int32_t b = tab_[i / kB];
+        return b >= 0 && !p.shared(b) ? p.data(b) + i % kB : take(p, i);
     }
 
     // [from, to) reads 0: whole blocks go back to the pool (the last one ends at cap), parts of one are written.
     // A shared block's part takes a copy to write. Reached only past a copied track's len (a fold op ending, see Looper),
     // where nothing is read: a full pool leaving it unzeroed is harmless there.
     void zero(BlockPool& p, uint32_t from, uint32_t to) {
+        rk_ = kNone;
         while (from < to) {
             const uint32_t n = std::min(to - from, kB - from % kB);
             int32_t& b = tab_[from / kB];
@@ -60,6 +58,7 @@ public:
     }
 
     void clear(BlockPool& p) {
+        rk_ = kNone;
         for (uint32_t k = 0; k < n_; ++k) if (tab_[k] >= 0) { p.free(tab_[k]); tab_[k] = -1; }
     }
 
@@ -71,9 +70,25 @@ public:
     }
 
 private:
-    static constexpr uint32_t kB = BlockPool::kBlock;
+    static constexpr uint32_t kB = BlockPool::kBlock, kNone = UINT32_MAX;
+    [[gnu::noinline]] void seek(const BlockPool& p, uint32_t k) const {
+        static const float zeros[kB] = {};
+        rk_ = k;
+        rp_ = tab_[k] < 0 ? zeros : p.data(tab_[k]);
+    }
+    [[gnu::noinline]] float* take(BlockPool& p, uint32_t i) {   // at()'s block: none yet, or shared
+        int32_t& b = tab_[i / kB];
+        const int32_t c = p.alloc(BlockPool::Kind::Audio);
+        if (c < 0) return nullptr;
+        if (b >= 0) { std::memcpy(p.data(c), p.data(b), kB * sizeof(float)); p.free(b); }
+        b = c;
+        rk_ = kNone;
+        return p.data(b) + i % kB;
+    }
     int32_t* tab_ = nullptr;                    // block per kB samples, -1 = none (reads 0)
     uint32_t n_ = 0, cap_ = 0;
+    mutable uint32_t rk_ = kNone;               // get()'s block number, kNone: none
+    mutable const float* rp_ = nullptr;         // its audio (zeros for no block)
 };
 
 } // namespace ouro

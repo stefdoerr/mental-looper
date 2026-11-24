@@ -8,6 +8,15 @@
 #include <cstdlib>
 #include <new>
 
+// The per-sample loops over a part's tracks, unrolled. Left to itself GCC unrolls them or not as unrelated code grows,
+// and a loop left gets the MOD toolchain's -fprefetch-loop-arrays prefetches: on the Dwarf's in-order core the bench
+// moved ~10% with that alone (see process()). The __builtin_expect hints in Ramp and play() are for the same core.
+#if defined(__GNUC__) && !defined(__clang__)
+#define OURO_UNROLL _Pragma("GCC unroll 4")
+#else
+#define OURO_UNROLL
+#endif
+
 namespace ouro {
 
 enum class TrackState : uint8_t { Empty, Recording, Playing, Overdubbing };
@@ -20,7 +29,7 @@ struct Ramp {
     float v = 0.0f, to = 0.0f, step = 0.0f;
     uint32_t left = 0;
     float next(float target, uint32_t n) {
-        if (target != to) { to = target; left = n; step = n ? (to - v) / float(n) : 0.0f; }
+        if (__builtin_expect(target != to, 0)) { to = target; left = n; step = n ? (to - v) / float(n) : 0.0f; }
         v = left && --left ? v + step : to;
         return v;
     }
@@ -113,6 +122,7 @@ public:
             }
         if (queued_ >= 0) part_ = queued_;
         if (songPart() >= 0) part_ = songPart();
+        cp_ = &parts_[part_];
         queued_ = out_ = step_ = -1;
         pass_ = 0;
         L_ = pos_ = rec_ = recD_ = 0;
@@ -167,7 +177,7 @@ public:
             // A recording onto the loop at the most whole loops in 5 min, or a take whose write was refused (memory full,
             // see write()): close as if B were pressed.
             const Part& C = cur();                       // once: per sample, cur()[u] costs measurably (the bench)
-            for (int u = 0; u < kTracks; ++u) {
+            OURO_UNROLL for (int u = 0; u < kTracks; ++u) {
                 const Track& tr = C[u];
                 if (writing(tr) && (tr.dub.full || (tr.len == cap_ && tr.pos == maxRec_ / L_ * L_))) close(u, recToDub_);
             }
@@ -193,14 +203,15 @@ public:
             } else if (L_ && tp_ != Transport::Stopped) {   // stopped: only the dry path, nothing moves
                 Part& P = cur();                         // the current part's tracks (a switch below changes it)
                 float wet = 0.0f;
-                for (Track& tr : P) wet += play(tr);     // read before write: the player hears the dry path
+                OURO_UNROLL for (Track& tr : P) wet += play(tr);   // read before write: the player hears the dry path
                 if (xf_) wet = crossfade(wet);           // a retrigger's 3 ms; else only this test
                 if (out_ >= 0) wet += finishOut(x, used);   // a switch's outgoing part; else only this test
                 y += lg_.next() * wet;
-                for (Track& tr : P) used += writeOut(tr, x);   // tails and fades first: the one track
-                for (Track& tr : P) if (writing(tr)) used += writeIn(tr, x, used);   // recording takes the rest
+                OURO_UNROLL for (Track& tr : P)          // tails and fades first: the one track
+                    if (tr.tailEnd || tr.fade.left) used += writeOut(tr, x);
+                OURO_UNROLL for (Track& tr : P) if (writing(tr)) used += writeIn(tr, x, used);   // recording: the rest
                 if (++pos_ == L_) pos_ = 0;
-                for (Track& tr : P) if (tr.len && ++tr.pos == tr.len) tr.pos = 0;   // every playhead in step
+                OURO_UNROLL for (Track& tr : P) if (tr.len && ++tr.pos == tr.len) tr.pos = 0;   // all playheads in step
                 if (queued_ >= 0 || song_) partEnd();    // a queued switch or the song (R2: else only these tests)
                 // Tails and fades done too. A queued restart then asks the grid at the next sample, its first.
                 if (tp_ == Transport::Stopping && lg_.ended() && !overlap()) { at_ = i + 1; park(); at_ = 0; }
@@ -608,22 +619,25 @@ private:
         bool baseUndone = false;         // the base is on top of the redo stack
     };
     using Part = Track[kTracks];
-    Part& cur() { return parts_[part_]; }
-    const Part& cur() const { return parts_[part_]; }
+    Part& cur() { return *cp_; }                         // a pointer kept with part_: several uses per sample
+    const Part& cur() const { return *cp_; }
 
     static bool inRange(int t) { return t >= 0 && t < kTracks; }
     bool valid(int t) const { return enabled_ && inRange(t); }
     float fadeInGain(uint32_t i) const { return i < fadeIn_ ? float(i) / float(fadeIn_) : 1.0f; }
     static bool writing(const Track& tr) { return tr.state == TrackState::Recording || tr.state == TrackState::Overdubbing; }
-    float target(const Track& tr) const { return tr.state != TrackState::Empty && tr.on && !bypass_ ? tr.vol : 0.0f; }
+    float target(const Track& tr) const {                // no branches (per sample for every track): & not &&, vol read
+        const float v = tr.vol;
+        return (tr.state != TrackState::Empty) & tr.on & !bypass_ ? v : 0.0f;
+    }
     // Cancels the waiting press, arm or restart. MOD's retrigger stays: only a stop or Sync off cancels it.
     void cancelWaiting() { pend_ = {pend_.retrig ? Pending::Retrigger : Pending::None, -1, pend_.retrig}; }
     // Every track of every part empty (idle: and ramped out). The current part first: per sample, it usually answers.
     bool idle() const { return all([](const Track& t) { return t.state == TrackState::Empty && t.gain.v == 0.0f; }); }
     bool allEmpty() const { return all([](const Track& tr) { return tr.state == TrackState::Empty; }); }
-    template <class F> bool all(F f) const {
-        if (!std::all_of(cur(), cur() + kTracks, f)) return false;
-        for (const Part& pt : parts_) if (!std::all_of(pt, pt + kTracks, f)) return false;
+    template <class F> bool all(F f) const {             // plain loops: std::all_of's find_if was a call per sample
+        for (const Track& tr : cur()) if (!f(tr)) return false;
+        for (const Part& pt : parts_) for (const Track& tr : pt) if (!f(tr)) return false;
         return true;
     }
     // A first recording ended without a loop (aborted, cleared, too short): nothing is recorded, so a queued switch
@@ -970,13 +984,13 @@ private:
         tr.fade.left = fadeOut_;
     }
 
-    // Commits the pending ops that owe the playhead (see commit()), then reads it through the track's gain.
-    // An empty track whose ramp-out has ended is no longer heard (its gain also mutes a retrigger's old read, and it has
-    // no writer): its ops and blocks go, the cycle with them. A base undone for redo stays.
+    // Commits the pending ops that owe the playhead (see commit(); with none, no call), then reads it through the track's
+    // gain. An empty track whose ramp-out has ended is no longer heard (its gain also mutes a retrigger's old read, and it
+    // has no writer): its ops and blocks go, the cycle with them. A base undone for redo stays.
     float play(Track& tr) {
-        const float adj = commit(tr);
+        const float adj = tr.nOps ? commit(tr) : 0.0f;
         const float g = tr.gain.next(target(tr), ramp_);
-        if (g != 0.0f) return g * (tr.buf.get(pool_, tr.pos) + adj);
+        if (__builtin_expect(g != 0.0f, 1)) return g * (tr.buf.get(pool_, tr.pos) + adj);
         if (tr.len && tr.state == TrackState::Empty && !tr.baseUndone) drop(tr);
         return 0.0f;
     }
@@ -999,7 +1013,8 @@ private:
     }
     // Applies the pending ops that owe the playhead. Returns what holds back their change during their ramp.
     // A recording onto the loop reads ahead of its writer: silence, as its buffer started empty (startDub()).
-    float commit(Track& tr) {
+    // Out of line, like writeOut(): rare, and kept out of the unrolled per-sample loops.
+    [[gnu::noinline]] float commit(Track& tr) {
         float adj = 0.0f;                                // holds back the ops' change during their ramp
         for (uint32_t k = 0; k < tr.nOps;) {
             Op& op = tr.ops[k];
@@ -1021,7 +1036,7 @@ private:
     }
 
     // The outgoing shares of the input: the first recording's tail and the punch-out fade; returns their sum.
-    float writeOut(Track& tr, float x) {
+    [[gnu::noinline]] float writeOut(Track& tr, float x) {
         float used = 0.0f;
         if (tr.tailEnd) {                                // tail of the first recording, g: 1 -> 0 over T = tailEnd
             if (float* s = sample(tr, tr.tailAt)) *s += x * float(tr.tailEnd - tr.tailAt) / float(tr.tailEnd);
@@ -1060,8 +1075,12 @@ private:
     // Sample i of tr's buffer, writable (see TrackBuf::at). Loops win over undo: a full pool gives up an undone base,
     // then undo layers for it (evict()). nullptr when none is left to give up: memory full (memoryFull()).
     float* sample(Track& tr, uint32_t i) {
-        float* s;
-        while (!(s = tr.buf.at(pool_, i)) && (dropUndoneBase(tr) || evict())) {}
+        float* s = tr.buf.at(pool_, i);
+        return s ? s : makeRoom(tr, i);
+    }
+    [[gnu::noinline]] float* makeRoom(Track& tr, uint32_t i) {   // out of line: sample() runs per sample written
+        float* s = nullptr;
+        while (!s && (dropUndoneBase(tr) || evict())) s = tr.buf.at(pool_, i);
         return s;
     }
     // R3: an undone base is redo only, the oldest redo entry: a refused loop write gives it up whole (its redo layers
@@ -1281,6 +1300,7 @@ private:
         bool fill = true;
         for (const Track& tr : parts_[p]) fill = fill && tr.state == TrackState::Empty;
         part_ = p;
+        cp_ = &parts_[p];
         for (int u = 0; u < kTracks; ++u) {
             Track& tr = cur()[u];
             if (fill) copy(tr, parts_[from][u]);
@@ -1335,6 +1355,7 @@ private:
 
     Part parts_[kParts];
     int part_ = 0, queued_ = -1;     // the current part; a switch queued to its end (-1: none)
+    Part* cp_ = parts_;              // &parts_[part_]
     int out_ = -1;                   // the part a switch left, while it finishes (see finishOut()), else -1
     struct Step { int8_t part = kStepLoop; uint8_t reps = 1; };
     Step steps_[kSteps] = {{0, 1}};  // the song: A x1, then Loop
