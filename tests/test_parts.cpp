@@ -14,9 +14,11 @@ static void switchWaitsForThePartEnd() {
 static void copyIsIndependentAndKeepsOnAndVolume() {
     Rig r; const auto a = recordBase(r, 24000, 0.1f);
     recordBaseOn(r, 1); r.lp.setOn(1, false); r.lp.setVolumeDb(0, -6.0f);
+    r.lp.setOn(2, false); r.lp.setVolumeDb(2, -12.0f);                   // R6: an empty track's settings follow too
     r.lp.pressRec(0); r.feed(sine(330, 0.05f, 24000)); r.lp.pressRec(0); r.silence(4800);   // A: 2 layers on track 0
     r.lp.setPart(1); r.silence(24000);
     CHECK(r.lp.part() == 1 && !r.lp.isOn(1) && r.lp.volumeDb(0) == -6.0f);
+    CHECK(!r.lp.isOn(2) && r.lp.volumeDb(2) == -12.0f);
     CHECK(r.lp.layerCount(0) == 1 && r.lp.canUndo(0) && !r.lp.canRedo(0));
     r.lp.pressRec(0); r.feed(sine(660, 0.05f, 24000)); r.lp.pressRec(0); r.silence(4800);   // B changes
     const auto b = r.settle();
@@ -135,6 +137,39 @@ static void aPartLeftWhileStoppedLetsLReset() {
     r.lp.clearAll(); r.silence(4800);
     CHECK(r.lp.part() == 0 && r.lp.loopLength() == 0 && r.lp.blocksUsed() == 0);
 }
+// M1: a first recording that ends without a loop (aborted, cleared, too short) leaves nothing recorded, so a switch
+// queued during it happens at once.
+static void aFirstRecordingEndingWithoutALoopSwitchesAtOnce() {
+    Rig r; r.lp.pressRec(0); r.feed(sine(220, 0.1f, 12000)); r.lp.setPart(1);
+    r.lp.undo(0); CHECK(r.lp.part() == 1 && r.lp.queuedPart() == -1);                  // aborted
+    r.lp.pressRec(0); r.feed(sine(220, 0.1f, 12000)); r.lp.setPart(2);
+    r.lp.clearTrack(0); CHECK(r.lp.part() == 2 && r.lp.queuedPart() == -1);            // cleared
+    r.lp.pressRec(0); r.feed(sine(220, 0.1f, 1000)); r.lp.setPart(3);
+    r.lp.pressRec(0);                                                                   // under kMinLoopMs: dropped
+    CHECK(r.lp.part() == 3 && r.lp.queuedPart() == -1 && r.lp.loopLength() == 0);
+}
+// M2: Clear All inside a switch's crossfade: the part left keeps ramping out (a freeze would snap it), the part cleared
+// ramps out too, and L then resets in part A.
+static void clearAllInsideTheSwitchCrossfadeDoesNotClick() {
+    Rig r; recordBase(r, 24000, 0.1f); r.silence(4800); recordBaseOn(r, 1, 0.2f, 471.0);   // track 1 mid-wave at the top
+    r.lp.setPart(1); r.silence(24000 - r.lp.position() + 64);                          // 64 samples into the crossfade
+    CHECK(r.lp.part() == 1);
+    const size_t from = r.out.size() - 1;
+    r.lp.clearAll(); r.silence(4800);
+    CHECK(r.lp.part() == 0 && r.lp.loopLength() == 0);
+    CHECK(maxStep(slice(r.out, from, r.out.size())) <= 1.5f * (sineStep(220.0, 0.1f) + sineStep(471.0, 0.2f)));
+}
+// R5: the switch crossfades over the restart's fade-in (kFadeInMs), not kRampMs: past it only the new part sounds.
+static void theSwitchCrossfadesOverTheFadeIn() {
+    Rig r; recordBase(r, 24000, 0.1f);
+    r.lp.setPart(1); r.silence(24000); r.lp.clearTrack(0); r.silence(4800);
+    recordBaseOn(r, 0, 0.2f, 880.0);                                     // B: its own tone
+    r.lp.setPart(0); r.silence(24000 - r.lp.position());                 // the switch back to A, at B's end
+    const auto in = r.capture(24000), steady = r.capture(24000);         // both from A's top
+    const uint32_t f = ouro::msToSamples(ouro::kFadeInMs, 48000.0);
+    CHECK(maxAbsDiff(slice(in, 0, f), slice(steady, 0, f)) > 1e-3f);     // B fading out under A
+    CHECK(maxAbsDiff(slice(in, f, 2000), slice(steady, f, 2000)) < 1e-6f);
+}
 
 int main() {
     switchWaitsForThePartEnd(); copyIsIndependentAndKeepsOnAndVolume(); copyOnEntryAllocatesNothing();
@@ -142,6 +177,7 @@ int main() {
     aRunningTakeClosesAndTheCopyHasItsPunchOut(); noClickAtTheSwitch(); undoOnACopiedTrack(); clearedPartRefillsOnEntry();
     lResetsOnlyWhenEveryPartIsEmpty(); clearAllEmptiesEveryPartAndGoesToA(); anEmptyPartLastsOneLoop();
     modStartKeepsAQueuedSwitch(); aPendingUndoReachesTheCopy(); theSwitchIntoACopyIsSeamless();
-    aPartLeftWhileStoppedLetsLReset();
+    aPartLeftWhileStoppedLetsLReset(); aFirstRecordingEndingWithoutALoopSwitchesAtOnce();
+    clearAllInsideTheSwitchCrossfadeDoesNotClick(); theSwitchCrossfadesOverTheFadeIn();
     REPORT();
 }

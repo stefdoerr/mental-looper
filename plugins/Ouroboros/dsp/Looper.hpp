@@ -260,7 +260,7 @@ public:
         if (tr.state == TrackState::Recording) {         // abort: the track is empty again. None of the take was heard
             tr.state = TrackState::Empty;                // (a recording onto the loop plays ahead of its writer): its
             tr.buf.clear(pool_);                         // blocks go back now
-            if (recTrack_ == t) recTrack_ = -1;
+            if (recTrack_ == t) noFirstLoop();
             return;
         }
         if (tr.state == TrackState::Overdubbing) {
@@ -296,21 +296,23 @@ public:
     void clearTrack(int t) {
         if (!valid(t)) return;
         Track& tr = cur()[t];
-        if (recTrack_ == t) recTrack_ = -1;
         if (armed_ == t) armed_ = -1;
         if (pend_.t == t) cancelWaiting();
         dropLayers(tr);                                  // an op still reading a layer keeps it: the ramp-out is smooth
         if (tr.state == TrackState::Recording) tr.buf.clear(pool_);   // a take none of which was heard (see undo())
         tr.state = TrackState::Empty;
+        if (recTrack_ == t) noFirstLoop();
     }
-    // Every track of every part, and back to part A (the current part ramps out as at a switch). L then resets.
+    // Every track of every part, then part A. The parts still heard (the current one, a switch's outgoing one) ramp out
+    // and A is queued: L's reset (see reset()) goes there; with nothing recorded, at once.
     void clearAll() {
         if (!enabled_) return;
         for (int t = 0; t < kTracks; ++t) clearTrack(t);
-        for (int p = 0; p < kParts; ++p)                 // the others are not heard: the reset frees their blocks
-            for (Track& tr : parts_[p]) if (p != part_) { dropLayers(tr); tr.state = TrackState::Empty; }
-        queued_ = -1;
-        if (part_) switchPart(0);
+        for (int p = 0; p < kParts; ++p)                 // frozen at gain 0, the others give their blocks back now
+            for (Track& tr : parts_[p])
+                if (p != part_) { dropLayers(tr); tr.state = TrackState::Empty; if (p != out_) drop(tr); }
+        queued_ = part_ ? 0 : -1;
+        if (!L_ && queued_ >= 0) switchPart(queued_);
     }
 
     // Parts: kParts sets of kTracks tracks; every per-track call acts on the current part's track t. Part p plays next:
@@ -570,16 +572,17 @@ private:
     float target(const Track& tr) const { return tr.state != TrackState::Empty && tr.on && !bypass_ ? tr.vol : 0.0f; }
     // Cancels the waiting press, arm or restart. MOD's retrigger stays: only a stop or Sync off cancels it.
     void cancelWaiting() { pend_ = {pend_.retrig ? Pending::Retrigger : Pending::None, -1, pend_.retrig}; }
-    bool idle() const {                                  // every track of every part empty and ramped out
-        for (const Part& pt : parts_)
-            for (const Track& tr : pt) if (tr.state != TrackState::Empty || tr.gain.v != 0.0f) return false;
+    // Every track of every part empty (idle: and ramped out). The current part first: per sample, it usually answers.
+    bool idle() const { return all([](const Track& t) { return t.state == TrackState::Empty && t.gain.v == 0.0f; }); }
+    bool allEmpty() const { return all([](const Track& tr) { return tr.state == TrackState::Empty; }); }
+    template <class F> bool all(F f) const {
+        if (!std::all_of(cur(), cur() + kTracks, f)) return false;
+        for (const Part& pt : parts_) if (!std::all_of(pt, pt + kTracks, f)) return false;
         return true;
     }
-    bool allEmpty() const {                              // every track of every part
-        for (const Part& pt : parts_)
-            for (const Track& tr : pt) if (tr.state != TrackState::Empty) return false;
-        return true;
-    }
+    // A first recording ended without a loop (aborted, cleared, too short): nothing is recorded, so a queued switch
+    // happens now, as setPart() does then.
+    void noFirstLoop() { recTrack_ = -1; if (queued_ >= 0) switchPart(queued_); }
     // The longest non-empty track's position; its length goes to len. Lowest index on ties; none longer than L: pos_, L.
     uint32_t longest(uint32_t& len) const {
         uint32_t p = pos_;
@@ -751,7 +754,12 @@ private:
             exact = L == span;
         }
         recTrack_ = -1;
-        if (L < minLoop_) { tr.state = TrackState::Empty; tr.buf.clear(pool_); return false; }   // an accidental double press
+        if (L < minLoop_) {                              // an accidental double press
+            tr.state = TrackState::Empty;
+            tr.buf.clear(pool_);
+            noFirstLoop();
+            return false;
+        }
         const uint32_t D = rec_ > L ? rec_ - L : 0, T = std::min(std::max(msToSamples(tailMs_, sr_), fadeIn_), L / 2);
         for (uint32_t i = 0; i < std::min(D, T); ++i)                 // fold the tail recorded so far (tail 0: 3 ms)
             if (float* s = sample(tr, i)) *s += tr.buf.get(pool_, L + i) * float(T - i) / float(T);
@@ -890,7 +898,7 @@ private:
         bool busy = false;
         for (Track& tr : parts_[out_]) {
             const float adj = commit(tr);
-            const float g = tr.gain.next(0.0f, ramp_);
+            const float g = tr.gain.next(0.0f, fadeIn_);     // under the new part's fade-in (see switchPart())
             if (g != 0.0f) wet += g * (tr.buf.get(pool_, tr.pos) + adj);
             used += writeOut(tr, x);
             if (tr.len && ++tr.pos == tr.len) tr.pos = 0;
@@ -1166,10 +1174,12 @@ private:
     // The switch to part p (see setPart()): at the current part's end (pos_ 0), or at once when stopped or with nothing
     // recorded. A take still running here closes as a press on this sample would; a waiting press or an arm goes (both
     // were on this part). An empty part p is filled from this one (see copy()). Part p's tracks start from their
-    // beginning. Running, they ramp in over kRampMs as this part ramps out under them, a linear crossfade (seamless where
-    // a copy plays the same audio); this part goes on until its punch-out fades end, then freezes (see finishOut()).
+    // beginning. Running, they ramp in over kFadeInMs (the restart's fade-in: a downbeat's attack survives) as this
+    // part ramps out under them, a linear crossfade (seamless where a copy plays the same audio); this part goes on
+    // until its punch-out fades end, then freezes (see finishOut()). The current part is no switch.
     void switchPart(int p) {
         queued_ = -1;
+        if (p == part_) return;                          // finishOut() would play it twice
         for (int u = 0; u < kTracks; ++u) if (writing(cur()[u])) close(u, false);
         armed_ = -1;
         if (pend_.kind == Pending::Press || pend_.kind == Pending::Arm) cancelWaiting();
@@ -1182,20 +1192,22 @@ private:
             Track& tr = cur()[u];
             if (fill) copy(tr, parts_[from][u]);
             if (tr.len) jump(tr, (tr.len - tr.phase) % tr.len);   // the track's beginning: base phase 0
-            tr.gain.snap(0.0f);
+            const float g = target(tr);                  // from 0, as Ramp::next() would start it, over fadeIn_
+            tr.gain = Ramp{0.0f, g, g / float(fadeIn_), fadeIn_};
         }
         if (L_ && tp_ != Transport::Stopped) out_ = from; else freeze(from);
     }
     // d becomes what s plays, as one layer: its audio shared (no allocation; a write copies a block first), its on/off,
     // volume, length, phase and pending ops (each delta with one owner here), and its punch-out fade, which writes the
-    // same into d while s's own goes on (an echo: the input's share counts once, in s). An empty s leaves d as it is.
+    // same into d while s's own goes on (an echo: the input's share counts once, in s). An empty s gives d only its
+    // on/off and volume.
     void copy(Track& d, const Track& s) {
+        d.on = s.on; d.vol = s.vol; d.volDb = s.volDb;
         if (s.state == TrackState::Empty) return;
         drop(d);                                         // a base kept for redo goes: the part counted as empty
         d.buf.shareFrom(pool_, s.buf);
         d.state = TrackState::Playing;
         d.len = s.len; d.pos = s.pos; d.phase = s.phase;
-        d.on = s.on; d.vol = s.vol; d.volDb = s.volDb;
         for (uint32_t k = 0; k < s.nOps; ++k) {
             Op& o = d.ops[k] = s.ops[k];
             o.layer = -1;
