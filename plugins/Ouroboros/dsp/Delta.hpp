@@ -40,6 +40,9 @@ public:
     uint32_t blocks() const { return (length_ + BlockPool::kBlock - 1) / BlockPool::kBlock; }
     bool shares(const Delta& o) const { return head_ >= 0 && head_ == o.head_; }   // copies of one delta's handle
 
+    // One more owner of every block: a copy of this handle that releases on its own (see release()).
+    void retain(BlockPool& p) const { for (int32_t b = head_; b >= 0; b = p.next(b)) p.addRef(b); }
+
     void release(BlockPool& p) {
         for (int32_t b = head_; b >= 0;) { int32_t n = p.next(b); p.free(b); b = n; }
         head_ = tail_ = -1; length_ = 0;

@@ -1,6 +1,7 @@
 #pragma once
 #include "BlockPool.hpp"
 #include <algorithm>
+#include <cassert>
 #include <cstdlib>
 #include <cstring>
 
@@ -16,7 +17,9 @@ public:
     TrackBuf& operator=(const TrackBuf&) = delete;
     ~TrackBuf() { std::free(tab_); }
 
-    bool init(uint32_t cap) {                   // a block table for cap samples, no audio
+    // A block table for cap samples, no audio. Never while it holds blocks (clear() first): their references would leak.
+    bool init(uint32_t cap) {
+        assert(std::none_of(tab_, tab_ + n_, [](int32_t b) { return b >= 0; }));
         std::free(tab_);
         cap_ = cap;
         n_ = cap / kB + (cap % kB != 0);
@@ -44,8 +47,8 @@ public:
     }
 
     // [from, to) reads 0: whole blocks go back to the pool (the last one ends at cap), parts of one are written.
-    // ponytail: a shared block's part needs a copy to write; a full pool leaves it unzeroed (parts only, unreached
-    // before copies exist); drop its block instead if that is ever hit
+    // A shared block's part takes a copy to write. Reached only past a copied track's len (a fold op ending, see Looper),
+    // where nothing is read: a full pool leaving it unzeroed is harmless there.
     void zero(BlockPool& p, uint32_t from, uint32_t to) {
         while (from < to) {
             const uint32_t n = std::min(to - from, kB - from % kB);
@@ -62,6 +65,7 @@ public:
 
     // This buffer becomes a copy of src (same cap) by reference: no allocation.
     void shareFrom(BlockPool& p, const TrackBuf& src) {
+        if (&src == this) return;
         clear(p);
         for (uint32_t k = 0; k < n_; ++k) if ((tab_[k] = src.tab_[k]) >= 0) p.addRef(tab_[k]);
     }

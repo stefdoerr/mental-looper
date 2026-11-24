@@ -32,6 +32,14 @@ static void audioIgnoresTheBudgetUntilThePoolIsFull() {
     a.clear(p); CHECK(p.used() == 0);
 }
 
+// R4: a buffer shared with itself keeps its audio and its blocks.
+static void sharingWithItselfIsANoOp() {
+    ouro::BlockPool p; CHECK(p.reserve(1 << 20));
+    ouro::TrackBuf a; CHECK(a.init(ouro::BlockPool::kBlock)); *a.at(p, 7) = 1.0f;
+    a.shareFrom(p, a); CHECK(a.get(p, 7) == 1.0f && p.used() == 1);
+    a.clear(p); CHECK(p.used() == 0);
+}
+
 static void onlyRecordedAudioUsesThePool() {
     Rig r; const uint32_t before = r.lp.blocksUsed();
     recordBase(r, 48000, 0.1f);
@@ -94,10 +102,19 @@ static void loopsWinOverUndo() {
     CHECK(r.lp.state(1) == TrackState::Playing && r.lp.trackLength(1) == 30 * 48000);
     CHECK(r.lp.undoDepth(0) < depth && r.lp.layerCount(0) == 3);         // given up, still heard
 }
+// R3: an undone base is only redo. A loop's write that finds the pool full gives it up before memory is full.
+static void anUndoneBaseGivesWayToLoops() {
+    Rig r(48000.0, 128, size_t(8) << 20);                               // 512 blocks
+    recordBase(r, 20 * 48000, 0.1f); recordBaseOn(r, 1);                // 235 blocks each
+    r.lp.undo(1); r.silence(4800); CHECK(r.lp.canRedo(1));              // track 1's base, kept for redo
+    recordBaseOn(r, 2);                                                 // needs the blocks track 1 holds
+    CHECK(!r.lp.memoryFull() && r.lp.trackLength(2) == 20 * 48000 && !r.lp.canRedo(1));
+}
 
 int main() {
     trackBufSharesUntilWritten(); audioIgnoresTheBudgetUntilThePoolIsFull();
     onlyRecordedAudioUsesThePool(); noBlocksStayPastTheLoop(); aThrownAwayTakeGivesItsBlocksBack(); aFullPoolClosesTheFirstRecording(); aFullPoolClosesARecordingOntoTheLoop();
     loopsWinOverUndo(); clearingATrackWhileOthersPlayFreesItsBlocks();
+    sharingWithItselfIsANoOp(); anUndoneBaseGivesWayToLoops();
     REPORT();
 }
