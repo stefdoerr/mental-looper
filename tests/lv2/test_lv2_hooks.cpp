@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <atomic>
 #include <chrono>
@@ -18,6 +19,7 @@
 #include "lv2/urid.h"
 #include "alabs-hmi-widgets.h"
 #include "lv2-hmi.h"
+#include "PiecesWidget.hpp"
 #include "../test_util.hpp"
 
 static std::vector<std::string> gUris;
@@ -31,14 +33,14 @@ static LV2_URID mapUri(LV2_URID_Map_Handle, const char* uri)
     return static_cast<LV2_URID>(gUris.size());
 }
 
-struct Draw { ALABS_HMI_Widget widget; uint16_t x, y, w, h; bool nullBits; };
+struct Draw { ALABS_HMI_Widget widget; uint16_t x, y, w, h; bool nullBits; std::vector<uint8_t> bits; };
 static std::vector<Draw> gDraws;
 static std::function<void()> gDuringDraw;  // once, inside draw_bitmap: a host call racing run()
 
 static void drawBitmap(ALABS_HMI_WidgetDraw_Handle, ALABS_HMI_Widget widget,
                        uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t* bits)
 {
-    gDraws.push_back({ widget, x, y, w, h, bits == nullptr });
+    gDraws.push_back({ widget, x, y, w, h, bits == nullptr, bits ? std::vector<uint8_t>(bits, bits + size_t((w + 7) / 8) * h) : std::vector<uint8_t>() });
     if (gDuringDraw) { auto f = gDuringDraw; gDuringDraw = nullptr; f(); }
 }
 
@@ -189,6 +191,39 @@ static void songWidgetShownLeadsToDraw(const LV2_Descriptor* d)
     d->cleanup(h);
 }
 
+// The pieces widget (128 x 37) is drawn whole, and it is the pieces layout: the number rows (the same for any set of full
+// slots; slot 1 is selected at the start) equal renderPiecesWidget's.
+static void piecesWidgetShownLeadsToDraw(const LV2_Descriptor* d)
+{
+    gDraws.clear();
+    LV2_Handle h = d->instantiate(d, 48000, bundleDir.c_str(), fullFeatures);
+    connectAll(d, h);
+    d->activate(h);
+    auto wn = (const ALABS_HMI_WidgetNotification*)d->extension_data(ALABS_HMI__WidgetNotification);
+    CHECK(wn != nullptr);
+    if (wn == nullptr) { d->cleanup(h); return; }
+    ALABS_HMI_WidgetArea area = { sizeof(area), 128, 37, ALABS_HMI_PixelFormat_Mono1 };
+    wn->widget_shown(h, "piece_slots", (ALABS_HMI_Widget)0x6, &area);
+    for (int i = 0; i < 40; ++i)
+        d->run(h, 128);
+    CHECK(!gDraws.empty());
+    if (!gDraws.empty())
+    {
+        const Draw& dr = gDraws[0];
+        CHECK(dr.x == 0 && dr.y == 0 && dr.w == 128 && dr.h == 37 && !dr.nullBits && dr.bits.size() == 16 * 37);
+        uint8_t ref[16 * 37];
+        const ouro::PiecesView pv = { 0, 0, -1, "" };
+        ouro::renderPiecesWidget(pv, 128, 37, ref);
+        bool same = dr.bits.size() == sizeof ref;
+        for (int y = 0; same && y < 37; ++y)
+            if (y < 8 || (y >= 15 && y < 23)) same = std::memcmp(&dr.bits[y * 16], ref + y * 16, 16) == 0;
+        CHECK(same);
+    }
+    wn->widget_hidden(h, (ALABS_HMI_Widget)0x6);
+    d->deactivate(h);
+    d->cleanup(h);
+}
+
 // A host that shows the widget but gave no WidgetDraw feature: nothing to draw with, nothing crashes.
 static void widgetShownWithoutDrawFeature(const LV2_Descriptor* d)
 {
@@ -322,6 +357,7 @@ int main(int argc, char** argv)
     instantiateWithoutFeatures(d);
     widgetShownLeadsToDraw(d);
     songWidgetShownLeadsToDraw(d);
+    piecesWidgetShownLeadsToDraw(d);
     widgetShownWithoutDrawFeature(d);
     addressedRecGetsLabel(d, so.substr(0, so.size() - 3) + ".ttl");
     widgetRedrawsWhenProgressMoves(d, so.substr(0, so.size() - 3) + ".ttl");
