@@ -338,7 +338,6 @@ protected:
         if (changed(kParamThreshold))     fEngine.setThresholdDb(fVal[kParamThreshold]);
         if (changed(kParamLength))        fEngine.setFixedBars(uint32_t(std::max(0L, std::lround(fVal[kParamLength]))));
         if (changed(kParamClickLevel))    fClickGain = std::pow(10.0f, fVal[kParamClickLevel] / 20.0f);
-        if (!on(kParamClick))             fTickPos = kNoTick;   // turned off: silent at once
         fEngine.setBypass(on(kParamBypass));
 
         // Sync = Bars: MOD's bar grid, before the presses below so they see this block's grid, then its play/stop
@@ -499,7 +498,8 @@ private:
     // The Click output: a tick at each beat line followMod found for this block (fClickAt), a running one carried on.
     void renderClick(float* out, uint32_t frames)
     {
-        if (fClickAt < 0.0 && fTickPos == kNoTick) { std::fill(out, out + frames, 0.0f); return; }
+        if (out == nullptr) return;             // not connected (a host may leave a side output off)
+        if (fClickAt < 0.0 && fTickPos == kNoTick) { std::fill(out, out + frames, 0.0f); return; }   // a tick finishes
         double at = fClickAt;
         const size_t len = fTick[0].size();
         for (uint32_t i = 0; i < frames; ++i)

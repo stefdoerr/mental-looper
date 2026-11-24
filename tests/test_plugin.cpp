@@ -496,6 +496,14 @@ static void clickTicksOnModsBeats() {
     fresh(); gT = 0; set(kParamSync, 1); set(kParamClick, 1); set(kParamClickLevel, -20);
     c.clear(); runModClick(true, 10, c);
     CHECK(peakFrom(c, 0, 1200) > 0.09f && peakFrom(c, 0, 1200) < 0.11f);   // Click Level
+    fresh(); gT = 50000; set(kParamSync, 1); set(kParamClick, 1); set(kParamClickLevel, 0);   // MOD starts in beat 3
+    c.clear(); runModClick(true, 600, c);                            // 76800 samples: beats 4, 1, 2
+    const std::vector<size_t> m = tickStarts(c);
+    CHECK(m.size() == 3);
+    if (m.size() == 3) {
+        CHECK(m[0] >= 22000 && m[0] <= 22002 && m[1] >= 46000 && m[1] <= 46002 && m[2] >= 70000 && m[2] <= 70002);
+        CHECK(peakFrom(c, m[0], 1200) < 0.6f && peakFrom(c, m[1], 1200) > 0.9f && peakFrom(c, m[2], 1200) < 0.6f);
+    }
 }
 static void clickIsSilentUnlessOnSyncedAndPlaying() {
     std::vector<float> c;
