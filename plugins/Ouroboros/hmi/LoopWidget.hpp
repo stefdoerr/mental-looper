@@ -50,27 +50,32 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
     if (tall)
     {
         static const char* const names[] = { "--", "REC", "PLAY", "DUB" };   // by TrackState: Empty, Recording, Playing, Overdubbing
-        // Part A with nothing queued and no song keeps the plain "T1" label; otherwise the label is the part letter and the
-        // track ("B1"; the selection frame below shows the track too), and the song position takes the state text's place.
-        const bool partInfo = v.part != 0 || v.queuedPart >= 0 || v.songStep >= 0;
-        char t[3] = { partInfo ? char('A' + v.part) : 'T', char('1' + v.selected), '\0' };
+        // Part letter and track ("A1"); the selection frame below shows the track too.
+        char t[3] = { char('A' + v.part), char('1' + v.selected), '\0' };
         drawText(bits, w, 0, textY, t);
         const char* txt = names[int(v.state[v.selected])];
         if (v.transport == Transport::Stopped) txt = "STOP";
         else if (v.transport == Transport::Stopping) txt = v.blinkOn ? "STOP" : "";
         else if (v.armed[v.selected]) txt = "ARM";
         if (v.waiting) txt = "WAIT";
+        // State slot, highest first: FULL, WAIT/ARM/STOP, REC/DUB, the queued "A>B" (blinking), the song position (instead of PLAY).
+        const TrackState st = v.state[v.selected];
+        const bool special = v.transport != Transport::Running || v.armed[v.selected] || v.waiting;
+        const bool writing = st == TrackState::Recording || st == TrackState::Overdubbing;
         char pos[16];
         int tx = 14;
-        if (v.songStep >= 0 && v.transport == Transport::Running && !v.waiting && !v.armed[v.selected])
-        {
-            std::snprintf(pos, sizeof pos, "%d/%d", v.songStep + 1, v.songLength);
-            txt = pos;
-            const int len = int(std::strlen(pos));
-            if (14 + len * 6 - 1 > w) tx = w - (len * 6 - 1);   // "10/16" is 29 px wide: keeps the whole text in 40 px
-        }
         char sw[4] = { char('A' + v.part), '>', char('A' + v.queuedPart), '\0' };
-        if (v.queuedPart >= 0 && v.queuedPart < kParts && v.blinkOn) txt = sw;
+        if (!special && !writing)
+        {
+            if (v.queuedPart >= 0 && v.queuedPart < kParts && v.blinkOn) txt = sw;
+            else if (v.songStep >= 0 && st == TrackState::Playing)
+            {
+                std::snprintf(pos, sizeof pos, "%d/%d", v.songStep + 1, v.songLength);
+                txt = pos;
+                const int len = int(std::strlen(pos));
+                if (14 + len * 6 - 1 > w) tx = w - (len * 6 - 1);   // "10/16" is 29 px wide: keeps the whole text in 40 px
+            }
+        }
         if (v.memoryFull) txt = "FULL";
         drawText(bits, w, tx, textY, txt);
 

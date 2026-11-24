@@ -150,7 +150,7 @@ static void stateTextNotClipped()
     {
         auto v = view(); v.state[0] = e.s; uint8_t b[1024], ref[1024];
         ouro::renderLoopWidget(v, 40, 37, b);
-        std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 64, 0, 2, "T1"); ouro::drawText(ref, 64, 14, 2, e.txt);
+        std::memset(ref, 0, sizeof ref); ouro::drawText(ref, 64, 0, 2, "A1"); ouro::drawText(ref, 64, 14, 2, e.txt);
         bool same = true;
         for (int y = 0; y < 11; ++y) for (int x = 0; x < 40; ++x) same &= px(b, 40, x, y) == px(ref, 64, x, y);
         CHECK(same);
@@ -418,7 +418,7 @@ static void loopWidgetShowsPartQueuedSongAndFull()
     CHECK(!sameBits(a, b, 5 * 37));
     uint8_t off[1024]; v.blinkOn = false; ouro::renderLoopWidget(v, 40, 37, off);
     CHECK(!sameBits(b, off, 5 * 37));                                 // A>B blinks
-    v = view(); ouro::renderLoopWidget(v, 40, 37, a);
+    v = view(); v.state[0] = TrackState::Playing; ouro::renderLoopWidget(v, 40, 37, a);
     v.songStep = 2; v.songLength = 6; ouro::renderLoopWidget(v, 40, 37, b);
     CHECK(!sameBits(a, b, 5 * 37));
     v.songStep = 3; ouro::renderLoopWidget(v, 40, 37, a);
@@ -429,7 +429,16 @@ static void loopWidgetShowsPartQueuedSongAndFull()
     CHECK(showsText(v, "FULL"));
     v.queuedPart = 1; v.blinkOn = true; CHECK(showsText(v, "FULL"));   // FULL wins over A>B
     v = view(); v.queuedPart = 1; v.blinkOn = true; v.part = 0; CHECK(showsText(v, "A>B"));
-    v = view(); v.songStep = 2; v.songLength = 6; v.transport = ouro::Transport::Running; CHECK(showsText(v, "3/6"));
+    v = view(); v.songStep = 2; v.songLength = 6; v.state[0] = TrackState::Playing; CHECK(showsText(v, "3/6"));   // instead of PLAY
+    v.state[0] = TrackState::Overdubbing; CHECK(showsText(v, "DUB"));                // recording feedback stays visible in song play
+    v.state[0] = TrackState::Recording; v.queuedPart = 1; v.blinkOn = true; CHECK(showsText(v, "REC"));   // REC/DUB beat A>B
+    v.state[0] = TrackState::Playing; CHECK(showsText(v, "A>B"));                    // A>B beats the position
+    v.blinkOn = false; CHECK(showsText(v, "3/6"));                                   // ...and alternates with it
+    v.queuedPart = -1; v.armed[0] = true; CHECK(showsText(v, "ARM"));                // ARM, WAIT and STOP beat the position
+    v.armed[0] = false; v.waiting = true; CHECK(showsText(v, "WAIT"));
+    v.waiting = false; v.transport = ouro::Transport::Stopped; CHECK(showsText(v, "STOP"));
+    v.transport = ouro::Transport::Running; v.state[0] = TrackState::Empty; CHECK(showsText(v, "--"));   // the position replaces PLAY only
+    v.state[0] = TrackState::Playing;
     v.songStep = 9; v.songLength = 16;   // 5 characters still fit in 40 px
     ouro::renderLoopWidget(v, 40, 37, a);
     CHECK(litIn(a, 40, 11, 2, 40, 9) > 0 && litIn(a, 40, 0, 0, 40, 2) == 0);
