@@ -13,9 +13,9 @@
 
 namespace ouro {
 
-enum HmiPort : uint8_t { kHmiRec, kHmiUndo, kHmiOnOff, kHmiVolume, kHmiPortCount };
+enum HmiPort : uint8_t { kHmiRec, kHmiStop, kHmiOnOff, kHmiVolume, kHmiRedo, kHmiPortCount };
 
-struct HmiView { TrackState state; NextAction next; bool canUndo; int selected; bool on; Transport transport; bool armed; bool waiting = false; };   // waiting: the user's press, arm or restart waits for the bar line
+struct HmiView { TrackState state; NextAction next; bool canRedo; int selected; bool on; Transport transport; bool armed; bool waiting = false; };   // waiting: the user's press, arm or restart waits for the bar line
 
 class HmiBridge {
 public:
@@ -64,7 +64,8 @@ private:
     {
         switch (p) {
         case kHmiRec:    return ((int(v.state) * 3 + int(v.next)) * 6 + int(v.transport) * 2 + v.armed) * 2 + v.waiting;
-        case kHmiUndo:   return v.canUndo;
+        case kHmiStop:   return ((v.selected * 3 + (v.state == TrackState::Empty ? 2 : v.transport == Transport::Stopped ? 1 : 0)) * 2 + v.on);
+        case kHmiRedo:   return v.canRedo;
         case kHmiOnOff:  return v.selected * 2 + v.on;
         default:         return v.selected;
         }
@@ -72,7 +73,7 @@ private:
 
     void send(HmiPort p, LV2_HMI_Addressing a, uint32_t caps, const HmiView& v) const
     {
-        char text[16];
+        char text[24];
         const char* label = text;
         switch (p) {
         case kHmiRec:
@@ -91,7 +92,12 @@ private:
                 wc_->set_led_with_blink(wc_->handle, a, col, t, t);
             }
             break;
-        case kHmiUndo:   label = v.canUndo ? "UNDO" : "-"; break;   // ASCII: the Dwarf font has no em dash
+        case kHmiStop:   // empty: a tap does nothing; stopped: a tap starts; else it toggles the track
+            if (v.state == TrackState::Empty) label = "-";
+            else if (v.transport == Transport::Stopped) std::snprintf(text, sizeof text, "PLAY %d", v.selected + 1);
+            else std::snprintf(text, sizeof text, "%s %d", v.on ? "ON" : "OFF", v.selected + 1);
+            break;
+        case kHmiRedo:   label = v.canRedo ? "REDO" : "-"; break;   // ASCII: the Dwarf font has no em dash
         case kHmiOnOff:  std::snprintf(text, sizeof text, "%s %d", v.on ? "ON" : "OFF", v.selected + 1); break;
         default:         std::snprintf(text, sizeof text, "Vol %d", v.selected + 1); break;
         }
@@ -102,7 +108,7 @@ private:
 
     const LV2_HMI_WidgetControl* wc_ = nullptr;
     Slot slot_[kHmiPortCount];
-    int sent_[kHmiPortCount] = {-1, -1, -1, -1};   // audio thread only
+    int sent_[kHmiPortCount] = {-1, -1, -1, -1, -1};   // audio thread only
 };
 
 }  // namespace ouro

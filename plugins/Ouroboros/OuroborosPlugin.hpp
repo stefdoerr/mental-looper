@@ -179,7 +179,8 @@ protected:
         if (lv2Index < kLv2FirstParam) return -1;
         switch (paramFromLv2Index(lv2Index)) {
         case kParamRec:      return ouro::kHmiRec;
-        case kParamStopClear: return ouro::kHmiUndo;
+        case kParamStopClear: return ouro::kHmiStop;
+        case kParamRedo:     return ouro::kHmiRedo;
         case kParamOnOff:    return ouro::kHmiOnOff;
         case kParamVolume:   return ouro::kHmiVolume;
         default:             return -1;
@@ -735,7 +736,7 @@ protected:
         fDrawAcc += frames;
         if (fDrawAcc >= 960) { fDrawAcc %= 960; drawWidgets(); }
 
-        fHmi.update({fEngine.state(sel), fEngine.nextAction(sel), fEngine.canUndo(sel), sel, fEngine.isOn(sel),
+        fHmi.update({fEngine.state(sel), fEngine.nextAction(sel), fEngine.canRedo(sel), sel, fEngine.isOn(sel),
                      fEngine.transport(), fEngine.armedTrack() == sel, fEngine.userWaiting(sel)});
     }
 

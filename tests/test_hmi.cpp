@@ -15,10 +15,10 @@ static LV2_HMI_WidgetControl gFake = { nullptr, sizeof(LV2_HMI_WidgetControl), l
 static LV2_HMI_Addressing A1 = (LV2_HMI_Addressing)0x1, A2 = (LV2_HMI_Addressing)0x2, A3 = (LV2_HMI_Addressing)0x3;
 static const uint32_t kAllCaps = LV2_HMI_AddressingCapability_LED | LV2_HMI_AddressingCapability_Label | LV2_HMI_AddressingCapability_Value;
 
-static ouro::HmiView view(ouro::TrackState s, ouro::NextAction n, bool undo = false, int sel = 0, bool on = true,
+static ouro::HmiView view(ouro::TrackState s, ouro::NextAction n, bool redo = false, int sel = 0, bool on = true,
                             ouro::Transport tp = ouro::Transport::Running, bool armed = false, bool waiting = false)
 {
-    return { s, n, undo, sel, on, tp, armed, waiting };
+    return { s, n, redo, sel, on, tp, armed, waiting };
 }
 static std::string lastLabel(LV2_HMI_Addressing a)
 {
@@ -90,16 +90,19 @@ static void labelsSentOnlyOnChange()
     CHECK(lastLed(A1).colour == LV2_HMI_LED_Colour_Green && lastLed(A1).on == LV2_HMI_LED_Blink_Mid);
 }
 
-static void undoLabelShowsAvailability()
-{
-    gCalls.clear();
-    ouro::HmiBridge b; b.setFeature(&gFake);
-    b.addressed(ouro::kHmiUndo, A1, kAllCaps);
-    b.update(view(ouro::TrackState::Empty, ouro::NextAction::Rec, false));
-    CHECK(lastLabel(A1) == "-");
-    b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, true));
-    CHECK(lastLabel(A1) == "UNDO");
+static void stopLabelFollowsTheSelectedTrack() {
+    gCalls.clear(); ouro::HmiBridge b; b.setFeature(&gFake); b.addressed(ouro::kHmiStop, A1, kAllCaps);
+    b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, false, 1, true));  CHECK(lastLabel(A1) == "ON 2");
+    b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, false, 1, false)); CHECK(lastLabel(A1) == "OFF 2");
+    b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, false, 1, true, ouro::Transport::Stopped));
+    CHECK(lastLabel(A1) == "PLAY 2");
+    b.update(view(ouro::TrackState::Empty, ouro::NextAction::Rec, false, 1, true)); CHECK(lastLabel(A1) == "-");
     CHECK(count("led") == 0);
+}
+static void redoLabelShowsAvailability() {
+    gCalls.clear(); ouro::HmiBridge b; b.setFeature(&gFake); b.addressed(ouro::kHmiRedo, A1, kAllCaps);
+    b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, false)); CHECK(lastLabel(A1) == "-");
+    b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, true));  CHECK(lastLabel(A1) == "REDO");
 }
 
 static void knobLabelsFollowTrack()
@@ -158,7 +161,8 @@ int main()
 {
     labelsSentOnlyOnChange();
     recLabelShowsArmAndStop(); waitingBlinksFastInTheComingColour();
-    undoLabelShowsAvailability();
+    stopLabelFollowsTheSelectedTrack();
+    redoLabelShowsAvailability();
     knobLabelsFollowTrack();
     readdressResends();
     capsRespected();
