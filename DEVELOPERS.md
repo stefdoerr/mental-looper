@@ -74,7 +74,7 @@ before publishing. See
 │   ├── modgui/                    - MOD pedalboard GUI (HTML/CSS/JS, knob sprite, screenshot)
 │   ├── modgui.ttl                 - MOD GUI declaration
 │   └── Makefile                   - DPF inner build glue (BETA=1 retags here)
-├── docs/manual/                   - one-page PDF manual (HTML source + generated PDF)
+├── docs/manual/                   - PDF manual (HTML source + generated PDF)
 ├── tests/                         - host-less DSP tests (`make test`), LV2 host tests (`make test-lv2`)
 ├── patches/                       - the DPF patch (see above)
 ├── dpf/                           - DISTRHO Plugin Framework (git submodule)
