@@ -63,8 +63,8 @@ inline std::string piecesDir() {
     const char* h = getenv("HOME");
     if (e && *e) base = e;
     else if (isDirectory("/data/user-files")) base = "/data/user-files";
-    else base = std::string(h ? h : ".") + "/.ouroboros";
-    return base + "/Audio Loops/Ouroboros";
+    else base = std::string(h ? h : ".") + "/.mental-looper";
+    return base + "/Audio Loops/Mental Looper";
 #endif
 }
 inline std::string slotDir(const std::string& root, int slot) {

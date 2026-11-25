@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Renders screenshot-ouroboros.png (and thumbnail-ouroboros.png) via headless Chrome, so it matches mod-ui's rendering
+Renders screenshot-mental-looper.png (and thumbnail-mental-looper.png) via headless Chrome, so it matches mod-ui's rendering
 of the pedal: bundled fonts, the baked title and head, real CSS. Also the page tests/test_modgui_face.py drives.
 
 Pipeline: resolve the Mustache tokens mod-ui fills at runtime, point every /resources/ URL at the local files, drop
@@ -8,7 +8,7 @@ the audio port loops (the jacks hang outside the frame), mirror mod-ui's forced 
 window.mlFace, then run a pose (start and change events, as mod-ui sends them) and screenshot.
 
 Run (make screenshot):
-    CHROME=google-chrome uv run --quiet --with playwright python3 plugins/Ouroboros/modgui/render_screenshot.py
+    CHROME=google-chrome uv run --quiet --with playwright python3 plugins/MentalLooper/modgui/render_screenshot.py
 """
 
 import os
@@ -17,11 +17,11 @@ import shutil
 import tempfile
 
 HERE   = os.path.dirname(os.path.abspath(__file__))
-ICON   = os.path.join(HERE, "icon-ouroboros.html")
-STYLE  = os.path.join(HERE, "stylesheet-ouroboros.css")
-SCRIPT = os.path.join(HERE, "script-ouroboros.js")
-OUT    = os.path.join(HERE, "screenshot-ouroboros.png")
-THUMB  = os.path.join(HERE, "thumbnail-ouroboros.png")
+ICON   = os.path.join(HERE, "icon-mental-looper.html")
+STYLE  = os.path.join(HERE, "stylesheet-mental-looper.css")
+SCRIPT = os.path.join(HERE, "script-mental-looper.js")
+OUT    = os.path.join(HERE, "screenshot-mental-looper.png")
+THUMB  = os.path.join(HERE, "thumbnail-mental-looper.png")
 
 WIDTH, HEIGHT = 520, 420
 SCALE = 2          # 2x: crisper on HiDPI screens and in the printed manual

@@ -2,12 +2,12 @@
 @prefix modgui: <http://moddevices.com/ns/modgui#> .
 @prefix rdfs:   <http://www.w3.org/2000/01/rdf-schema#> .
 
-<http://ouroboros.local/plugins/ouroboros>
+<http://mental-looper.local/plugins/mental-looper>
     modgui:gui [
         modgui:resourcesDirectory <modgui> ;
-        modgui:iconTemplate       <modgui/icon-ouroboros.html> ;
-        modgui:stylesheet         <modgui/stylesheet-ouroboros.css> ;
-        modgui:javascript         <modgui/script-ouroboros.js> ;
+        modgui:iconTemplate       <modgui/icon-mental-looper.html> ;
+        modgui:stylesheet         <modgui/stylesheet-mental-looper.css> ;
+        modgui:javascript         <modgui/script-mental-looper.js> ;
         # Beginner PDF manual — when declared, mod-ui shows a "documentation"
         # button in the plugin info dialog. The Makefile's modgui target
         # copies docs/manual/<plugin>-manual.pdf into the bundle under this
@@ -17,8 +17,8 @@
         # plugin scanner segfaults at startup when a modgui omits them (see
         # "Screenshots — REQUIRED" in INSTRUCTIONS.md). Regenerate them with
         # modgui/render_screenshot.py when the pedal layout changes.
-        modgui:screenshot         <modgui/screenshot-ouroboros.png> ;
-        modgui:thumbnail          <modgui/thumbnail-ouroboros.png> ;
+        modgui:screenshot         <modgui/screenshot-mental-looper.png> ;
+        modgui:thumbnail          <modgui/thumbnail-mental-looper.png> ;
 
         # Mustache tokens MOD-UI substitutes at render time. `brand` and
         # `label` are the strings shown on the pedal frame; `model` and
@@ -26,7 +26,7 @@
         # / `knob` pick built-in palettes and knob sprites — or you can
         # override them with the custom CSS / sprite in this directory.
         modgui:brand "Stefan" ;
-        modgui:label "Ouroboros" ;
+        modgui:label "Mental Looper" ;
         # `model` + `panel` + `color` + `knob` pick MOD-UI's built-in
         # skins for the pedal frame and knobs. Swap any of these strings
         # to retheme — see MOD-UI's pedals.css / knobs.css for the full
@@ -54,7 +54,7 @@
         modgui:port [ lv2:symbol "part" ; lv2:name "Part" ] ;
         modgui:port [ lv2:symbol "song" ; lv2:name "Song" ] ;
 
-        # The face's outputs (OuroborosPlugin.hpp, hmi/FaceView.hpp): mod-ui forwards an output to the face script as
+        # The face's outputs (MentalLooperPlugin.hpp, hmi/FaceView.hpp): mod-ui forwards an output to the face script as
         # a change event only when it is listed here.
         modgui:monitoredOutputs [ lv2:symbol "progress" ] , [ lv2:symbol "progress_loops" ] , [ lv2:symbol "looper" ] ,
                                 [ lv2:symbol "take_secs" ] , [ lv2:symbol "song_step" ]

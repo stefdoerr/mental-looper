@@ -1,12 +1,12 @@
 <!--
-  Mental Looper face (still named Ouroboros in MOD's lists until the rename).
+  Mental Looper face.
   Design: docs/superpowers/specs/2026-11-25-mental-looper-face-design.md; the mockup next to it is the reference for
   every pixel value.
 
   - Every selector in the stylesheet carries {{{cns}}}, and the root here does too, so a stable and a beta copy on one
     page can't restyle each other. No id= attributes: two pedals on a page would share them.
   - The head between the ml-head markers is baked by generate_face.py (make face-assets): don't edit it by hand.
-  - script-ouroboros.js sets the state classes (ml-st-0..5 from the looper output, ml-off when bypassed, ml-rec-on)
+  - script-mental-looper.js sets the state classes (ml-st-0..5 from the looper output, ml-off when bypassed, ml-rec-on)
     and writes the ports. The markup below is the pose before it runs: nothing recorded, track 1, part A, 0 dB, the
     default song.
   - The beta build's Makefile adds BETA to the fine print.

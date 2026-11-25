@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Regression guard for the MOD pedal face (plugins/Ouroboros/modgui/), in the style of ~/Fun/boreas's.
+Regression guard for the MOD pedal face (plugins/MentalLooper/modgui/), in the style of ~/Fun/boreas's.
 
-mod-ui and script-ouroboros.js find every control by its mod-role / mod-port-symbol / data-* attributes, and mod-ui's
+mod-ui and script-mental-looper.js find every control by its mod-role / mod-port-symbol / data-* attributes, and mod-ui's
 own CSS has traps a restyle walks into (forced fonts, stylesheets that outlive their plugin version, a z-index-20
 footswitch, a shadow on the first child div). This pins all of that, plus the baked head and the static defaults the
 face shows before its script runs.
@@ -15,14 +15,14 @@ import re
 import sys
 
 ROOT   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PLUGIN = os.path.join(ROOT, "plugins", "Ouroboros")
+PLUGIN = os.path.join(ROOT, "plugins", "MentalLooper")
 MODGUI = os.path.join(PLUGIN, "modgui")
 read   = lambda f: open(os.path.join(MODGUI, f), encoding="utf-8").read()
-html   = read("icon-ouroboros.html")
-js     = read("script-ouroboros.js")
+html   = read("icon-mental-looper.html")
+js     = read("script-mental-looper.js")
 ttl    = open(os.path.join(PLUGIN, "modgui.ttl"), encoding="utf-8").read()
 # The stylesheet is a Mustache template: swap {{{cns}}}/{{{ns}}} out so their braces don't confuse the rule parser.
-css    = re.sub(r"/\*.*?\*/", "", read("stylesheet-ouroboros.css"), flags=re.DOTALL) \
+css    = re.sub(r"/\*.*?\*/", "", read("stylesheet-mental-looper.css"), flags=re.DOTALL) \
            .replace("{{{cns}}}", "__CNS__").replace("{{{ns}}}", "")
 SCOPE  = ".ml-pedal__CNS__"
 
@@ -170,7 +170,7 @@ def test_script_hooks():
 
 def test_screenshot_has_alpha():
     # RGBA (colour type 6), so the rounded corners sit on MOD's dark dialogs without a white frame.
-    for f in ("screenshot-ouroboros.png", "thumbnail-ouroboros.png"):
+    for f in ("screenshot-mental-looper.png", "thumbnail-mental-looper.png"):
         png = open(os.path.join(MODGUI, f), "rb").read(32)
         assert png[:8] == b"\x89PNG\r\n\x1a\n" and png[25] == 6, f"{f}: PNG colour type {png[25]} (want 6 = RGBA)"
 

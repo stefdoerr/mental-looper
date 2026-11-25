@@ -6,11 +6,11 @@ mockup next to it is the reference for every shape):
   fonts()  Anton and Archivo (SIL OFL) from the google/fonts repo, subset to woff2 in fonts/, with their licences.
   title()  "MENTAL LOOPER" in cut-out letters as outlines in face/title.svg: the mockup's ransom() with seed 11 and the
            Fluoro looks, so the face ships no fonts for it.
-  head()   the Mohawk head as inline SVG between the <!-- ml-head:begin/end --> markers of icon-ouroboros.html: the
+  head()   the Mohawk head as inline SVG between the <!-- ml-head:begin/end --> markers of icon-mental-looper.html: the
            mockup's spiral(), hairPath() and mouth(o, 'gap', 6), baked for every state (no ids: two pedals share a page).
 
 Fonts are downloaded into build/face-fonts/ (not committed). Run from the repo root:
-    make face-assets     (uv run --with fonttools --with brotli python3 plugins/Ouroboros/modgui/generate_face.py)
+    make face-assets     (uv run --with fonttools --with brotli python3 plugins/MentalLooper/modgui/generate_face.py)
 """
 
 import math
@@ -224,7 +224,7 @@ def head_svg():
     return "\n".join(s)
 
 
-def head(template=os.path.join(HERE, "icon-ouroboros.html")):
+def head(template=os.path.join(HERE, "icon-mental-looper.html")):
     src = open(template, encoding="utf-8").read()
     m = re.search(r"(<!-- ml-head:begin -->)(.*?)([ \t]*<!-- ml-head:end -->)", src, re.DOTALL)
     assert m, "the icon has no <!-- ml-head:begin/end --> markers"

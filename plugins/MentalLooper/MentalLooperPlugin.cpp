@@ -1,19 +1,19 @@
-#include "OuroborosPlugin.hpp"
+#include "MentalLooperPlugin.hpp"
 
 START_NAMESPACE_DISTRHO
 
 Plugin* createPlugin()
 {
-    return new OuroborosPlugin();
+    return new MentalLooperPlugin();
 }
 
 // LV2 extension data (patches/dpf-lv2-hooks.patch): the MOD HMI and aLabs
 // widget notifications, forwarded to the instance. Never called for VST3/CLAP.
 static void* (*sInstanceOf)(void* lv2Handle) = nullptr;
 
-static OuroborosPlugin* self(LV2_Handle h)
+static MentalLooperPlugin* self(LV2_Handle h)
 {
-    return static_cast<OuroborosPlugin*>(static_cast<Plugin*>(sInstanceOf(h)));
+    return static_cast<MentalLooperPlugin*>(static_cast<Plugin*>(sInstanceOf(h)));
 }
 
 const void* d_lv2PluginExtensionData(const char* uri, void* (*instanceOf)(void* lv2Handle))

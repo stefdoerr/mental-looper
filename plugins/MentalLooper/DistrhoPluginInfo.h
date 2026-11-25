@@ -1,11 +1,11 @@
 /*
- * Ouroboros — DPF plugin info header.
+ * Mental Looper — DPF plugin info header.
  *
  * Single source of truth for the plugin's LV2 identity. Change every
- * `ouroboros` string here AND the matching values in the top-level
+ * `mental-looper` string here AND the matching values in the top-level
  * Makefile (PLUGIN, BRAND, LABEL, PLUGIN_URI_BASE) when forking.
  *
- * BETA build: pass -DOUROBOROS_BETA on the command line (top-level
+ * BETA build: pass -DMENTAL_LOOPER_BETA on the command line (top-level
  * Makefile does this when BETA=1) to get a side-by-side build with a
  * distinct LV2 URI, bundle name, label, and DPF unique-id — installs
  * alongside the stable plugin for A/B testing.
@@ -14,29 +14,29 @@
 #ifndef DISTRHO_PLUGIN_INFO_H_INCLUDED
 #define DISTRHO_PLUGIN_INFO_H_INCLUDED
 
-#ifdef OUROBOROS_BETA
+#ifdef MENTAL_LOOPER_BETA
 #define DISTRHO_PLUGIN_BRAND   "Stefan"
-#define DISTRHO_PLUGIN_NAME    "Ouroboros (Beta)"
-#define DISTRHO_PLUGIN_URI     "http://ouroboros.local/plugins/ouroboros-beta"
-#define DISTRHO_PLUGIN_CLAP_ID "local.ouroboros.ouroboros-beta"
+#define DISTRHO_PLUGIN_NAME    "Mental Looper (Beta)"
+#define DISTRHO_PLUGIN_URI     "http://mental-looper.local/plugins/mental-looper-beta"
+#define DISTRHO_PLUGIN_CLAP_ID "local.mental-looper.mental-looper-beta"
 // 4-char identifiers — must be unique within your set of plugins. DPF
 // packs them into 32-bit ints (d_cconst). The beta gets distinct codes
 // so DAWs / hosts don't confuse it with the stable plugin's state.
-#define DISTRHO_PLUGIN_BRAND_ID  OurB
-#define DISTRHO_PLUGIN_UNIQUE_ID dOuB
+#define DISTRHO_PLUGIN_BRAND_ID  MeLB
+#define DISTRHO_PLUGIN_UNIQUE_ID dMeB
 #else
 #define DISTRHO_PLUGIN_BRAND   "Stefan"
-#define DISTRHO_PLUGIN_NAME    "Ouroboros"
-#define DISTRHO_PLUGIN_URI     "http://ouroboros.local/plugins/ouroboros"
-#define DISTRHO_PLUGIN_CLAP_ID "local.ouroboros.ouroboros"
-#define DISTRHO_PLUGIN_BRAND_ID  Ouro
-#define DISTRHO_PLUGIN_UNIQUE_ID dOur
+#define DISTRHO_PLUGIN_NAME    "Mental Looper"
+#define DISTRHO_PLUGIN_URI     "http://mental-looper.local/plugins/mental-looper"
+#define DISTRHO_PLUGIN_CLAP_ID "local.mental-looper.mental-looper"
+#define DISTRHO_PLUGIN_BRAND_ID  MeLo
+#define DISTRHO_PLUGIN_UNIQUE_ID dMeL
 #endif
 
 // Real project homepage — hosts surface it (MOD's info dialog links its
 // "See online" button here). The LV2 URI above is just an identifier, not
 // a web page; returning it gives users a dead link. Change when forking.
-#define PLUGIN_HOMEPAGE "https://github.com/stefdoerr/ouroboros"
+#define PLUGIN_HOMEPAGE "https://github.com/stefdoerr/mental-looper"
 
 // LV2 plugin class -> the "Category" shown in MOD's plugin info / store.
 // Without it the plugin shows "Category: None". Pick the class matching

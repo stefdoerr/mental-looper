@@ -99,7 +99,7 @@ static void extensionDataForwarded(const LV2_Descriptor* d)
 {
     CHECK(d->extension_data(LV2_HMI__PluginNotification) != nullptr);
     CHECK(d->extension_data(ALABS_HMI__WidgetNotification) != nullptr);
-    CHECK(d->extension_data("urn:ouroboros:nothing") == nullptr);
+    CHECK(d->extension_data("urn:mental-looper:nothing") == nullptr);
 }
 
 static void instantiateWithoutFeatures(const LV2_Descriptor* d)

@@ -1,19 +1,19 @@
-# Ouroboros — build & release reference
+# Mental Looper — build & release reference
 
-Everything for building, cross-compiling, testing, and publishing Ouroboros. New here?
+Everything for building, cross-compiling, testing, and publishing Mental Looper. New here?
 Start with the [README](README.md#install).
 
 ## Build targets
 
 | Command                       | What it does |
 |-------------------------------|--------------|
-| `make`                        | Build `bin/ouroboros.{lv2,vst3,clap}` (host toolchain) |
-| `make beta`                   | Build `bin/ouroboros-beta.lv2` (side-by-side variant) |
+| `make`                        | Build `bin/mental-looper.{lv2,vst3,clap}` (host toolchain) |
+| `make beta`                   | Build `bin/mental-looper-beta.lv2` (side-by-side variant) |
 | `./install.sh`                | Copy to MOD Desktop's user-plugin dir |
 | `BETA=1 ./install.sh`         | Install the beta variant |
 | `make install`                | Copy to `/usr/lib/lv2/` (use `sudo`) |
 | `make dwarf-image`            | One-time: build aarch64 cross-toolchain image (~30-60 min) |
-| `make dwarf-build`            | Cross-compile → `build/dwarf/ouroboros.lv2` (~10 s) |
+| `make dwarf-build`            | Cross-compile → `build/dwarf/mental-looper.lv2` (~10 s) |
 | `make dwarf-deploy`           | scp the bundle to a connected Dwarf + restart services |
 | `make dwarf`                  | Cross-build + deploy in one step |
 | `make test`                   | Build + run the DSP regression tests in `tests/` under ASAN |
@@ -43,14 +43,14 @@ build target that compiles DPF code first runs `make dpf-patch`, which applies
 `d_nextLv2Features` (the host's features, non-null only inside the `Plugin` constructor
 of an LV2 build) and, with `DISTRHO_PLUGIN_WANT_LV2_EXTENSION_DATA`, forwards unknown
 `extension_data()` URIs to the plugin's `d_lv2PluginExtensionData()`. The vendored
-headers live in `plugins/Ouroboros/hmi/`, the matching TTL lines in
-`plugins/Ouroboros/hmi.ttl.in`, and `make test-lv2` checks it all with a fake LV2 host.
+headers live in `plugins/MentalLooper/hmi/`, the matching TTL lines in
+`plugins/MentalLooper/hmi.ttl.in`, and `make test-lv2` checks it all with a fake LV2 host.
 To change the patch, edit the files under `dpf/` and run
 `git -C dpf diff > patches/dpf-lv2-hooks.patch`.
 
 ## Publishing to Patchstorage
 
-Ouroboros also wires up publishing to [patchstorage.com](https://patchstorage.com)'s
+Mental Looper also wires up publishing to [patchstorage.com](https://patchstorage.com)'s
 LV2-plugins platform (`linux-amd64`, `rpi-aarch64`, and `patchbox-os-arm32` targets):
 
 - `make patchstorage-build` — cross-build all three bundles
@@ -66,8 +66,8 @@ before publishing. See
 
 ```
 .
-├── plugins/Ouroboros/             - the DPF plugin
-│   ├── OuroborosPlugin.{hpp,cpp}  - plugin class, parameters (frozen port list), HMI glue
+├── plugins/MentalLooper/             - the DPF plugin
+│   ├── MentalLooperPlugin.{hpp,cpp}  - plugin class, parameters (frozen port list), HMI glue
 │   ├── dsp/                       - header-only looper engine (loop, deltas, block pool)
 │   ├── hmi/, hmi.ttl.in           - vendored MOD HMI / aLabs widget headers + TTL lines
 │   ├── DistrhoPluginInfo.h        - LV2 identity (stable + beta)

@@ -4,7 +4,7 @@ You are working in a **MOD plugin template repository**. Your job is
 typically one of:
 
 1. **Rename the template** to a fresh plugin name for the user.
-2. **Implement DSP** (replace `OuroborosPlugin.cpp`'s passthrough with
+2. **Implement DSP** (replace `MentalLooperPlugin.cpp`'s passthrough with
    real audio processing the user describes).
 3. **Add parameters / a modgui layout** that exposes the DSP knobs. Once
    there are more than a handful, section them with port groups ("Port
@@ -25,7 +25,7 @@ wrong-looking build with no error message if you trip them.
 `dpf/Makefile.base.mk` (around line 347) assigns `BUILD_CXX_FLAGS = …`
 unconditionally, then appends `$(CXXFLAGS)` at the end. **User-defined
 `-D…` macros must go through `CXXFLAGS`, not `BUILD_CXX_FLAGS`.** The
-template's inner Makefile already does this for `OUROBOROS_BETA=1`. If
+template's inner Makefile already does this for `MENTAL_LOOPER_BETA=1`. If
 you add another conditional compile flag, follow the same pattern.
 
 ### `lv2_ttl_generator` only works on the host architecture
@@ -57,9 +57,9 @@ the TTL stays stale and the new ports won't show. Always re-run the
 top-level `make` after parameter changes.
 
 ### Renaming a parameter requires three places to update
-1. Inner `OuroborosPlugin.cpp` — the `Parameter.symbol` in `initParameter()`
+1. Inner `MentalLooperPlugin.cpp` — the `Parameter.symbol` in `initParameter()`
 2. `modgui.ttl` — the `lv2:symbol` for that port
-3. `modgui/icon-ouroboros.html` — `mod-port-symbol="..."` on the bound
+3. `modgui/icon-mental-looper.html` — `mod-port-symbol="..."` on the bound
    widget
 
 If any one is out of sync, MOD-UI will log "No such symbol: ..." and
@@ -257,7 +257,7 @@ CI is only the release conveyor for the portable / cross-platform binaries.
 
 When the user describes an effect, these patterns are commonly needed.
 Apart from the in-plugin bypass, **none of them are pre-installed** in this
-template's gain-stage origin; Ouroboros's `OuroborosPlugin.cpp` is a looper. Add what you need.
+template's gain-stage origin; Mental Looper's `MentalLooperPlugin.cpp` is a looper. Add what you need.
 
 ### Precompute everything you can at load time — NEVER on the audio thread
 `run()` must do as little as possible. **Anything whose result does not depend
@@ -436,7 +436,7 @@ control values reach the plugin with the first `run()`, so in `activate()`
 the parameters still hold the constructor defaults. A smoother initialised
 there ramps audibly from the default to the saved value on every pedalboard
 load. Set a flag in `activate()` and jump current = target at the top of the
-first `run()` (see `fSnap` in `OuroborosPlugin.cpp`).
+first `run()` (see `fSnap` in `MentalLooperPlugin.cpp`).
 
 ### Denormal protection
 Feedback loops at long decay produce denormalized floats that are
@@ -651,7 +651,7 @@ ships a transparent one, `modgui/knobs/clear.png` (horizontal film-strip,
 size and `background-size` whose height equals the box height (frames are
 square, so MOD-UI counts them correctly):
 ```css
-.ouroboros-pedal .mod-knob-image {
+.mental-looper-pedal .mod-knob-image {
     width: 64px;
     height: 64px;
     margin: 0 auto;
@@ -708,14 +708,14 @@ A clean exit means every installed plugin's modgui is well-formed.
 ## Customising the modgui look
 
 The template ships with MOD-UI's default skin for the frame, brand
-text, bypass light, footswitch, and knob — `stylesheet-ouroboros.css`
+text, bypass light, footswitch, and knob — `stylesheet-mental-looper.css`
 only POSITIONS those elements; MOD-UI provides their visuals based on
 the `modgui:model` / `modgui:panel` / `modgui:color` / `modgui:knob`
 strings in `modgui.ttl`. To go custom, override the relevant rule.
 
 **Custom pedal frame:**
 ```css
-.ouroboros-pedal {
+.mental-looper-pedal {
     border-radius: 14px;
     background:
         radial-gradient(ellipse at 20% 0%, rgba(255, 200, 120, 0.18), transparent 60%),
@@ -731,14 +731,14 @@ strings in `modgui.ttl`. To go custom, override the relevant rule.
 
 **Custom brand / label text:**
 ```css
-.ouroboros-pedal .mod-plugin-brand h1 {
+.mental-looper-pedal .mod-plugin-brand h1 {
     margin: 0;
     font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
     color: rgba(245, 217, 154, 0.7);
 }
-.ouroboros-pedal .mod-plugin-name h1 {
+.mental-looper-pedal .mod-plugin-name h1 {
     margin: 0;
     font-size: 20px;
     letter-spacing: 0.18em;
@@ -757,7 +757,7 @@ strings in `modgui.ttl`. To go custom, override the relevant rule.
    (height == box height). A custom pedal frame REQUIRES this or the knobs
    break — see "Custom pedal frames MUST ship their own knob sprite" above:
    ```css
-   .ouroboros-pedal .mod-knob-image {
+   .mental-looper-pedal .mod-knob-image {
        width: 64px; height: 64px; margin: 0 auto;
        background-image: url(/resources/knobs/<name>.png{{{ns}}});
        background-repeat: no-repeat;
@@ -769,20 +769,20 @@ appends; keep it in every resource URL.
 
 **Custom bypass light + footswitch** (drawn entirely in CSS):
 ```css
-.ouroboros-pedal .mod-light {
+.mental-looper-pedal .mod-light {
     width: 14px; height: 14px;
     border-radius: 50%;
     background: #401a09;
     border: 1px solid rgba(0, 0, 0, 0.7);
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
 }
-.ouroboros-pedal .mod-light.on {
+.mental-looper-pedal .mod-light.on {
     background: radial-gradient(circle at 30% 30%, #ffd55a, #d27a14 70%, #6e3a04);
     box-shadow:
         inset 0 1px 2px rgba(0, 0, 0, 0.3),
         0 0 8px rgba(255, 180, 60, 0.7);
 }
-.ouroboros-pedal .mod-footswitch {
+.mental-looper-pedal .mod-footswitch {
     width: 24px; height: 24px;
     border-radius: 50%;
     background: linear-gradient(180deg, #4a2a18 0%, #281407 100%);
@@ -871,7 +871,7 @@ and `dpf/distrho/src/DistrhoPlugin.cpp`.
 ## User manual (PDF)
 
 Every plugin ships a beginner-facing PDF manual as a GitHub release asset.
-`docs/manual/ouroboros-manual.html` is a working, annotated demo — read its
+`docs/manual/mental-looper-manual.html` is a working, annotated demo — read its
 HTML comments before writing one; they carry the conventions inline.
 
 ### How it's built and released
@@ -928,7 +928,7 @@ HTML comments before writing one; they carry the conventions inline.
 1. **Read INSTRUCTIONS.md** (this file) and **`Makefile`** before touching
    the build system or modgui. The patterns and gotchas above will
    save you reverse-engineering them.
-2. **For DSP work:** edit `plugins/Ouroboros/OuroborosPlugin.cpp`. Add
+2. **For DSP work:** edit `plugins/MentalLooper/MentalLooperPlugin.cpp`. Add
    parameters via the `ParamIndex` enum (above `kParamBypass`, see
    "In-plugin bypass") and `initParameter()`. Echo
    them in `getParameterValue()` / `setParameterValue()`. Update

@@ -1,5 +1,5 @@
 /*
- * Ouroboros — 4-track looper LV2 plugin for the MOD Dwarf.
+ * Mental Looper — 4-track looper LV2 plugin for the MOD Dwarf.
  * Mono in / mono out. The plugin maps ports and footswitch gestures onto the
  * engine (dsp/Looper.hpp); it makes no DSP decisions of its own.
  */
@@ -86,10 +86,10 @@ enum ParamIndex {
 
 enum GroupId { kGroupPerform = 0, kGroupTracks, kGroupSettings, kGroupSong, kGroupPieces };
 
-class OuroborosPlugin : public Plugin
+class MentalLooperPlugin : public Plugin
 {
 public:
-    OuroborosPlugin() : Plugin(kNumParams, 0, 0)
+    MentalLooperPlugin() : Plugin(kNumParams, 0, 0)
     {
         for (uint32_t i = 0; i < kNumParams; ++i)
         {
@@ -110,7 +110,7 @@ public:
             }
     }
 
-    ~OuroborosPlugin() override { haltPieces(); }
+    ~MentalLooperPlugin() override { haltPieces(); }
 
     const ouro::Looper& engine() const { return fEngine; }
     int selectedTrack() const { return fSel; }   // 0-3
@@ -131,7 +131,7 @@ public:
     bool pieceLoading() const { return fLoading; }   // from Load (the stop) to the result
     int loadedPiece() const { return std::min(16, std::max(0, int(std::lround(fVal[kParamPiece])))); }   // 0: none
 
-    // LV2 extension callbacks (OuroborosPlugin.cpp), from non-RT host threads,
+    // LV2 extension callbacks (MentalLooperPlugin.cpp), from non-RT host threads,
     // possibly while run() runs: share state with run() through atomics only.
     void hmiAddressed(uint32_t lv2Index, LV2_HMI_Addressing a, const LV2_HMI_AddressingInfo* info)
     {
@@ -208,10 +208,10 @@ protected:
     int64_t getUniqueId() const override
     {
         // Must match DISTRHO_PLUGIN_UNIQUE_ID in DistrhoPluginInfo.h.
-#ifdef OUROBOROS_BETA
-        return d_cconst('d', 'O', 'u', 'B');
+#ifdef MENTAL_LOOPER_BETA
+        return d_cconst('d', 'M', 'e', 'B');
 #else
-        return d_cconst('d', 'O', 'u', 'r');
+        return d_cconst('d', 'M', 'e', 'L');
 #endif
     }
 
@@ -1014,7 +1014,7 @@ private:
     uint32_t fFaceAcc = 0;                  // samples since the progress output last moved
     bool fBlinkOn = false;
 
-    DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OuroborosPlugin)
+    DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MentalLooperPlugin)
 };
 
 END_NAMESPACE_DISTRHO

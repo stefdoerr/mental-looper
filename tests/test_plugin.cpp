@@ -1,4 +1,4 @@
-#include "OuroborosPlugin.hpp"
+#include "MentalLooperPlugin.hpp"
 #include "src/DistrhoPluginInternal.hpp"
 #include "signals.hpp"
 #include "test_util.hpp"
@@ -30,7 +30,7 @@ static std::unique_ptr<PluginExporter> gPlugin;
 static PluginExporter& P() { return *gPlugin; }
 static void fresh() { gPlugin.reset(new PluginExporter(nullptr, nullptr, requestStub, nullptr)); gReqs.clear(); }
 static void set(uint32_t i, float v) { P().setParameterValue(i, v); }
-static OuroborosPlugin& plug() { return *static_cast<OuroborosPlugin*>(P().getInstancePointer()); }
+static MentalLooperPlugin& plug() { return *static_cast<MentalLooperPlugin*>(P().getInstancePointer()); }
 static const ouro::Looper& eng() { return plug().engine(); }
 
 // Process vec in 128-frame blocks into gOut. gOut is prefilled with a nonzero
@@ -432,7 +432,7 @@ static void widgetShowsLayerCounts()
     static const LV2_Feature* const features[] = { &feature, nullptr };
     d_nextLv2Features = features; fresh(); d_nextLv2Features = nullptr;
     const ALABS_HMI_WidgetArea area = { sizeof(area), 40, 37, ALABS_HMI_PixelFormat_Mono1 };
-    static_cast<OuroborosPlugin*>(P().getInstancePointer())->widgetShown("loop", (ALABS_HMI_Widget)0x1, &area);
+    static_cast<MentalLooperPlugin*>(P().getInstancePointer())->widgetShown("loop", (ALABS_HMI_Widget)0x1, &area);
     runN(8); CHECK(countRowShows(0));                                   // empty: no count
     recordBaseAndDub(); CHECK(eng().layerCount(0) == 2 && countRowShows(2));
     set(kParamUndo, 1); runN(8); set(kParamUndo, 0); runN(1);
@@ -672,7 +672,7 @@ static void clearAllRequestsPartA() {
 
 // Saved pieces. MOD_USER_FILES_DIR is a fresh folder (main()); each test starts with no slot. The worker thread is real:
 // waits are on conditions, with a wall-clock limit.
-static std::string gRoot;                                           // its "Audio Loops/Ouroboros"
+static std::string gRoot;                                           // its "Audio Loops/Mental Looper"
 static void freshPieces() { ouro::pieces::removeTree(gRoot); fresh(); }
 static std::string status() { return plug().pieceStatus(); }
 static void press(uint32_t i) { set(i, 1); runN(1); set(i, 0); runN(1); }

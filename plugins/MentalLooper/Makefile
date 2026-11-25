@@ -1,22 +1,22 @@
 #!/usr/bin/make -f
-# DPF inner Makefile for Ouroboros
+# DPF inner Makefile for Mental Looper
 # -------------------------------
 
-# Set BETA=1 (or OUROBOROS_BETA=1) on the make command line for the
+# Set BETA=1 (or MENTAL_LOOPER_BETA=1) on the make command line for the
 # side-by-side beta variant: distinct LV2 URI, bundle name, brand and
 # unique id. The top-level Makefile wraps this in `make beta`.
 ifeq ($(BETA),1)
-OUROBOROS_BETA = 1
+MENTAL_LOOPER_BETA = 1
 endif
-ifeq ($(OUROBOROS_BETA),1)
-NAME = ouroboros-beta
+ifeq ($(MENTAL_LOOPER_BETA),1)
+NAME = mental-looper-beta
 # DPF's Makefile.base.mk hard-resets BUILD_CXX_FLAGS but APPENDS
 # $(CXXFLAGS) at the end, so user-visible flags must travel through
-# CXXFLAGS to actually reach the compiler. Putting -DOUROBOROS_BETA=1
+# CXXFLAGS to actually reach the compiler. Putting -DMENTAL_LOOPER_BETA=1
 # in BUILD_CXX_FLAGS silently fails.
-CXXFLAGS += -DOUROBOROS_BETA=1
+CXXFLAGS += -DMENTAL_LOOPER_BETA=1
 else
-NAME = ouroboros
+NAME = mental-looper
 endif
 
 # Plugin version — the top-level VERSION file is the single source of
@@ -52,7 +52,7 @@ EXTRA_DSP_LIBS += -lpthread
 # FILES_UI when there's a native UI — but we use modgui for the MOD GUI,
 # so DSP-only here).
 FILES_DSP = \
-	OuroborosPlugin.cpp
+	MentalLooperPlugin.cpp
 
 # Pull in DPF's shared build rules
 include ../../dpf/Makefile.plugins.mk

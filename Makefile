@@ -34,11 +34,11 @@
 # PLUGIN_URI_BASE — stable LV2 URI prefix (does NOT need to resolve over
 #              HTTP — LV2 URIs are pure identifiers — but pick something
 #              unique so plugins from different vendors never collide).
-PLUGIN          := ouroboros
-PLUGIN_DIR      := plugins/Ouroboros
+PLUGIN          := mental-looper
+PLUGIN_DIR      := plugins/MentalLooper
 BRAND           := Stefan
-LABEL           := Ouroboros
-PLUGIN_URI_BASE := http://ouroboros.local/plugins
+LABEL           := Mental Looper
+PLUGIN_URI_BASE := http://mental-looper.local/plugins
 # ---------------------------------------------------------------------------
 
 # Set BETA=1 to produce a side-by-side beta build: distinct LV2 URI,
@@ -50,7 +50,8 @@ PLUGIN_URI_BASE := http://ouroboros.local/plugins
 # The conditional `-D<PLUGIN_UPPER>_BETA=1` macro is propagated to the
 # DPF sub-make via $(CXXFLAGS) (BUILD_CXX_FLAGS is hard-reset by DPF's
 # Makefile.base.mk so user flags must travel via CXXFLAGS).
-PLUGIN_UPPER := $(shell echo $(PLUGIN) | tr a-z A-Z)
+# tr maps - to _ : mental-looper -> MENTAL_LOOPER (a macro and make variable name).
+PLUGIN_UPPER := $(shell echo $(PLUGIN) | tr a-z- A-Z_)
 ifeq ($(BETA),1)
 export $(PLUGIN_UPPER)_BETA := 1
 BUNDLE_NAME  := $(PLUGIN)-beta

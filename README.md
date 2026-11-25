@@ -1,6 +1,6 @@
-# Ouroboros
+# Mental Looper
 
-![Ouroboros, a four-track looper](plugins/Ouroboros/modgui/screenshot-ouroboros.png)
+![Mental Looper, a four-track looper](plugins/MentalLooper/modgui/screenshot-mental-looper.png)
 
 **A four-track looper for free-time playing, for [MOD Dwarf](https://mod.audio/dwarf/),
 [MOD Desktop](https://mod.audio/desktop/) and any LV2 / VST3 / CLAP host.** No click and no
@@ -19,22 +19,22 @@ as much as you like and undo one layer at a time. Built with the
   (Starless 19 or later).
 - The output is only the loops: wire your dry signal around it, or turn up **Dry**.
 
-**[Install](#install) · [Manual (PDF)](docs/manual/ouroboros-manual.pdf) · [Building](DEVELOPERS.md)**
+**[Install](#install) · [Manual (PDF)](docs/manual/mental-looper-manual.pdf) · [Building](DEVELOPERS.md)**
 
 ## Install
 
-Build from source and copy `ouroboros.lv2` to your host.
+Build from source and copy `mental-looper.lv2` to your host.
 
 ### MOD Desktop (Linux)
 
 ```bash
-git clone --recurse-submodules https://github.com/stefdoerr/ouroboros.git
-cd ouroboros
+git clone --recurse-submodules https://github.com/stefdoerr/mental-looper.git
+cd mental-looper
 make
-./install.sh        # copies bin/ouroboros.lv2 into ~/Documents/MOD Desktop/lv2/
+./install.sh        # copies bin/mental-looper.lv2 into ~/Documents/MOD Desktop/lv2/
 ```
 
-Restart MOD Desktop. The plugin appears under brand **Stefan** as **Ouroboros**.
+Restart MOD Desktop. The plugin appears under brand **Stefan** as **Mental Looper**.
 
 ### MOD Dwarf (hardware)
 
@@ -42,22 +42,22 @@ Restart MOD Desktop. The plugin appears under brand **Stefan** as **Ouroboros**.
 make dwarf          # cross-build (needs Docker, see DEVELOPERS.md) and deploy
 ```
 
-or copy a prebuilt `ouroboros.lv2/` over by hand:
+or copy a prebuilt `mental-looper.lv2/` over by hand:
 
 ```bash
-scp -O -r ouroboros.lv2 root@192.168.51.1:/root/.lv2/
+scp -O -r mental-looper.lv2 root@192.168.51.1:/root/.lv2/
 ssh root@192.168.51.1 'systemctl restart jack2 mod-ui'
 ```
 
 ### Desktop DAWs
 
-`make` also writes `bin/ouroboros.vst3` and `bin/ouroboros.clap`. Copy them into `~/.vst3/` and
+`make` also writes `bin/mental-looper.vst3` and `bin/mental-looper.clap`. Copy them into `~/.vst3/` and
 `~/.clap/`. Rec/Undo and Stop/Clear are press-and-release switches: outside MOD, map them to a
 momentary control such as a MIDI footswitch.
 
 ## Manual
 
-The one-page **[PDF manual](docs/manual/ouroboros-manual.pdf)** covers the controls, the
+The one-page **[PDF manual](docs/manual/mental-looper-manual.pdf)** covers the controls, the
 footswitch gestures and the settings. On a MOD device it is the *documentation* button in the
 plugin's info dialog.
 

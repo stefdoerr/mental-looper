@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The face script (plugins/Ouroboros/modgui/script-ouroboros.js) in a real browser, against the real template and
+The face script (plugins/MentalLooper/modgui/script-mental-looper.js) in a real browser, against the real template and
 stylesheet: start and change events shaped as mod-ui sends them, pointer and wheel input from Playwright, port writes
 recorded from funcs.set_port_value.
 
@@ -11,7 +11,7 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, "plugins", "Ouroboros", "modgui"))
+sys.path.insert(0, os.path.join(ROOT, "plugins", "MentalLooper", "modgui"))
 import render_screenshot as rs  # noqa: E402
 
 # The plugin's defaults for every input the face sees at start (mod-ui sends them all, :bypass included).

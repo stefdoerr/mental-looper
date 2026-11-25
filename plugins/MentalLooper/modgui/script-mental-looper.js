@@ -1,7 +1,7 @@
 /*
  * Mental Looper — the MOD face's script. Design: docs/superpowers/specs/2026-11-25-mental-looper-face-design.md.
  *
- * It animates nothing itself: every movement is CSS (stylesheet-ouroboros.css). It only
+ * It animates nothing itself: every movement is CSS (stylesheet-mental-looper.css). It only
  *   - follows ports and outputs: state classes on the root (ml-st-0..5 from `looper`, ml-off when bypassed, ml-rec-on
  *     while `rec` is on), the eyes' angle (one turn per loop, from progress x progress_loops), the bar (--p, a tick
  *     per loop, the first take's time), the selected track, part, song and steps, the knob's --v and dB;

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Ouroboros User Manual</title>
+<title>Mental Looper User Manual</title>
 <style>
 /* ==========================================================================
    Print source. Rendered to PDF with headless Chrome via `make manual` (A4).
@@ -290,10 +290,10 @@ p { margin: 0 0 5px 0; }
 <body>
 
 <div class="head">
-    <img src="../../plugins/Ouroboros/modgui/screenshot-ouroboros.png" alt="The Ouroboros pedal">
+    <img src="../../plugins/MentalLooper/modgui/screenshot-mental-looper.png" alt="The Mental Looper pedal">
     <div>
         <div class="brand">Stefan</div>
-        <h1>OUROBOROS</h1>
+        <h1>MENTAL LOOPER</h1>
         <div class="tag">A four-track looper for free-time playing</div>
         <p style="margin-top:4px">For MOD Dwarf and MOD Desktop. No click, no bars: the first loop you record sets the
         length, and the other three tracks lock to it.</p>
@@ -302,7 +302,7 @@ p { margin: 0 0 5px 0; }
 
 <h2>Quick start</h2>
 <ol class="steps" style="margin:0 0 4px 0">
-    <li>Put Ouroboros on the pedalboard and wire a <b>parallel dry path</b> around it (see below).</li>
+    <li>Put Mental Looper on the pedalboard and wire a <b>parallel dry path</b> around it (see below).</li>
     <li>Press <b>REC</b> and play your loop. Press <b>REC</b> again to close it: it now plays back and sets the loop length.</li>
     <li>Press <b>REC</b> to overdub, and again to go back to play. Hold <b>REC</b> to undo the newest layer. Tap <b>C</b> to turn the selected track off, and again to turn it on.</li>
     <li>Turn the <b>Track</b> knob to another track and press <b>REC</b>: it records on top of silence, in time with the first.</li>
@@ -386,26 +386,26 @@ Recording or overdubbing again forgets what you could still redo.</p>
 </div>
 
 <h2>Sound, dry signal and bypass</h2>
-<p>Ouroboros outputs <b>only the loops</b>. Your live sound is not passed through, so run the dry signal around the pedal on the pedalboard (a parallel path) and mix the two.
+<p>Mental Looper outputs <b>only the loops</b>. Your live sound is not passed through, so run the dry signal around the pedal on the pedalboard (a parallel path) and mix the two.
 If you run the pedal in series instead, turn <b>Dry</b> up: it adds your input to the output at that level, with no delay (0&nbsp;dB is your input as it comes in).
 <b>Bypass</b> mutes the loops, but they keep running in time and pick up where they are when you switch back on. While bypassed you get the dry signal at the Dry level (none when Dry is at the bottom, off).</p>
 <p>The loop point is click-free, and a note still ringing when you close the loop carries into the next pass. The first loop can be up to 5 minutes. The pedalboard does not hold the loops; save them as a piece (see Saved pieces). Each track&rsquo;s on/off and volume are also in the web interface (On 1&ndash;4, Volume 1&ndash;4).</p>
 
 <h2>On the Dwarf screen (Starless 19 and later)</h2>
-<p>Ouroboros offers a <b>Loop</b> display widget. In Starless&rsquo; <b>Display</b> dialog, put it in the column above knob 1; it replaces knob 1&rsquo;s own text and keeps the footswitch labels visible.
+<p>Mental Looper offers a <b>Loop</b> display widget. In Starless&rsquo; <b>Display</b> dialog, put it in the column above knob 1; it replaces knob 1&rsquo;s own text and keeps the footswitch labels visible.
 It shows the selected track and its state (ARM when that track is armed), a mark per track (a blinking dot for an armed track), and a bar that fills once per pass (elapsed time during the first recording). Under each mark a small number counts the layers you hear on that track: the recording plus each overdub still in, so an undo takes one off (it needs an area at least 33 pixels tall). For a long track the bar covers the whole track, with a small tick at each loop (left out when there are too many), and while a track records past the loop, small dots count how many times the loop has come round while it records. It needs an area at least 27 pixels tall for the full layout; a shorter area shows the bar only. While stopped it shows STOP (blinking while a stop is still finishing), and B&rsquo;s label reads PLAY. C&rsquo;s label reads <code>ON n</code> or <code>OFF n</code> for the selected track while running, <code>PLAY n</code> while stopped, and <code>-</code> for an empty selected track. C&rsquo;s light is green while the loops play with the selected track on (blinking while a stop is finishing), red while stopped, and off when the selected track is off or empty.
 Without the widget everything still works, just without the screen. On stock MOD OS the volume knob can be one step off right after you change track.</p>
 
 <h2>Tempo sync</h2>
-<p>Set <b>Sync</b> to <b>Bars</b> and Ouroboros follows MOD&rsquo;s tempo and transport. With Sync Off nothing changes. With no usable tempo from the host, presses act at once, as with Sync Off.</p>
+<p>Set <b>Sync</b> to <b>Bars</b> and Mental Looper follows MOD&rsquo;s tempo and transport. With Sync Off nothing changes. With no usable tempo from the host, presses act at once, as with Sync Off.</p>
 <p><b>Bar lines.</b> Recording starts on a MOD bar line, and the first loop closes on one, so loops are whole bars. A press up to 150&nbsp;ms after a line counts as on the line; any other press waits for the next line. While it waits, B blinks fast (red before a recording, green before the first loop closes or playback restarts) and the screen shows WAIT. Press B again, or press C with that track selected, to cancel. Starting playback with B while MOD plays waits for the next bar line the same way. With Auto Rec, a note up to 150&nbsp;ms after a bar line starts at that line; any other note waits for the next line.</p>
 <p><b>MOD stopped.</b> Your first press sets bar 1. Once a loop exists, presses use the loop&rsquo;s own bars, counted from its top. A loop recorded with Sync Off or with no tempo counts as one bar, so B on an empty track can show WAIT for up to a whole loop.</p>
 <p><b>MOD&rsquo;s play and stop.</b> When MOD starts playing, the loops start from their top on the bar line (if MOD starts mid-bar, loops that are playing jump on the next line with no WAIT shown; stopped loops show WAIT until the line). If you are recording or overdubbing, that take closes first and every track jumps to its start with a short crossfade. During the very first recording, MOD&rsquo;s play is ignored. When MOD stops, the loops stop too, following Stop Mode. If MOD stops during the first recording, or you stop it with a double-tap, you keep the whole bars recorded so far; less than one bar is discarded.</p>
 <p><b>Tempo changes.</b> Loops keep their length, so if the tempo changes after you record they drift from the drums.</p>
-<p><b>Click and Length.</b> With Click on, Ouroboros ticks on MOD&rsquo;s beats while MOD plays, beat&nbsp;1 higher and louder, on its own <b>Click</b> output: route that to your headphones or a second output to keep it out of the mix. With MOD playing, B waits for the next bar line, so the click is your count-in. Set Length to a number of bars and the first loop closes by itself on that bar line, as a press would; B before then closes it as usual.</p>
+<p><b>Click and Length.</b> With Click on, Mental Looper ticks on MOD&rsquo;s beats while MOD plays, beat&nbsp;1 higher and louder, on its own <b>Click</b> output: route that to your headphones or a second output to keep it out of the mix. With MOD playing, B waits for the next bar line, so the click is your count-in. Set Length to a number of bars and the first loop closes by itself on that bar line, as a press would; B before then closes it as usual.</p>
 
 <h2>Song parts</h2>
-<p>Ouroboros has four <b>parts</b>, A to D. Each part is its own set of four tracks, so you can record a verse in A and a chorus in B. The Track, Redo and Volume knobs act on the current part. The loop length L is set once, by the first recording, and every track in every part is a whole multiple of it. A part&rsquo;s pass is its longest track, so parts can last a different number of Ls.</p>
+<p>Mental Looper has four <b>parts</b>, A to D. Each part is its own set of four tracks, so you can record a verse in A and a chorus in B. The Track, Redo and Volume knobs act on the current part. The loop length L is set once, by the first recording, and every track in every part is a whole multiple of it. A part&rsquo;s pass is its longest track, so parts can last a different number of Ls.</p>
 <p><b>Copy on entry.</b> Switch to an empty part and it starts as a copy of the part you left: every track&rsquo;s audio as heard, with its on/off and volume, one layer each (no undo history). Clear what you do not want.</p>
 <p><b>Switching.</b> Turn <b>Part</b> and the switch waits for the end of the current part&rsquo;s pass (its longest track). The screen shows <code>A&gt;B</code> blinking, and the knob shows the queued part until the switch. The switch is a crossfade of a few ms on both sides, so the new part&rsquo;s downbeat keeps its attack.</p>
 <h3>The song</h3>
@@ -429,7 +429,7 @@ Without the widget everything still works, just without the screen. On stock MOD
 <h2>Saved pieces</h2>
 <p>A <b>piece</b> is everything you hear: all four parts with their four tracks, each track&rsquo;s volume and on/off, the loop length, the arrangement and the current part. You can keep 16 pieces in numbered <b>slots</b>, save the one you built and load another between songs, all on the Dwarf. Undo history is not saved.</p>
 <h3>Where pieces live</h3>
-<p>A slot is a folder, <code>/data/user-files/Audio Loops/Ouroboros/01</code> to <code>16</code>. It holds one 32-bit float mono WAV per recorded track (<code>A1.wav</code> to <code>D4.wav</code>) and a small text file, <code>piece.txt</code>. Copy a slot folder to a computer to back it up, or into another slot or Dwarf with MOD&rsquo;s file manager. A slot you copy in or delete shows on the screen within about a second. On a desktop host the folder is <code>$MOD_USER_FILES_DIR/Audio Loops/Ouroboros</code>, else <code>$HOME/.ouroboros/Audio Loops/Ouroboros</code>. The Windows desktop build has no saved pieces.</p>
+<p>A slot is a folder, <code>/data/user-files/Audio Loops/Mental Looper/01</code> to <code>16</code>. It holds one 32-bit float mono WAV per recorded track (<code>A1.wav</code> to <code>D4.wav</code>) and a small text file, <code>piece.txt</code>. Copy a slot folder to a computer to back it up, or into another slot or Dwarf with MOD&rsquo;s file manager. A slot you copy in or delete shows on the screen within about a second. On a desktop host the folder is <code>$MOD_USER_FILES_DIR/Audio Loops/Mental Looper</code>, else <code>$HOME/.mental-looper/Audio Loops/Mental Looper</code>. The Windows desktop build has no saved pieces.</p>
 <h3>Page 2 controls</h3>
 <p>Press footswitch A to go to page 2 of the Dwarf.</p>
 <table>
