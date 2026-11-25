@@ -8,7 +8,7 @@ bars: the first loop you record sets the length, and the other three tracks lock
 as much as you like and undo one layer at a time. Built with the
 [DISTRHO Plugin Framework (DPF)](https://github.com/DISTRHO/DPF), mono in and mono out.
 
-- Rec / Play / Dub on one footswitch; undo (tap), redo (hold) and stop (double-tap) on another.
+- Rec / Play / Dub on one footswitch; undo (hold) on the same one; on/off (tap), clear (hold) and stop (double-tap) on another, with redo on a knob.
 - Optional auto-record: arm a track and it starts on your first note.
 - Optional tempo sync: loops start on MOD's bar lines, are whole bars long, and follow MOD's play/stop. A click on its own output and a fixed loop length in bars come with it.
 - Click-free loop point, punch in/out, undo, redo and clear.
