@@ -179,6 +179,10 @@ static void cDoubleTapRestoresThenStops() {
     fresh(); recordBaseAndDub(); tapC(); runN(29); cDown();
     CHECK(eng().isOn(0) && eng().transport() != ouro::Transport::Running); cUp();
 }
+static void cDoubleTapPutsBackTheOnBeforeTheTap() {                     // not a flip: On/Off between the taps
+    fresh(); recordBaseAndDub(); tapC(); set(kParamOnOff, 1); runN(1); set(kParamOnOff, 0); runN(1); CHECK(eng().isOn(0));
+    cDown(); CHECK(eng().isOn(0)); cUp();
+}
 static void cDoubleTapRestoresBeforeAFadeStop() {                       // Review Focus 3
     fresh(); set(kParamStopMode, 2); recordBaseAndDub(); tapC(); runN(29); cDown();
     CHECK(eng().isOn(0) && eng().transport() == ouro::Transport::Stopping); cUp();
@@ -892,6 +896,62 @@ static void cGestureDroppedOnPartChange() {                            // Review
     CHECK(eng().part() == 1 && eng().state(0) != ouro::TrackState::Empty); cUp();
 }
 
+// C while stopped. Two tracks recorded (track 1, then track 2 onto the loop), track 1 selected, stopped.
+static void twoTracksStoppedNoFresh() {
+    recordLoop(); set(kParamTrack, 2); runN(1); recordLoop(); set(kParamTrack, 1); runN(1);
+    press(kParamStopPlay); CHECK(runUntil(stopped)); gReqs.clear();
+}
+static void twoTracksStopped() { fresh(); twoTracksStoppedNoFresh(); }
+static void cTapWhileStoppedStartsTheSelectedTrackAlone() {
+    twoTracksStopped(); set(kParamTrack, 2); runN(1);
+    cDown(); CHECK(stopped()); runN(19); cUp();
+    CHECK(eng().transport() == ouro::Transport::Running && eng().isOn(1) && !eng().isOn(0) && hasReq(kParamOn1, 0.0f));
+}
+static void cSoloStartLeavesEmptyTracksOn() {
+    twoTracksStopped(); tapC(); CHECK(eng().isOn(2) && eng().isOn(3));
+}
+static void cDoubleTapWhileStoppedStartsEverything() {
+    twoTracksStopped(); set(kParamTrack, 2); runN(1); tapC(); runN(100); cDown(); cUp(); runN(60);
+    CHECK(eng().transport() == ouro::Transport::Running && eng().isOn(0) && eng().isOn(1));
+    CHECK(eng().position() < 128 * 80);                                 // restarted from the top at the second press
+}
+static void cHoldWhileStoppedClearsTheTrackThenEverything() {            // Ruling R3: Clear All leaves the fresh engine
+    twoTracksStopped(); set(kParamTrack, 2); runN(1);
+    cDown(); runN(188); CHECK(eng().state(1) == ouro::TrackState::Empty && eng().state(0) != ouro::TrackState::Empty && stopped());
+    runN(185); CHECK(eng().state(0) != ouro::TrackState::Empty && stopped());   // nothing started before twice Hold Time
+    runN(3); CHECK(eng().empty() && eng().loopLength() == 0 && eng().transport() == ouro::Transport::Running);
+    cUp(); runN(10); CHECK(eng().empty() && eng().loopLength() == 0 && eng().transport() == ouro::Transport::Running);
+    twoTracksStopped(); set(kParamTrack, 2); runN(1);                   // released after the track's clear: no tap,
+    cDown(); runN(188); cUp(); runN(5); tapC(); runN(10);               // so the next press is no double-tap
+    CHECK(stopped() && eng().state(0) != ouro::TrackState::Empty && eng().isOn(0));
+}
+static void cTapWhileStoppedOnAnEmptyTrackDoesNothing() {
+    twoTracksStopped(); set(kParamTrack, 3); runN(1); tapC(); runN(160); CHECK(stopped());
+}
+static void cSoloStartCountsAsAChange() {                               // Review Focus 5
+    freshPieces(); twoTracksStoppedNoFresh(); saveTo(2);
+    set(kParamTrack, 2); runN(1); tapC(); runN(160);
+    press(kParamStopPlay); CHECK(runUntil(stopped));
+    press(kParamLoad); CHECK(status() == "LOAD 2?");
+}
+// Sync on, MOD playing mid-bar: the tap's restart waits for the line (96000) with track 1 off.
+static void syncTapWaits() {
+    twoTracksStopped(); gT = 50000; set(kParamSync, 1); set(kParamTrack, 2); runMod(true, 1);
+    set(kParamStopClear, 1); runMod(true, 20); set(kParamStopClear, 0); runMod(true, 1);
+    CHECK(eng().userWaiting() && !eng().isOn(0) && eng().isOn(1));
+}
+static void cSyncWaitPutsTracksBackWhenCancelled() {
+    syncTapWaits(); set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runMod(true, 1);    // B cancels
+    CHECK(!eng().userWaiting() && stopped() && eng().isOn(0) && eng().isOn(1));
+    syncTapWaits(); runMod(true, 160);                                  // the window passes; then a C press cancels
+    set(kParamStopClear, 1); runMod(true, 1); set(kParamStopClear, 0); runMod(true, 1);
+    CHECK(!eng().userWaiting() && stopped() && eng().isOn(0) && eng().isOn(1));
+    syncTapWaits(); runMod(true, 10);                                   // a second press within the window
+    set(kParamStopClear, 1); runMod(true, 1); set(kParamStopClear, 0); runMod(true, 1);
+    CHECK(eng().userWaiting() && stopped() && eng().isOn(0) && eng().isOn(1));
+    runTo(96000 + 128 * 5); CHECK(eng().transport() == ouro::Transport::Running && eng().isOn(0) && eng().isOn(1));
+}
+
 int main()
 {
     char dir[] = "build/tests/pluginXXXXXX";                         // pieces go to a fresh folder, never $HOME
@@ -910,9 +970,12 @@ int main()
     holdBOnAnArmedEmptyTrackKeepsTheArm(); redoAfterHoldsBringsBackOnlyTheLast(); holdBFromStoppedStartsThenUndoes();
     holdBDroppedOnPartChange();
     cPressMutesAndReleaseUnmutes(); cHoldClearsTheTrackAndSetsItOn(); cHoldOnAnOffTrackNeverSounds();
-    cDoubleTapRestoresThenStops(); cDoubleTapRestoresBeforeAFadeStop(); cTapOnAnEmptyTrackDoesNothing();
+    cDoubleTapRestoresThenStops(); cDoubleTapPutsBackTheOnBeforeTheTap(); cDoubleTapRestoresBeforeAFadeStop(); cTapOnAnEmptyTrackDoesNothing();
     cDuringAnOverdubClosesItAndMutes(); cCancelsOnlyTheSelectedTracksArm(); cDuringTheFirstRecording(); cTapPendingDoesNotWipeALoopBClosed();
     cGestureKeepsTheTrackItWasPressedOn(); cGestureDroppedOnPartChange();
+    cTapWhileStoppedStartsTheSelectedTrackAlone(); cSoloStartLeavesEmptyTracksOn(); cDoubleTapWhileStoppedStartsEverything();
+    cHoldWhileStoppedClearsTheTrackThenEverything(); cTapWhileStoppedOnAnEmptyTrackDoesNothing();
+    cSyncWaitPutsTracksBackWhenCancelled();
     doubleTapStops();
     bRestartsAfterStop();
     doubleTapThenHoldDoesNotClear();
@@ -953,6 +1016,7 @@ int main()
     saveOnAFullSlotAsksFirst();
     loadWithChangesAsksFirst();
     pressesDuringALoadAreIgnored();
+    cSoloStartCountsAsAChange();
     settingsDuringALoadApplyAfter();
     dryLevelHoldsThroughALoad();
     controlsFollowTheLoadedPiece();

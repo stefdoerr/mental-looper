@@ -363,7 +363,7 @@ protected:
         fEngine.reset();
         fFirst = true;
         fHold = 0; fBHold = 0; fBHeld = fBDone = false;
-        fHeld = fDone = fTapPending = false;
+        fHeld = fDone = fTapPending = fCRestart = false;
         fSinceTap = 0;
     }
 
@@ -398,7 +398,7 @@ protected:
                     fLent = true;
                 }
                 for (uint32_t i = 0; i < kParamBypass; ++i) if (droppedDuringLoad(i)) fPrev[i] = fVal[i];
-                fTapPending = false; fHeld = on(kParamStopClear); fDone = true;
+                fTapPending = fCRestart = false; fHeld = on(kParamStopClear); fDone = true;
                 fBHeld = on(kParamRec); fBDone = true;
                 fClickAt = -1.0;                // no new tick (a running one ends)
                 if (!fLent) fEngine.process(inputs[0], outputs[0], frames);   // the Instant stop ramps out
@@ -552,14 +552,31 @@ protected:
         }
         else fBHeld = false;
         // C footswitch (stop/clear): the gesture acts on the track and in the part of its first press; a part change
-        // drops it (a second press is then a first press). While the loops run or a stop finishes, the press turns the
-        // track off (a take on it closes first, as B would), a release before Hold Time turns on a track that was off,
-        // and Hold Time clears the track and sets it on. On the first recording the press does nothing: a tap aborts it
-        // once the Double-Tap window passes, a hold at Hold Time. A press that cancels the track's wait or arm (or a
-        // pending restart), or on an empty track, does nothing else. A second press within the window after a tap puts
-        // back the On the tap turned, then stops (a first recording is kept). While stopped: nothing.
+        // drops it (a second press is then a first press). A press that cancels the track's wait or arm (or a pending
+        // restart) does nothing else, stopped or not; a second press within the window then stops (stopped: nothing).
+        // While the loops run or a stop finishes, the press turns the track off (a take on it closes first, as B
+        // would), a release before Hold Time turns on a track that was off, and Hold Time clears the track and sets it
+        // on. On the first recording the press does nothing: a tap aborts it once the Double-Tap window passes, a hold
+        // at Hold Time. On an empty track a tap does nothing. A second press within the window after a tap puts back
+        // the On the tap turned (as it was before the tap), then stops (a first recording is kept).
+        // While stopped the press does nothing. A tap starts playback from the top with only the track on (the other
+        // tracks that hold audio go off; on an empty track, nothing); a second press within the window puts them back
+        // and starts everything from the top (a restart still waiting for its line is left waiting). Hold Time clears
+        // the track and sets it on, twice Hold Time clears everything; the release starts nothing. A tap's restart
+        // cancelled before playback starts (B, a C press, Stop/Play, MOD's stop) puts them back too.
         const auto turn = [&](int t, bool v) { fEngine.setOn(t, v); request(kParamOn1 + t, v ? 1.0f : 0.0f); };
-        if (fEngine.part() != fCPart) { fTapPending = false; fDone = true; }
+        const auto remember = [&](uint8_t tracks) {      // the tap turns these: their On as it is now, for putBack
+            fCFlipped = tracks; fCWas = 0;
+            for (int u = 0; u < 4; ++u) fCWas |= uint8_t(fEngine.isOn(u) << u);
+        };
+        const auto putBack = [&] { for (int u = 0; u < 4; ++u) if (fCFlipped >> u & 1) turn(u, fCWas >> u & 1); fCFlipped = 0; };
+        if (fEngine.part() != fCPart) { fTapPending = fCRestart = false; fDone = true; }
+        const bool stoppedNow = fEngine.transport() == ouro::Transport::Stopped;
+        if (fCRestart && !(stoppedNow && fEngine.userWaiting()))   // the tap's restart started, or B, Stop/Play or
+        {                                                          // MOD's stop cancelled it (a C press: below)
+            fCRestart = false;
+            if (stoppedNow) putBack();
+        }
         if (on(kParamStopClear))
         {
             if (!fHeld)
@@ -567,25 +584,32 @@ protected:
                 fHeld = true; fHold = 0;
                 if (fTapPending)                         // a double-tap: a second press is never a first press
                 {
-                    fTapPending = false; fDone = true;
-                    for (int u = 0; u < 4; ++u) if (fCFlipped >> u & 1) turn(u, !fEngine.isOn(u));
-                    stopNow();                           // stopping already: at once
+                    fTapPending = fCRestart = false; fDone = true;
+                    putBack();
+                    if (!fCStopped) stopNow();           // stopping already: at once
+                    else if (!fEngine.userWaiting())     // the tap's restart still waiting: everything starts on the line
+                    {
+                        if (fEngine.transport() != ouro::Transport::Stopped) fEngine.stop(ouro::StopMode::Instant, 0.0f);
+                        fEngine.restart();               // from the top; after a stop, at the park
+                    }
                 }
                 else
                 {
                     const ouro::TrackState st = fEngine.state(sel);
-                    fCTrack = sel; fCPart = fEngine.part(); fCFlipped = 0;
-                    fCStopped = fEngine.transport() == ouro::Transport::Stopped;
-                    fDone = fCStopped;
-                    fCClears = fCAborts = fCWasOff = false;
-                    if (!fCStopped && !fEngine.cancelWait(sel) && st != ouro::TrackState::Empty)   // cancelWait acts
+                    fCTrack = sel; fCPart = fEngine.part();
+                    const bool cancelled = fEngine.cancelWait(sel);   // cancelWait acts
+                    if (cancelled && fCRestart) { fCRestart = false; putBack(); }   // the tap's own restart
+                    fCFlipped = 0;
+                    fCStopped = !cancelled && stoppedNow;
+                    fCClears = !cancelled && st != ouro::TrackState::Empty;
+                    fCAborts = fCWasOff = fDone = false;
+                    if (fCClears && !fCStopped)
                     {
-                        fCClears = true;
                         if (st == ouro::TrackState::Recording && fEngine.loopLength() == 0) fCAborts = true;
                         else
                         {
                             fEngine.closeTake(sel);
-                            if (fEngine.isOn(sel)) { turn(sel, false); fCFlipped = uint8_t(1u << sel); }
+                            if (fEngine.isOn(sel)) { remember(uint8_t(1u << sel)); turn(sel, false); }
                             else fCWasOff = st == ouro::TrackState::Playing;
                         }
                     }
@@ -594,16 +618,25 @@ protected:
             fHold += frames;
             if (!fDone && fHold >= hold)
             {
-                fDone = true;
-                if (fCClears) { fEngine.clearTrack(fCTrack); turn(fCTrack, true); }
+                if (fCClears) { fEngine.clearTrack(fCTrack); turn(fCTrack, true); fCClears = false; }
+                if (!fCStopped || fHold >= 2 * hold) { fDone = true; if (fCStopped) fEngine.clearAll(); }
             }
         }
         else if (fHeld)
         {
             fHeld = false;
-            if (!fDone)                                  // released before Hold Time: a tap
+            if (!fDone && fHold < hold)                  // released before Hold Time: a tap
             {
-                if (fCWasOff) { turn(fCTrack, true); fCFlipped = uint8_t(1u << fCTrack); }
+                if (fCWasOff) { remember(uint8_t(1u << fCTrack)); turn(fCTrack, true); }
+                else if (fCStopped && fEngine.state(fCTrack) != ouro::TrackState::Empty)
+                {
+                    uint8_t heard = 0;                   // the tracks that hold audio, fCTrack among them
+                    for (int u = 0; u < 4; ++u) if (fEngine.state(u) != ouro::TrackState::Empty) heard |= uint8_t(1u << u);
+                    remember(heard);
+                    for (int u = 0; u < 4; ++u) if (heard >> u & 1) turn(u, u == fCTrack);
+                    fEngine.restart();
+                    fCRestart = fEngine.userWaiting();
+                }
                 fTapPending = true; fSinceTap = 0;
             }
         }
@@ -890,11 +923,13 @@ private:
     bool fHeld = false;                     // C is down
     bool fDone = false;                     // the press is spent: no hold or release action
     bool fTapPending = false;               // a tap was released: the Double-Tap window runs
-    bool fCStopped = false;                 // the first press came while stopped
+    bool fCStopped = false;                 // the first press came while stopped (and cancelled nothing)
     bool fCClears = false;                  // Hold Time clears fCTrack (not: a wait or arm cancelled, an empty track)
     bool fCWasOff = false;                  // fCTrack was playing and off: the tap turns it on at the release
     bool fCAborts = false;                  // the press came on the first recording: the tap aborts it
-    uint8_t fCFlipped = 0;                  // the tracks whose On the tap turned (bit t): a double-tap turns them back
+    uint8_t fCFlipped = 0;                  // the tracks whose On the tap turned (bit t): a double-tap puts them back
+    uint8_t fCWas = 0;                      // every track's On (bit t) as it was before the tap turned them
+    bool fCRestart = false;                 // a stopped tap's restart waits: cancelled while stopped, fCFlipped back
     int fCTrack = 0, fCPart = 0;            // the first press's track and part
     bool fModPlaying = false;               // MOD's transport as of the last run() with Sync on
     static constexpr size_t kNoTick = SIZE_MAX;
