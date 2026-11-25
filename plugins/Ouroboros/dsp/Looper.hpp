@@ -612,6 +612,8 @@ public:
     bool userWaiting() const { return pend_.kind && pend_.kind != Pending::Retrigger; }
     bool userWaiting(int t) const { return pend_.kind == Pending::Restart || ((pend_.kind == Pending::Press || pend_.kind == Pending::Arm) && pend_.t == t); }
     int waitingTrack() const { return pend_.t; }         // its track; -1: none, or a restart
+    // A REC waits: an Auto Rec arm, or a press or arm waiting for the bar line (not a restart, not MOD's retrigger).
+    bool recWaiting() const { return armed_ >= 0 || pend_.kind == Pending::Press || pend_.kind == Pending::Arm; }
     uint32_t bars() const { return L_ ? bars_ : 0; }     // the first loop's bars (1 if recorded without a grid)
     // What L would be if closed now (with a grid: before the rounding to bars). An arm's start can be back-dated less
     // than the close: 0 until rec_ passes recD_.

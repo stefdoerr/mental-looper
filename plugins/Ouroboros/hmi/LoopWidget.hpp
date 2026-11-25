@@ -21,6 +21,16 @@ struct WidgetView {
     bool loading;                          // a piece loads: LOAD takes the state text's place, FULL's too
 };
 
+// The bar's source: a long track fills by its own length; otherwise by the loop (or the base phase while recording
+// onto it). An empty track (its only recording undone, the length kept for a redo) shows like one never recorded: the
+// loop. len 0: no loop yet.
+struct BarSource { uint64_t len, pos; };
+inline BarSource barSource(TrackState selState, uint32_t trackLength, uint32_t trackPosition, uint32_t loopLength, uint32_t position)
+{
+    const uint64_t trackLen = selState != TrackState::Empty ? trackLength : 0;
+    return trackLen > 0 ? BarSource{trackLen, trackPosition} : BarSource{loopLength, position};
+}
+
 // Mono1: rows top->bottom, (w+7)/8 bytes per row, MSB = leftmost pixel, 1 = lit. Returns bytes written.
 inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint8_t* bits)
 {
@@ -113,11 +123,9 @@ inline size_t renderLoopWidget(const WidgetView& v, uint16_t w, uint16_t h, uint
     if (v.loopLength > 0)
     {
         const uint64_t inner = w > 2 ? w - 2 : 0;
-        // A long track fills by its own length; otherwise by the loop (or the base phase while recording onto it). An
-        // empty track (its only recording undone, the length kept for a redo) shows like one never recorded: the loop.
+        const BarSource src = barSource(v.state[v.selected], v.trackLength, v.trackPosition, v.loopLength, v.position);
         const uint64_t trackLen = v.state[v.selected] != TrackState::Empty ? v.trackLength : 0;
-        const uint64_t len = trackLen > 0 ? trackLen : v.loopLength;
-        const uint64_t pos = trackLen > 0 ? v.trackPosition : v.position;
+        const uint64_t len = src.len, pos = src.pos;
         uint64_t fill = (inner * pos + len / 2) / len;
         if (fill > inner) fill = inner;
         if (fill > 0) rect(1, barY + 1, 1 + int(fill), barEnd - 1, true);
