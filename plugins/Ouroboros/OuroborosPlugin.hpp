@@ -514,10 +514,15 @@ protected:
         // Triggers and the footswitch act on rising edges only; a trigger held high from the
         // start (previous value NaN on the first run) counts as a press.
         const auto rising = [&](uint32_t i) { return on(i) && !(fPrev[i] > 0.5f); };
+        // C's tap on a first recording aborts it, if it still is one (B may have closed it while C was down).
+        const auto abortTap = [&] {
+            if (fCAborts && fEngine.state(fCTrack) == ouro::TrackState::Recording && fEngine.loopLength() == 0)
+                fEngine.clearTrack(fCTrack);
+        };
         if (fTapPending && rising(kParamRec))         // B after a tap ends its window: a first recording's abort first
         {
             fTapPending = false;
-            if (fCAborts) fEngine.clearTrack(fCTrack);
+            abortTap();
         }
         if (rising(kParamRec))        fEngine.pressRec(sel);
         if (rising(kParamUndo))       fEngine.undo(sel);
@@ -605,7 +610,7 @@ protected:
         else if (fTapPending && (fSinceTap += frames) >= window)
         {
             fTapPending = false;
-            if (fCAborts) fEngine.clearTrack(fCTrack);
+            abortTap();
         }
 
         // Pieces. Save: once no take runs, a snapshot the worker writes while the loops play on (a refusal by the pool

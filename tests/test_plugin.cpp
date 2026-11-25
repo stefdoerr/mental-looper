@@ -208,6 +208,14 @@ static void cDuringTheFirstRecording() {
     tapC(); runN(10); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(1);    // B while the abort is pending
     CHECK(eng().state(0) == ouro::TrackState::Recording && eng().loopLength() == 0);
 }
+static void cTapPendingDoesNotWipeALoopBClosed() {                     // Ruling R6
+    fresh(); bDown(); bUp(); runN(100);                                 // the first recording
+    cDown(); runN(5); bDown(); bUp(); runN(5); cUp();                   // B closes it while C is held, then a tap
+    runN(160); CHECK(eng().loopLength() > 0 && eng().state(0) == ouro::TrackState::Playing);
+    fresh(); bDown(); bUp(); runN(100);
+    cDown(); runN(5); bDown(); bUp(); runN(5); cUp(); runN(10);         // the same, then B within the window
+    bDown(); bUp(); CHECK(eng().loopLength() > 0 && eng().state(0) == ouro::TrackState::Overdubbing);
+}
 static void doubleTapStops() {
     fresh(); recordBaseAndDub(); tapC(); runN(29);
     set(kParamStopClear, 1); runN(1); CHECK(eng().transport() == ouro::Transport::Stopping);   // on the press
@@ -896,7 +904,7 @@ int main()
     holdBDroppedOnPartChange();
     cPressMutesAndReleaseUnmutes(); cHoldClearsTheTrackAndSetsItOn(); cHoldOnAnOffTrackNeverSounds();
     cDoubleTapRestoresThenStops(); cDoubleTapRestoresBeforeAFadeStop(); cTapOnAnEmptyTrackDoesNothing();
-    cDuringAnOverdubClosesItAndMutes(); cCancelsOnlyTheSelectedTracksArm(); cDuringTheFirstRecording();
+    cDuringAnOverdubClosesItAndMutes(); cCancelsOnlyTheSelectedTracksArm(); cDuringTheFirstRecording(); cTapPendingDoesNotWipeALoopBClosed();
     cGestureKeepsTheTrackItWasPressedOn(); cGestureDroppedOnPartChange();
     doubleTapStops();
     bRestartsAfterStop();
