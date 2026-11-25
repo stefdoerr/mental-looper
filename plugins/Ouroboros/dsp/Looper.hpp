@@ -511,6 +511,10 @@ public:
 
     // Playback gains: settings, stored even while disabled; every gain ramps to its target over kRampMs.
     void setOn(int t, bool on) { if (inRange(t) && cur()[t].on != on) { cur()[t].on = on; ++changes_; } }
+    // Part p's, any part: a C double-tap puts back a track in the part a song stop has just left.
+    void setOnIn(int p, int t, bool on) {
+        if (p >= 0 && p < kParts && inRange(t) && parts_[p][t].on != on) { parts_[p][t].on = on; ++changes_; }
+    }
     void toggleOn(int t) { if (inRange(t)) { cur()[t].on = !cur()[t].on; ++changes_; } }
     bool isOn(int t) const { return inRange(t) && cur()[t].on; }
     void setVolumeDb(int t, float db) {

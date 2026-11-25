@@ -97,7 +97,24 @@ static void stopLabelFollowsTheSelectedTrack() {
     b.update(view(ouro::TrackState::Playing, ouro::NextAction::Dub, false, 1, true, ouro::Transport::Stopped));
     CHECK(lastLabel(A1) == "PLAY 2");
     b.update(view(ouro::TrackState::Empty, ouro::NextAction::Rec, false, 1, true)); CHECK(lastLabel(A1) == "-");
-    CHECK(count("led") == 0);
+}
+static void stopLedShowsPlayStopAndTheTrack() {   // green playing with the track on (blinking while a stop finishes), red stopped, else off
+    gCalls.clear(); ouro::HmiBridge b; b.setFeature(&gFake); b.addressed(ouro::kHmiStop, A1, kAllCaps);
+    using ouro::TrackState; using ouro::NextAction; using ouro::Transport;
+    b.update(view(TrackState::Playing, NextAction::Dub, false, 1, true));
+    CHECK(lastLed(A1).colour == LV2_HMI_LED_Colour_Green && lastLed(A1).on == LV2_HMI_LED_Blink_None);
+    b.update(view(TrackState::Playing, NextAction::Dub, false, 1, true, Transport::Stopping));
+    CHECK(lastLed(A1).colour == LV2_HMI_LED_Colour_Green && lastLed(A1).on == LV2_HMI_LED_Blink_Mid && lastLed(A1).off == LV2_HMI_LED_Blink_Mid);
+    b.update(view(TrackState::Playing, NextAction::Dub, false, 1, false));
+    CHECK(lastLed(A1).colour == LV2_HMI_LED_Colour_Off);
+    b.update(view(TrackState::Playing, NextAction::Dub, false, 1, false, Transport::Stopped));
+    CHECK(lastLed(A1).colour == LV2_HMI_LED_Colour_Red && lastLed(A1).on == LV2_HMI_LED_Blink_None);
+    b.update(view(TrackState::Empty, NextAction::Rec, false, 1, true, Transport::Stopped));
+    CHECK(lastLed(A1).colour == LV2_HMI_LED_Colour_Off);
+    const size_t n = gCalls.size(); b.update(view(TrackState::Empty, NextAction::Rec, false, 1, true, Transport::Stopped));
+    CHECK(gCalls.size() == n);                     // unchanged: nothing sent
+    gCalls.clear(); ouro::HmiBridge l; l.setFeature(&gFake); l.addressed(ouro::kHmiStop, A1, LV2_HMI_AddressingCapability_Label);
+    l.update(view(TrackState::Playing, NextAction::Dub, false, 1, true)); CHECK(count("led") == 0);   // no LED capability
 }
 static void redoLabelShowsAvailability() {
     gCalls.clear(); ouro::HmiBridge b; b.setFeature(&gFake); b.addressed(ouro::kHmiRedo, A1, kAllCaps);
@@ -161,7 +178,7 @@ int main()
 {
     labelsSentOnlyOnChange();
     recLabelShowsArmAndStop(); waitingBlinksFastInTheComingColour();
-    stopLabelFollowsTheSelectedTrack();
+    stopLabelFollowsTheSelectedTrack(); stopLedShowsPlayStopAndTheTrack();
     redoLabelShowsAvailability();
     knobLabelsFollowTrack();
     readdressResends();

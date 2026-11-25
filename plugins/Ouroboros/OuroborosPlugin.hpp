@@ -571,9 +571,20 @@ protected:
             fCFlipped = tracks; fCWas = 0;
             for (int u = 0; u < 4; ++u) fCWas |= uint8_t(fEngine.isOn(u) << u);
         };
-        const auto putBack = [&] { for (int u = 0; u < 4; ++u) if (fCFlipped >> u & 1) turn(u, fCWas >> u & 1); fCFlipped = 0; };
-        if (fEngine.part() != fCPart) { fTapPending = fCRestart = false; fDone = true; }
+        const auto putBack = [&] {                       // into the first press's part, wherever the song is now
+            for (int u = 0; u < 4; ++u)
+                if (fCFlipped >> u & 1)
+                {
+                    const bool v = fCWas >> u & 1;
+                    fEngine.setOnIn(fCPart, u, v);
+                    if (fEngine.part() == fCPart) request(kParamOn1 + u, v ? 1.0f : 0.0f);
+                }
+            fCFlipped = 0;
+        };
         const bool stoppedNow = fEngine.transport() == ouro::Transport::Stopped;
+        // A part change drops the gesture, except a song stop's park (Song on: step 1's part) inside the window of a tap
+        // made while the loops ran: the second press then only puts the track back, in the part the tap was made in.
+        if (fEngine.part() != fCPart && !(stoppedNow && fTapPending && !fCStopped)) { fTapPending = fCRestart = false; fDone = true; }
         if (fCRestart && !(stoppedNow && fEngine.userWaiting()))   // the tap's restart started, or B, Stop/Play or
         {                                                          // MOD's stop cancelled it (a C press: below)
             fCRestart = false;
@@ -588,7 +599,7 @@ protected:
                 {
                     fTapPending = fCRestart = false; fDone = true;
                     putBack();
-                    if (!fCStopped) stopNow();           // stopping already: at once
+                    if (!fCStopped) { if (!stoppedNow) stopNow(); }   // stopping already: at once; parked: nothing more
                     else if (!fEngine.userWaiting())     // the tap's restart still waiting: everything starts on the line
                     {
                         if (fEngine.transport() != ouro::Transport::Stopped) fEngine.stop(ouro::StopMode::Instant, 0.0f);

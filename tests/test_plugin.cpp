@@ -987,6 +987,17 @@ static void songEndedInB() {
     CHECK(runUntil(stopped) && eng().songOn() && eng().songStep() == -1);
     CHECK(eng().part() == 0 && P().getParameterValue(kParamPart) == 0.0f);
 }
+static void cDoubleTapAcrossASongStopPutsBackAndStaysStopped() {        // the stop's park moves the song home inside the window
+    fresh(); set(kParamStopMode, 2); set(kParamFadeTime, 0.5f); song({{0, 1}, {1, 1}, {5, 1}});
+    recordLoop(); set(kParamTrack, 2); runN(1); recordLoop(); set(kParamTrack, 1); runN(1);
+    set(kParamSong, 1); CHECK(runUntil([] { return eng().part() == 1; }));
+    CHECK(runUntil([] { return eng().transport() == ouro::Transport::Stopping; }));   // the Stop step's fade, in B
+    runN(120); tapC(); CHECK(!eng().isOn(0) && eng().transport() == ouro::Transport::Stopping);
+    CHECK(runUntil(stopped, 120) && eng().part() == 0);                // parked in step 1's part, inside the window
+    cDown(); cUp(); runN(10);
+    CHECK(stopped() && eng().part() == 0 && eng().isOn(0) && eng().isOn(1));   // no solo start
+    press(kParamStopPlay); CHECK(runUntil([] { return eng().part() == 1; }) && eng().isOn(0));   // B's track 1 put back
+}
 static void cAfterTheSongEndsActsInStepOnesPart() {
     songEndedInB(); tapC();                                             // track 2 alone, in A
     CHECK(eng().transport() == ouro::Transport::Running && eng().part() == 0 && !eng().isOn(0) && eng().isOn(1));
@@ -1020,6 +1031,7 @@ int main()
     cHoldWhileStoppedClearsTheTrackThenEverything(); cTapWhileStoppedOnAnEmptyTrackDoesNothing();
     cSyncWaitPutsTracksBackWhenCancelled(); cTapKeepsARestartQueuedWhileHeld();
     cAfterTheSongEndsActsInStepOnesPart();
+    cDoubleTapAcrossASongStopPutsBackAndStaysStopped();
     doubleTapStops();
     bRestartsAfterStop();
     doubleTapThenHoldDoesNotClear();

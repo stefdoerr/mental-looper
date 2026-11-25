@@ -359,10 +359,10 @@ Restart (B, or a double-tap on C while stopped; a tap on C starts the selected t
 <tr><td>Press, track on</td><td>Turns it off at once. The label always shows the selected track&rsquo;s current state: <code>ON n</code> or <code>OFF n</code>.</td></tr>
 <tr><td>Release before the hold time, track was off</td><td>Turns it on.</td></tr>
 <tr><td>Hold</td><td>At the hold time the selected track clears and is set back on, so your next recording on it is heard. You cannot undo this.</td></tr>
-<tr><td>Double-tap</td><td>Puts the on/off back as it was before the first tap, and stops every track (see Stop Mode). During End of loop or Fade it stops at once.</td></tr>
+<tr><td>Double-tap</td><td>Puts the on/off back as it was before the first tap, and stops every track (see Stop Mode). During End of loop or Fade it stops at once; if the stop has already finished, it only puts the on/off back.</td></tr>
 <tr><td>Empty selected track</td><td>A tap does nothing (the label reads <code>-</code>). A double-tap still stops.</td></tr>
 </table>
-<p>While stopped, the label reads <code>PLAY n</code>:</p>
+<p>While stopped, the label reads <code>PLAY n</code> and C&rsquo;s light is red:</p>
 <table>
 <tr><th>Gesture</th><th>Effect</th></tr>
 <tr><td>Tap</td><td>Starts from the top with only the selected track on. The other tracks that hold audio are turned off; empty tracks keep their setting, so a later recording on them is heard. With Song on, it starts from step 1. An empty selected track: nothing.</td></tr>
@@ -392,7 +392,7 @@ If you run the pedal in series instead, turn <b>Dry</b> up: it adds your input t
 
 <h2>On the Dwarf screen (Starless 19 and later)</h2>
 <p>Ouroboros offers a <b>Loop</b> display widget. In Starless&rsquo; <b>Display</b> dialog, put it in the column above knob 1; it replaces knob 1&rsquo;s own text and keeps the footswitch labels visible.
-It shows the selected track and its state (ARM when that track is armed), a mark per track (a blinking dot for an armed track), and a bar that fills once per pass (elapsed time during the first recording). Under each mark a small number counts the layers you hear on that track: the recording plus each overdub still in, so an undo takes one off (it needs an area at least 33 pixels tall). For a long track the bar covers the whole track, with a small tick at each loop (left out when there are too many), and while a track records past the loop, small dots count how many times the loop has come round while it records. It needs an area at least 27 pixels tall for the full layout; a shorter area shows the bar only. While stopped it shows STOP (blinking while a stop is still finishing), and B&rsquo;s label reads PLAY. C&rsquo;s label reads <code>ON n</code> or <code>OFF n</code> for the selected track while running, <code>PLAY n</code> while stopped, and <code>-</code> for an empty selected track.
+It shows the selected track and its state (ARM when that track is armed), a mark per track (a blinking dot for an armed track), and a bar that fills once per pass (elapsed time during the first recording). Under each mark a small number counts the layers you hear on that track: the recording plus each overdub still in, so an undo takes one off (it needs an area at least 33 pixels tall). For a long track the bar covers the whole track, with a small tick at each loop (left out when there are too many), and while a track records past the loop, small dots count how many times the loop has come round while it records. It needs an area at least 27 pixels tall for the full layout; a shorter area shows the bar only. While stopped it shows STOP (blinking while a stop is still finishing), and B&rsquo;s label reads PLAY. C&rsquo;s label reads <code>ON n</code> or <code>OFF n</code> for the selected track while running, <code>PLAY n</code> while stopped, and <code>-</code> for an empty selected track. C&rsquo;s light is green while the loops play with the selected track on (blinking while a stop is finishing), red while stopped, and off when the selected track is off or empty.
 Without the widget everything still works, just without the screen. On stock MOD OS the volume knob can be one step off right after you change track.</p>
 
 <h2>Tempo sync</h2>

@@ -64,7 +64,7 @@ private:
     {
         switch (p) {
         case kHmiRec:    return ((int(v.state) * 3 + int(v.next)) * 6 + int(v.transport) * 2 + v.armed) * 2 + v.waiting;
-        case kHmiStop:   return ((v.selected * 3 + (v.state == TrackState::Empty ? 2 : v.transport == Transport::Stopped ? 1 : 0)) * 2 + v.on);
+        case kHmiStop:   return (v.selected * 4 + (v.state == TrackState::Empty ? 3 : int(v.transport))) * 2 + v.on;
         case kHmiRedo:   return v.canRedo;
         case kHmiOnOff:  return v.selected * 2 + v.on;
         default:         return v.selected;
@@ -96,6 +96,18 @@ private:
             if (v.state == TrackState::Empty) label = "-";
             else if (v.transport == Transport::Stopped) std::snprintf(text, sizeof text, "PLAY %d", v.selected + 1);
             else std::snprintf(text, sizeof text, "%s %d", v.on ? "ON" : "OFF", v.selected + 1);
+            if (caps & LV2_HMI_AddressingCapability_LED)   // green: playing, the track on (blinking: a stop finishing);
+            {                                              // red: stopped; off: the track off, or empty
+                LV2_HMI_LED_Colour col = LV2_HMI_LED_Colour_Off;
+                int t = LV2_HMI_LED_Blink_None;
+                if (v.state != TrackState::Empty && v.transport == Transport::Stopped) col = LV2_HMI_LED_Colour_Red;
+                else if (v.state != TrackState::Empty && v.on)
+                {
+                    col = LV2_HMI_LED_Colour_Green;
+                    if (v.transport == Transport::Stopping) t = LV2_HMI_LED_Blink_Mid;
+                }
+                wc_->set_led_with_blink(wc_->handle, a, col, t, t);
+            }
             break;
         case kHmiRedo:   label = v.canRedo ? "REDO" : "-"; break;   // ASCII: the Dwarf font has no em dash
         case kHmiOnOff:  std::snprintf(text, sizeof text, "%s %d", v.on ? "ON" : "OFF", v.selected + 1); break;
