@@ -95,17 +95,30 @@ def load(browser, pose_js: str = "", scale: float = 1):
     return tab
 
 
-POSE = ""
+# The screenshot's pose, through the face script as mod-ui would drive it: screaming (looper 3), track 1, the bar at
+# 40 %, the mockup's song playing step 1. Transitions jump to their end, animations hold their first frame.
+POSE = """
+const host = document.querySelector('.pedal-host');
+const ev = o => mlFace(Object.assign({ icon: [host] }, o), { set_port_value() {} });
+const ports = { track: 1, volume: 0, song: 1, part: 0, ':bypass': 0, on_1: 1, on_2: 1, on_3: 1, on_4: 1 };
+const song = [[0, 4], [1, 2], [0, 4], [1, 4], [2, 2], [5, 1]];
+for (let s = 1; s <= 16; s++) { const [p, r] = song[s - 1] || [4, 1]; ports['step' + s + '_part'] = p; ports['step' + s + '_repeats'] = r; }
+ev({ type: 'start', ports: Object.entries(ports).map(([symbol, value]) => ({ symbol, value })) });
+for (const [symbol, value] of [['looper', 3], ['progress_loops', 1], ['progress', .4], ['song_step', 1]])
+    ev({ type: 'change', symbol, value });
+document.body.offsetWidth;
+document.getAnimations().forEach(a => a instanceof CSSTransition ? a.finish() : (a.pause(), a.currentTime = 0));
+"""
 
 
 def main():
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         browser = launch(p)
-        tab = load(browser, POSE, SCALE)
-        tab.screenshot(path=OUT, omit_background=True)
+        load(browser, POSE, SCALE).screenshot(path=OUT, omit_background=True)
+        load(browser, POSE, 0.5).screenshot(path=THUMB, omit_background=True)   # 260 px wide
         browser.close()
-    print(f"Wrote {OUT} ({WIDTH * SCALE}x{HEIGHT * SCALE} @ {SCALE}x)")
+    print(f"Wrote {OUT} ({WIDTH * SCALE}x{HEIGHT * SCALE}) and {THUMB} ({WIDTH // 2}x{HEIGHT // 2})")
 
 
 if __name__ == "__main__":

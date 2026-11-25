@@ -244,11 +244,18 @@ test-lv2: all
 	g++ -std=gnu++14 -g -O0 -fsanitize=address -Idpf/distrho/src -I$(PLUGIN_DIR)/hmi tests/lv2/test_lv2_hooks.cpp -ldl -pthread -o build/tests/test_lv2_hooks
 	build/tests/test_lv2_hooks $(BUNDLE)/$(BUNDLE_NAME).so
 
-# test-modgui: the face's static checks (tests/test_modgui_hooks.py).
+# test-modgui: the face's static checks, then its script in headless Chrome ($(CHROME)) against the real template
+# (needs uv; Playwright comes with it).
+PLAYWRIGHT_PY ?= uv run --quiet --with playwright python3
 test-modgui:
 	python3 tests/test_modgui_hooks.py
+	CHROME=$(CHROME) $(PLAYWRIGHT_PY) tests/test_modgui_face.py
 
-.PHONY: test test-lv2 test-modgui
+# screenshot: re-render the face's screenshot and thumbnail (render_screenshot.py, the face in its screaming pose).
+screenshot:
+	CHROME=$(CHROME) $(PLAYWRIGHT_PY) $(PLUGIN_DIR)/modgui/render_screenshot.py
+
+.PHONY: test test-lv2 test-modgui screenshot
 
 beta:
 	$(MAKE) BETA=1

@@ -162,6 +162,19 @@ def test_static_defaults():
 
 
 
+def test_script_hooks():
+    for p in KEY_PORTS + ["rec", "track", "part", "song", "volume", "stop_clear", ":bypass"] + sorted(OUTPUTS):
+        assert f"'{p}'" in js, f"script must handle {p}"
+    assert "event.icon[0]" in js and "set_port_value" in js
+
+
+def test_screenshot_has_alpha():
+    # RGBA (colour type 6), so the rounded corners sit on MOD's dark dialogs without a white frame.
+    for f in ("screenshot-ouroboros.png", "thumbnail-ouroboros.png"):
+        png = open(os.path.join(MODGUI, f), "rb").read(32)
+        assert png[:8] == b"\x89PNG\r\n\x1a\n" and png[25] == 6, f"{f}: PNG colour type {png[25]} (want 6 = RGBA)"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):
