@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0">
+<title>Mental Looper Faces</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=Anton&family=Archivo:wdth,wght@100..125,400..800&family=Bungee&family=Courier+Prime:wght@700&family=Playfair+Display:wght@900&family=Rubik+Mono+One&family=Saira+Stencil+One&family=Special+Elite&display=swap">
+<style>
+/* layout: four punk boxes in a 2x2 grid, all showing the same live face; one control bar on top drives them all */
+:root{
+  --bg:#121110; --panel:#1b1a18; --rule:#33302b; --fg:#ece8df; --muted:#a29c90; --accent:#ff3d8b;
+  --display:"Anton",Impact,"Arial Narrow",sans-serif; --body:"Archivo",system-ui,sans-serif;
+  --z:1;
+  color-scheme:dark;
+}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.55}
+.wrap{max-width:1240px;margin:0 auto;padding-block:36px 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font-family:var(--display);font-weight:400;font-size:2.8rem;line-height:1;letter-spacing:.03em;margin:0 0 .7rem;text-shadow:3px 2px 0 var(--accent)}
+.lede{max-width:74ch;color:var(--muted);margin:0 0 .8rem}
+.lede b{color:var(--fg)}
+.bar{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;margin:1.2rem 0 .9rem;padding:12px 16px;border:1px solid var(--rule);border-radius:8px;background:var(--panel)}
+.bar>span{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px}
+.lab{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.seg button{font:inherit;font-size:13px;color:var(--muted);background:none;border:0;padding:5px 11px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#170b10;font-weight:700}
+.seg button:focus-visible{outline:2px solid var(--fg);outline-offset:-2px}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:6px 26px;margin:0 0 1.6rem;color:var(--muted);font-size:13.5px;line-height:1.5}
+.notes b{color:var(--fg)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,580px),1fr));gap:24px}
+.grid.big{grid-template-columns:1fr}
+.card.pick{grid-column:1/-1}
+.card.pick .holder{zoom:calc(var(--z) * 1.4)}
+.card{min-width:0}
+.card h2{font-family:var(--display);font-weight:400;font-size:1.4rem;letter-spacing:.05em;margin:0}
+.card p{margin:.1rem 0 .6rem;color:var(--muted);font-size:14px}
+.stage{overflow-x:auto;border-radius:10px;background:radial-gradient(ellipse at 50% 35%,#2a2724,#191816 75%);box-shadow:inset 0 0 0 1px #2b2825}
+.holder{zoom:var(--z);display:flex;padding:24px 20px}
+
+/* ===== the box: 520 x 404, same places as the Minimal face ===== */
+.face{position:relative;width:520px;height:420px;flex:none;margin:0 auto;-webkit-user-select:none;user-select:none;border-radius:12px;
+  --ink:#1d1d1f; --muted:#6d6a64; --accent:#ff5a1f; --key:#d9d5cc; --key-fg:#1d1d1f; --key-on:#1d1d1f; --key-on-fg:#f2efe9; --trk-sel:#1d1d1f; --trk-sel-fg:#f2efe9; --kptr:#f2efe9;
+  --stroke:#1d1d1f; --fill:#fff; --pupil:#1d1d1f; --hole:#ff5a1f; --hair:#1d1d1f; --skin:none; --tongue:#ffa07e; --lw:3px; --ui:"Archivo",sans-serif;
+  color:var(--ink);font-family:var(--ui);
+  background:linear-gradient(180deg,#f0ede7,#e3dfd7);box-shadow:inset 0 1px 0 rgba(255,255,255,.75),inset 0 0 0 1px rgba(0,0,0,.12),0 10px 24px rgba(0,0,0,.55)}
+.face *{box-sizing:border-box}
+.face>*{position:absolute}
+:where(.face button){font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer}
+.face button:focus-visible,.face .f-knob:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mi-model{right:30px;top:27px;text-align:right;font-size:7.5px;font-weight:600;letter-spacing:.18em;line-height:1.6;opacity:.75;pointer-events:none}
+.f-brand{top:20px;left:0;right:0;text-align:center;font-weight:600;font-size:8px;letter-spacing:.5em;text-indent:.5em;color:var(--muted);pointer-events:none}
+.f-title{top:41px;left:0;right:0;text-align:center;line-height:1;white-space:nowrap;pointer-events:none;font-family:"Archivo",sans-serif;font-stretch:125%;font-weight:800;font-size:17px;letter-spacing:.22em;text-indent:.22em}
+.f-bypass{left:26px;top:22px;width:46px;height:46px;border-radius:50%}
+.f-bypass svg,.smp svg{width:100%;height:100%;display:block;overflow:visible}
+/* the on/off light: four options; off is styled from .is-dead (mod-ui: the bypass-light's .off) */
+.pw .ink{fill:#111}
+.pw .wire{fill:none;stroke:#111;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.pw.led .bezel{fill:#2b2b2b}
+.pw.led .lens{fill:#ff3d8b;filter:drop-shadow(0 0 4px #ff3d8b) drop-shadow(0 0 9px rgba(255,61,139,.7))}
+.pw.led .gl{fill:#fff;opacity:.8}
+.is-dead .pw.led .lens{fill:#4a1a2c;filter:none}
+.is-dead .pw.led .gl{opacity:.25}
+.pw.badge .tilt{transform:rotate(-8deg)}
+.pw.badge .disc{fill:#ff3d8b;stroke:#111;stroke-width:2.5}
+.pw.badge text{font-family:"Anton",Impact,sans-serif;font-size:16px;fill:#111;text-anchor:middle}
+.pw.badge .shine{fill:none;stroke:#fff;stroke-width:2.6;stroke-linecap:round;opacity:.85}
+.pw.badge .off,.is-dead .pw.badge .on,.pw.pin .open,.is-dead .pw.pin .shut{display:none}
+.is-dead .pw.badge .off,.is-dead .pw.pin .open{display:inline}
+.is-dead .pw.badge .disc,.is-dead .pw.pin .clasp{fill:#fff}
+.pw.pin .clasp{fill:#ff3d8b;stroke:#111;stroke-width:2}
+.pw.bolt .disc{fill:#111}
+.pw.bolt .zap{fill:#ff3d8b}
+.is-dead .pw.bolt .zap{fill:none;stroke:#f3e813;stroke-width:1.5;opacity:.55}
+.f-head{left:150px;top:82px;width:220px;height:220px;overflow:visible;pointer-events:none}
+.f-rec{left:208px;top:202px;width:104px;height:82px;border-radius:40%}
+.f-rec:hover{outline:1.5px dashed var(--accent);outline-offset:-3px}
+.f-trk{width:28px;height:28px;border-radius:50%;font-weight:700;font-size:11px;line-height:1;text-align:center;border:1.5px solid var(--ink)}
+.face .f-trk.sel{background:var(--trk-sel);color:var(--trk-sel-fg)}
+.f-trk.off{opacity:.35;text-decoration:line-through}
+.t1{left:172.5px;top:104.5px}.t2{left:319.5px;top:104.5px}.t3{left:319.5px;top:251.5px}.t4{left:172.5px;top:251.5px}
+.f-part,.f-trackbox{top:108px;width:130px;height:150px}
+.f-part{left:30px}.f-trackbox{left:360px}
+.f-part>*,.f-trackbox>*{position:absolute}
+.f-cap{top:0;left:0;right:0;text-align:center;font-weight:700;font-size:7.5px;letter-spacing:.3em;text-indent:.3em;color:var(--muted)}
+.f-parts{top:20px;left:21px;width:88px;display:grid;grid-template-columns:40px 40px;gap:8px}
+.face .f-key,.face .f-pt{font-weight:700;font-size:8.5px;letter-spacing:.2em;color:var(--key-fg);background:var(--key);border-radius:14px;box-shadow:inset 0 -1px 0 rgba(0,0,0,.12)}
+.face .f-pt{height:28px;border-radius:6px;font-size:12px;letter-spacing:.05em}
+.face .f-key.on,.face .f-pt.sel{background:var(--key-on);color:var(--key-on-fg)}
+.f-song,.f-onoff{top:112px;left:21px;width:88px;height:28px}
+.f-song i{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;vertical-align:1px;background:currentColor;opacity:.35}
+.face .f-song.lit i{background:var(--accent);opacity:1}
+.f-knob{top:18px;left:37px;width:56px;height:56px;touch-action:none;cursor:ns-resize;border-radius:50%}
+.f-knob svg{position:absolute;left:-12px;top:-12px;width:80px;height:80px;overflow:visible;pointer-events:none}
+.tick{stroke:var(--ink);stroke-width:1.2;stroke-linecap:round;opacity:.6}
+.f-kcap{position:absolute;inset:0;border-radius:50%;transform:rotate(calc(var(--v) * 270deg - 135deg));background:repeating-conic-gradient(#2c2c2e 0 6deg,#141415 6deg 12deg);box-shadow:0 3px 6px rgba(0,0,0,.3)}
+.f-kcap::before{content:"";position:absolute;inset:8px;border-radius:50%;background:radial-gradient(circle at 42% 34%,#323234,#161617)}
+.f-kptr{position:absolute;left:50%;top:4px;width:2.5px;height:16px;margin-left:-1.25px;border-radius:1px;background:var(--kptr)}
+.f-klab{top:80px;left:0;right:0;text-align:center;font-weight:700;font-size:8px;letter-spacing:.24em;pointer-events:none}
+.f-db{display:block;font-weight:500;font-size:9px;letter-spacing:.08em;opacity:.8;margin-top:1px;font-variant-numeric:tabular-nums}
+.f-keys{left:30px;right:30px;top:292px;height:28px;display:flex;gap:10px}
+.f-keys .f-key{height:28px;flex:1 1 auto;padding:0 6px;white-space:nowrap}
+.f-strip{left:30px;right:30px;top:352px;height:52px}
+.f-prog{left:30px;right:30px;top:330px;height:12px;border-radius:3px;background:var(--prog-bg,rgba(0,0,0,.07));overflow:hidden}
+.f-prog::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1.5px var(--ink)}
+.f-prog .pg-fill{position:absolute;left:0;top:0;bottom:0;width:calc(var(--p,0) * 100%);background:var(--accent)}
+.f-prog .pg-tick{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--ink)}
+.face:not(.pg-bar){height:404px}
+.face:not(.pg-bar) .f-prog{display:none}
+.face:not(.pg-bar) .f-strip{top:336px}
+.face:not(.pg-ring) .ringg{display:none}
+.f-head .pg-ring-bg{fill:none;stroke:var(--stroke);stroke-width:10px}
+.f-head .pg-ring-in{fill:none;stroke:var(--fill);stroke-width:6px}
+.f-head .pg-ring{fill:none;stroke:var(--accent);stroke-width:6px}
+.hg .a{stop-color:var(--accent)}
+.hg .b{stop-color:var(--fill)}
+.f-strip>*{position:absolute}
+.ss-rule{left:0;right:0;top:0;height:1px;background:var(--ink);opacity:.14}
+.ss-cap{left:0;top:9px;font-weight:700;font-size:7.5px;letter-spacing:.3em;color:var(--muted)}
+.ss-hint{right:0;top:9px;font-weight:600;font-size:7px;letter-spacing:.16em;color:var(--muted)}
+.ss-row{left:0;right:0;top:22px;display:flex;gap:4px}
+.face .ss-step{flex:1 1 0;min-width:0;height:30px;border-radius:5px;background:var(--key);color:var(--key-fg);box-shadow:inset 0 -1px 0 rgba(0,0,0,.12);display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:11.5px;line-height:1;touch-action:none}
+.face .ss-step:nth-child(4n):not(:last-child){margin-right:5px}
+.face .ss-step small{font-weight:600;font-size:7.5px;letter-spacing:.04em;opacity:.7;margin-top:3px}
+.face .ss-step.end{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
+.face .ss-step.dead{opacity:.3}
+.face .ss-step.now{background:var(--accent);color:#fff;box-shadow:none}
+
+/* ===== the head ===== */
+.f-head .skull{fill:var(--skin);stroke:var(--stroke);stroke-width:var(--lw)}
+.f-head .hair{fill:var(--hair);stroke:var(--stroke);stroke-width:var(--lw);stroke-linejoin:round}
+.f-head .white{fill:var(--fill);stroke:var(--stroke);stroke-width:var(--lw)}
+.f-head .spiral{fill:none;stroke:var(--pupil);stroke-linecap:round}
+.f-head .pupil{fill:var(--pupil)}
+.f-head .glint{fill:var(--fill)}
+.f-head .xx{fill:none;stroke:var(--pupil);stroke-width:4px;stroke-linecap:round;display:none}
+.f-head .brow{fill:none;stroke:var(--stroke);stroke-width:calc(var(--lw) + 1.5px);stroke-linecap:round;transition:transform .25s;transform-box:fill-box;transform-origin:center}
+.f-head .cav{fill:var(--hole)}
+.f-head .cav-line{fill:none;stroke:var(--stroke);stroke-width:var(--lw);stroke-linejoin:round;stroke-linecap:round}
+.f-head .teeth{fill:var(--fill);stroke:var(--stroke);stroke-width:1.4px;stroke-linejoin:round}
+.f-head .tongue{fill:var(--tongue)}
+.f-head .drop{fill:var(--fill);stroke:var(--stroke);stroke-width:1.8px}
+.f-head .scar{fill:none;stroke:var(--stroke);stroke-width:2.2px;stroke-linecap:round}
+.f-head .chin{fill:var(--stroke);font:700 7.5px var(--ui);letter-spacing:.3em;text-anchor:middle}
+.st-play .brow.L{transform:translateY(-4px) rotate(-14deg)}
+.st-play .brow.R{transform:rotate(10deg)}
+.st-rec .brow.L{transform:translateY(4px) rotate(22deg)}
+.st-rec .brow.R{transform:translateY(4px) rotate(-22deg)}
+@keyframes shake{25%{transform:translate(1.5px,-1px) rotate(1.2deg)}50%{transform:translate(-1px,1px) rotate(-1deg)}75%{transform:translate(1px,1.5px) rotate(.6deg)}}
+.st-rec .f-head .hd{animation:shake .16s linear infinite}
+.st-wait .brow.L,.st-wait .brow.R{transform:translateY(-8px)}
+.face.is-dead .f-head .hd{animation:none}
+.face.is-dead .f-head .brow{transform:none}
+.is-dead .f-head{opacity:.5}
+.is-dead .f-head .spin,.is-dead .f-head .teeth-g,.is-dead .f-head .cav{display:none}
+.is-dead .f-head .xx{display:inline}
+@media (prefers-reduced-motion:reduce){.st-rec .f-head .hd{animation:none}.f-head .brow{transition:none}}
+
+/* ===== Xerox: photocopied zine ===== */
+.th-xerox{--ink:#141414; --muted:#55534e; --accent:#ff2e88; --key:#151515; --key-fg:#f1efe9; --key-on:#ff2e88; --key-on-fg:#141414; --trk-sel:#ff2e88; --trk-sel-fg:#141414;
+  --stroke:#141414; --fill:#f8f7f3; --pupil:#141414; --hole:#ff2e88; --hair:#141414; --tongue:#ffb3d1; --ui:"Special Elite","Courier New",monospace;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2.4 0 0 0 -1.38'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse at 50% 45%,transparent 55%,rgba(0,0,0,.22) 100%),
+    linear-gradient(90deg,transparent 70%,rgba(0,0,0,.05) 70.5%,transparent 72.5%),#ebeae5}
+.th-xerox .f-head .hd{filter:url(#rough)}
+.th-xerox .f-title{top:35px;font-family:inherit;font-stretch:normal;letter-spacing:0;text-indent:0}
+.rn span{display:inline-block;line-height:1;padding:2px 3px 1px;margin:0 1px;vertical-align:middle;box-shadow:0 1px 1.5px rgba(0,0,0,.3)}
+.rn .sp{width:8px;padding:0;box-shadow:none}
+.th-xerox .f-key{border-radius:0;box-shadow:none;font-family:var(--ui);font-weight:400;font-size:10px;letter-spacing:.06em;clip-path:polygon(0 12%,4% 0,97% 7%,100% 90%,96% 100%,2% 93%)}
+.th-xerox .f-keys .f-key:nth-child(odd){transform:rotate(-1.5deg)}
+.th-xerox .f-keys .f-key:nth-child(even){transform:rotate(1.2deg)}
+.th-xerox .f-pt{background:var(--fill);color:var(--ink);border:1.5px solid var(--ink);border-radius:1px;box-shadow:2px 2px 0 rgba(0,0,0,.18);font-family:"Courier Prime",monospace;font-size:15px}
+.th-xerox .f-pt.sel{background:var(--ink);color:var(--fill)}
+.th-xerox .f-trk{border:2px solid var(--ink);background:var(--fill);font-family:"Courier Prime",monospace;font-size:13px}
+.th-xerox .ss-step{background:var(--fill);color:var(--ink);border-radius:1px;box-shadow:inset 0 0 0 1.5px var(--ink);font-family:"Courier Prime",monospace;font-size:13px}
+.th-xerox .ss-step.end{background:transparent}
+.th-xerox .ss-step.now{color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
+.th-xerox :is(.f-cap,.ss-cap,.ss-hint,.f-klab,.mi-model,.f-brand){font-weight:400;letter-spacing:.14em}
+
+/* ===== Fluoro: gig poster ===== */
+.th-fluoro{--ink:#111; --muted:#4a4300; --accent:#ff3d8b; --key:#111; --key-fg:#f6ec1a; --key-on:#ff3d8b; --key-on-fg:#111; --trk-sel:#111; --trk-sel-fg:#f6ec1a;
+  --stroke:#111; --fill:#fff; --pupil:#111; --hole:#ff3d8b; --hair:#ff3d8b; --skin:#fff; --tongue:#ffb0cf; --lw:4px;
+  background:#f3e813;box-shadow:inset 0 0 0 1px rgba(0,0,0,.2),0 10px 24px rgba(0,0,0,.55)}
+.th-fluoro::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:.55;
+  background:radial-gradient(circle,var(--accent) 1.15px,transparent 1.6px) 0 0/6px 6px;
+  -webkit-mask:radial-gradient(ellipse 70% 65% at 50% 47%,transparent 55%,#000 100%);mask:radial-gradient(ellipse 70% 65% at 50% 47%,transparent 55%,#000 100%)}
+.th-fluoro .f-title{top:30px;font-family:"Anton",Impact,sans-serif;font-weight:400;font-stretch:normal;font-size:32px;letter-spacing:.03em;text-indent:0;text-shadow:2.5px 2px 0 var(--accent);transform:rotate(-3deg)}
+.th-fluoro .f-key{font-family:"Anton",Impact,sans-serif;font-weight:400;font-size:11px;letter-spacing:.1em;border-radius:3px;box-shadow:none}
+.th-fluoro .f-pt{font-family:"Anton",Impact,sans-serif;font-weight:400;font-size:15px;background:#fff;color:#111;border:2px solid #111;border-radius:3px;box-shadow:2px 2px 0 #111}
+.th-fluoro .f-pt.sel{background:var(--accent);color:#111}
+.th-fluoro .f-trk{border:2px solid #111;background:#fff;font-family:"Anton",Impact,sans-serif;font-weight:400;font-size:13px}
+.th-fluoro .ss-step{background:#fff;color:#111;border-radius:3px;box-shadow:inset 0 0 0 2px #111;font-family:"Anton",Impact,sans-serif;font-weight:400;font-size:13px}
+.th-fluoro .ss-step small{font-family:"Archivo",sans-serif}
+.th-fluoro .ss-step.end{background:transparent}
+.th-fluoro .ss-step.now{background:var(--accent);color:#111;box-shadow:inset 0 0 0 2px #111}
+.th-fluoro :is(.f-cap,.ss-cap,.ss-hint,.f-klab){font-weight:800}
+.th-fluoro .f-title.rn{top:35px;font-family:inherit;font-size:inherit;letter-spacing:0;text-indent:0;text-shadow:none;transform:none}
+.th-fluoro .rn span{box-shadow:1.5px 1.5px 0 #111}
+.th-fluoro{--prog-bg:#fff}
+.th-fluoro .f-prog::after{box-shadow:inset 0 0 0 2px #111}
+
+/* ===== Stencil: spray paint on a black box ===== */
+.th-stencil{--ink:#ece8de; --muted:#9b978d; --accent:#ec3a2e; --key:transparent; --key-fg:#ece8de; --key-on:#ec3a2e; --key-on-fg:#fff; --trk-sel:#ec3a2e; --trk-sel-fg:#fff; --kptr:#ec3a2e;
+  --stroke:#ece8de; --fill:#ece8de; --pupil:#1f1f1d; --hole:#ec3a2e; --hair:#ec3a2e; --tongue:#ff8f84; --lw:3.5px;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 2.2 0 0 0 -1.28'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse at 40% 30%,#2f2e2b,#1b1b19 80%);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.07),0 10px 24px rgba(0,0,0,.6)}
+.th-stencil .f-head .hd{filter:url(#spray)}
+.th-stencil .f-title{top:36px;left:50%;right:auto;transform:translateX(-50%);font-family:"Saira Stencil One","Archivo",sans-serif;font-weight:400;font-stretch:normal;font-size:23px;letter-spacing:.1em;text-indent:.1em}
+.drip{position:absolute;top:20px;width:2.5px;border-radius:0 0 2px 2px;background:var(--ink)}
+.drip::after{content:"";position:absolute;left:-1px;bottom:-3px;width:4.5px;height:5px;border-radius:50%;background:inherit}
+.th-stencil .f-key{font-family:"Saira Stencil One",sans-serif;font-weight:400;font-size:10.5px;letter-spacing:.12em;border-radius:2px;box-shadow:inset 0 0 0 1.5px var(--ink)}
+.th-stencil .f-key.on{box-shadow:none}
+.th-stencil .f-pt{font-family:"Saira Stencil One",sans-serif;font-weight:400;font-size:15px;border-radius:2px;box-shadow:inset 0 0 0 1.5px var(--ink)}
+.th-stencil .f-pt.sel{background:var(--ink);color:#1f1f1d}
+.th-stencil .f-trk{font-family:"Saira Stencil One",sans-serif;font-weight:400;font-size:13px}
+.th-stencil .ss-step{font-family:"Saira Stencil One",sans-serif;font-weight:400;font-size:13px;border-radius:2px;box-shadow:inset 0 0 0 1.5px var(--ink)}
+.th-stencil .ss-step small{font-family:"Archivo",sans-serif}
+.th-stencil .ss-step.end{box-shadow:inset 0 0 0 1.5px var(--muted);color:var(--muted)}
+.th-stencil .ss-step.now{box-shadow:none}
+.th-stencil .ss-rule{opacity:.25}
+.th-stencil .f-kcap{box-shadow:0 0 0 1.5px rgba(236,232,222,.3),0 3px 6px rgba(0,0,0,.5)}
+
+/* ===== the on/off light, close up ===== */
+.pw-pick{margin-top:30px}
+.pw-pick h2{font-family:var(--display);font-weight:400;font-size:1.4rem;letter-spacing:.05em;margin:0}
+.pw-pick>p{margin:.1rem 0 .8rem;color:var(--muted);font-size:14px;max-width:74ch}
+.pw-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:14px}
+.pw-tile{font:inherit;color:var(--fg);text-align:left;background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:12px;cursor:pointer;display:flex;flex-direction:column;gap:5px}
+.pw-tile[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.pw-tile:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.pw-tile .sw{display:flex;gap:26px;justify-content:center;padding:18px 10px 8px;border-radius:8px;background:#f3e813;color:#4a4300;font-size:11px;font-weight:700;letter-spacing:.2em;text-align:center}
+.pw-tile .smp{display:block;width:69px;height:69px;margin-bottom:8px}
+.pw-tile b{font-family:var(--display);font-weight:400;font-size:1.1rem;letter-spacing:.04em;margin-top:4px}
+.pw-tile small{color:var(--muted);font-size:13px;line-height:1.45}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <filter id="rough" x="-8%" y="-8%" width="116%" height="116%"><feTurbulence type="fractalNoise" baseFrequency=".045" numOctaves="2" seed="3" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="3.5" xChannelSelector="R" yChannelSelector="G"/></filter>
+  <filter id="spray" x="-12%" y="-12%" width="124%" height="124%"><feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="1" seed="9" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.4" xChannelSelector="R" yChannelSelector="G" result="d"/><feGaussianBlur in="d" stdDeviation="2.6" result="b"/><feComponentTransfer in="b" result="glow"><feFuncA type="linear" slope=".5"/></feComponentTransfer><feMerge><feMergeNode in="glow"/><feMergeNode in="d"/></feMerge></filter>
+</defs></svg>
+
+<div class="wrap">
+  <h1>MENTAL LOOPER</h1>
+  <p class="lede"><b>The final face.</b> One thing left to pick: the <b>on/off light</b> top left, in place of the little head. Four options are below the box. Click one to put it on the box, and click the light on the box to switch the plugin off (the big head goes X-eyed).</p>
+  <p class="lede"><b>New: waiting to record.</b> Click the mouth. With Auto Rec or Sync on, a REC press first waits (ARM or WAIT on the MOD display). The face shows it: the mouth opens halfway and trembles, the brows go up. Then the take starts and it screams. In this demo the wait lasts 1.5 s.</p>
+
+  <div class="bar">
+    <span><span class="lab">Size</span><span class="seg" id="zoom"><button type="button" aria-pressed="true" data-z="1">1× (as on the board)</button><button type="button" aria-pressed="false" data-z="1.5">1.5×</button></span></span>
+    <span><span class="lab">On/off light</span><span class="seg" id="power"><button type="button" data-v="led">Pedal light</button><button type="button" data-v="badge">Badge</button><button type="button" data-v="pin">Safety pin</button><button type="button" data-v="bolt">Bolt</button></span></span>
+    <span><span class="lab">Looper</span><span class="seg" id="tr"><button type="button" data-v="stop">Stopped</button><button type="button" data-v="play">Playing</button><button type="button" data-v="wait">Waiting</button><button type="button" data-v="rec">Recording</button></span></span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <section class="pw-pick">
+    <h2>The on/off light</h2>
+    <p>Each shown on and off, at 1.5× the size on the board.</p>
+    <div class="pw-row" id="pw-row"></div>
+  </section>
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), f1 = v => v.toFixed(1);
+
+const THEMES = [
+  { id: 'fluoro', rn: true, pick: true, name: 'Mental Looper', blurb: 'Fluoro colours, cut-out letters, the Mohawk head. It screams while recording or overdubbing; the bar shows the selected track.' },
+];
+const POWERS = [
+  { v: 'led', name: 'Pedal light', d: 'A pink jewel light in a black nut, like on a real pedal. It glows when on and goes dark when off. My pick: it reads at a glance and leaves the head as the only face.' },
+  { v: 'badge', name: 'Badge', d: 'A punk pin-back button: pink with ON, white with OFF.' },
+  { v: 'pin', name: 'Safety pin', d: 'Shut with a pink clasp when on. It springs open when off.' },
+  { v: 'bolt', name: 'Bolt', d: 'A pink lightning bolt on a black disc. Only its outline is left when off.' },
+];
+const HEX = [0, 1, 2, 3, 4, 5].map(k => { const a = (k * 60 + 30) * Math.PI / 180; return (21 * Math.cos(a)).toFixed(1) + ',' + (21 * Math.sin(a)).toFixed(1); }).join(' ');
+function powerSVG(k) {
+  const g = {
+    led: `<polygon class="ink" points="${HEX}"/><circle class="bezel" r="13"/><circle class="lens" r="9.5"/><ellipse class="gl" cx="-3.2" cy="-3.6" rx="3" ry="2"/>`,
+    badge: '<g class="tilt"><circle class="disc" r="20"/><text class="on" y="6">ON</text><text class="off" y="5" style="font-size:13px">OFF</text><path class="shine" d="M-15.5,-5A16.5,16.5 0 0 1 -6,-15.5"/></g>',
+    pin: '<g transform="rotate(-30)"><circle class="wire" cx="-17" r="4"/><path class="wire" d="M-17,4H12"/><path class="wire shut" d="M-17,-4L12,-2"/><path class="wire open" d="M-17,-4L4,-21"/><path class="clasp" d="M10,-5.5H19Q22,-5.5 22,-2.5V2.5Q22,5.5 19,5.5H10Z"/></g>',
+    bolt: '<circle class="disc" r="20"/><path class="zap" d="M4,-15L-8,2H0L-4,15L9,-3H1Z"/>',
+  }[k];
+  return `<svg viewBox="-24 -24 48 48" aria-hidden="true"><g class="pw ${k}">${g}</g></svg>`;
+}
+const CHARS = {
+  hypno: { eyes: [{ x: -36, y: -26, R: 22, k: 'spiral', spd: 1 }, { x: 36, y: -26, R: 22, k: 'spiral', spd: -1 }], teeth: 'zig', n: 7, extras: ['sweat'] },
+  mohawk: { eyes: [{ x: -36, y: -24, R: 25, k: 'spiral', spd: 1 }, { x: 38, y: -28, R: 15, k: 'spiral', spd: -2 }], teeth: 'gap', n: 6, extras: ['hair', 'scar'] },
+  googly: { eyes: [{ x: -36, y: -26, R: 25, k: 'googly', spd: 1 }, { x: 36, y: -26, R: 25, k: 'googly', spd: 1.5 }], teeth: 'block', n: 6, extras: ['tongue'] },
+};
+const NAMES = ['A', 'B', 'C', 'D', '↺', '■'], LOOP = 4, STOP = 5, LOOP_MS = 4000;
+const LOOPS = [1, 2, 4, 1];   // each track's length in loops (demo)
+const steps = [[0, 4], [1, 2], [0, 4], [1, 4], [2, 2], [STOP, 1]];
+while (steps.length < 16) steps.push([LOOP, 1]);
+const S = { tr: 'play', mouth: 'scream', ch: 'mohawk', pg: 'bar', power: 'led', song: true, t: 1, on: [1, 1, 1, 1], db: [0, -6, 0, -12], part: 0, now: -1, left: 0 };
+
+// ----- drawing -----
+function spiral(R, turns = 3) {
+  const N = turns * 40; let d = '';
+  for (let i = 0; i <= N; i++) { const a = i / N * turns * 2 * Math.PI, r = R * i / N; d += (i ? 'L' : 'M') + f1(r * Math.cos(a)) + ',' + f1(r * Math.sin(a)); }
+  return d;
+}
+function hairPath() {
+  const P = (a, r) => f1(r * Math.cos(a * Math.PI / 180)) + ',' + f1(r * Math.sin(a * Math.PI / 180));
+  const n = 6, a0 = -124, a1 = -56, st = (a1 - a0) / n, pts = [P(a0, 88)];
+  for (let k = 0; k < n; k++) { pts.push(P(a0 + st * (k + .5), k % 2 ? 104 : 111)); pts.push(P(a0 + st * (k + 1), 88)); }
+  for (let a = a1 - 4; a > a0; a -= 4) pts.push(P(a, 87.5));
+  return 'M' + pts.join('L') + 'Z';
+}
+function ransom(txt, LOOKS) {
+  let seed = 11; const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+  const FONTS = ['"Anton",Impact,sans-serif', '"Abril Fatface",serif', '"Courier Prime",monospace', '"Bungee",sans-serif', '"Playfair Display",serif', '"Rubik Mono One",sans-serif', '"Special Elite",monospace'];
+  LOOKS = LOOKS || [['#f8f7f3', '#141414'], ['#141414', '#f8f7f3'], ['#ff2e88', '#141414'], ['#d6d2c6', '#141414'], ['#f8f7f3', '#ff2e88']];
+  let last = -1;
+  return [...txt].map(ch => {
+    if (ch === ' ') return '<span class="sp"></span>';
+    let fi; do fi = Math.floor(rnd() * FONTS.length); while (fi === last); last = fi;
+    const [bg, fg] = LOOKS[Math.floor(rnd() * LOOKS.length)], size = 15 + Math.round(rnd() * 6), rot = (rnd() * 14 - 7).toFixed(1), dy = (rnd() * 4 - 2).toFixed(1);
+    return `<span style="font-family:${fFix(FONTS[fi])};font-size:${size}px;background:${bg};color:${fg};transform:translateY(${dy}px) rotate(${rot}deg)">${ch}</span>`;
+  }).join('');
+}
+const fFix = s => s.replace(/"/g, "'");
+function titleHTML(th, rn) {
+  if (rn) return `<div class="f-title rn">${ransom('MENTAL LOOPER', [['#fff', '#111'], ['#111', '#f6ec1a'], ['#ff3d8b', '#111'], ['#111', '#fff'], ['#fff', '#ff3d8b'], ['#e8e2cc', '#111']])}</div>`;
+  if (th === 'xerox') return `<div class="f-title rn">${ransom('MENTAL LOOPER')}</div>`;
+  if (th === 'stencil') return '<div class="f-title">MENTAL LOOPER<i class="drip" style="left:21%;height:9px"></i><i class="drip" style="left:46%;height:16px"></i><i class="drip" style="left:80%;height:7px"></i></div>';
+  return '<div class="f-title">MENTAL LOOPER</div>';
+}
+function headSVG(c, i) {
+  const C = CHARS[c];
+  let s = '<svg class="f-head" viewBox="-110 -110 220 220" aria-hidden="true"><g class="hd">';
+  s += `<linearGradient id="hg${i}" class="hg"><stop class="a" offset="0"/><stop class="a" offset="0"/><stop class="b" offset="0"/><stop class="b" offset="1"/></linearGradient>`;
+  s += '<g class="ringg"><circle class="pg-ring-bg" r="97"/><circle class="pg-ring-in" r="97"/><circle class="pg-ring" r="97" pathLength="1" transform="rotate(-90)" stroke-dasharray="0 1"/></g>';
+  if (C.extras.includes('hair')) s += `<path class="hair" d="${hairPath()}"/>`;
+  s += '<circle class="skull" r="88"/>';
+  if (C.extras.includes('sweat')) s += '<path class="drop" d="M74,-54c5,8 8,12 0,18c-8,-6 -5,-10 0,-18z"/><path class="drop" d="M-80,-38c4,6 6,9 0,14c-6,-5 -4,-8 0,-14z"/>';
+  if (C.extras.includes('scar')) s += '<path class="scar" d="M50,6L72,24M53,16l7,-7M59,21l7,-7M65,26l7,-7"/>';
+  C.eyes.forEach((e, k) => {
+    s += `<g transform="translate(${e.x},${e.y})"><path class="brow ${k ? 'R' : 'L'}" d="M${-e.R + 2},${-e.R - 12}L${e.R - 2},${-e.R - 12}"/></g>`;
+    s += `<g transform="translate(${e.x},${e.y})"><circle class="white" r="${e.R + 3}"/><g class="spin" data-spd="${e.spd}">`;
+    s += e.k === 'spiral'
+      ? `<path class="spiral" style="stroke-width:${f1(e.R / 3 * .44)}px" d="${spiral(e.R)}"/>`
+      : `<circle class="pupil" cx="${f1(e.R * .4)}" r="${f1(e.R * .46)}"/><circle class="glint" cx="${f1(e.R * .4 - 4)}" cy="-4" r="3"/>`;
+    s += '</g><path class="xx" d="M-10,-10L10,10M10,-10L-10,10"/></g>';
+  });
+  s += `<clipPath id="mc${i}"><path class="cav-clip"/></clipPath><path class="cav"/><g class="teeth-g" clip-path="url(#mc${i})">`;
+  if (C.extras.includes('tongue')) s += '<ellipse class="tongue" rx="17" ry="10"/>';
+  s += '<path class="teeth tt"/><path class="teeth tb"/></g><path class="cav-line"/><text class="chin" y="81">REC</text></g></svg>';
+  return s;
+}
+// the mouth, o = 0 (gritted teeth) .. 1 (screaming)
+function mouth(o, style, n) {
+  const w = 44, y0 = 20, yb = y0 + 12 + 30 * o, A = 5 * o, B = 8 * o, bw = w * .86, L = 8, s = 2 * w / n;
+  const yt = x => y0 - A * (1 - Math.min(1, (x / w) ** 2)), ybx = x => yb + B * (1 - Math.min(1, (x / bw) ** 2));
+  const cav = `M${-w},${y0}Q0,${f1(y0 - 2 * A)} ${w},${y0}L${f1(bw)},${f1(yb)}Q0,${f1(yb + 2 * B)} ${f1(-bw)},${f1(yb)}Z`;
+  let tt = '', tb = '';
+  if (style === 'zig') {
+    tt = `M${-w - 4},${y0 - 30}L${w + 4},${y0 - 30}`;
+    for (let k = 0; k <= 2 * n; k++) { const x = w - k * s / 2; tt += `L${f1(x)},${f1(k % 2 ? yt(x) + L : yt(x) - 1)}`; }
+    tb = `M${w + 4},${f1(yb + 30)}L${-w - 4},${f1(yb + 30)}`;
+    for (let k = 0; k <= 2 * n + 2; k++) { const x = -w - s / 2 + k * s / 2; tb += `L${f1(x)},${f1(k % 2 ? ybx(x) - L : ybx(x) + 1)}`; }
+    tt += 'Z'; tb += 'Z';
+  } else {
+    for (let k = 0; k < n; k++) {
+      const x0 = -w + k * s + 1.2, x1 = x0 + s - 2.4, xm = (x0 + x1) / 2, e = yt(xm), b = ybx(xm);
+      if (!(style === 'gap' && k === 2)) tt += `M${f1(x0)},${f1(e - 2)}H${f1(x1)}V${f1(e + L - 2)}Q${f1(xm)},${f1(e + L + 1)} ${f1(x0)},${f1(e + L - 2)}Z`;
+      tb += `M${f1(x0)},${f1(b + 2)}H${f1(x1)}V${f1(b - L + 2)}Q${f1(xm)},${f1(b - L - 1)} ${f1(x0)},${f1(b - L + 2)}Z`;
+    }
+  }
+  return { cav, tt, tb, yb };
+}
+const DEAD_MOUTH = 'M-30,34Q0,30 30,34';
+
+// ----- the boxes -----
+let TICKS = ''; for (let i = 0; i <= 10; i++) { const a = (-135 + i * 27 - 90) * Math.PI / 180, r1 = 31, r2 = i % 5 ? 34 : 35.5; TICKS += `<line class="tick" x1="${f1(r1 * Math.cos(a))}" y1="${f1(r1 * Math.sin(a))}" x2="${f1(r2 * Math.cos(a))}" y2="${f1(r2 * Math.sin(a))}"/>`; }
+const faceHTML = (th, i, rn) => `<div class="face th-${th}" data-i="${i}">
+  <button type="button" class="f-bypass" aria-pressed="true" aria-label="On/Off" title="On/Off"></button>
+  <div class="mi-model">ML-4<br>4 TRACKS</div>
+  <div class="f-brand">STEFAN</div>
+  ${titleHTML(th, rn)}
+  <svg class="f-head"></svg>
+  <button type="button" class="f-rec" aria-label="Record (the mouth)" title="REC: click the mouth"></button>
+  ${[1, 2, 3, 4].map(n => `<button type="button" class="f-trk t${n}" data-t="${n}" aria-label="Track ${n}">${n}</button>`).join('')}
+  <div class="f-part"><div class="f-cap">PART</div><div class="f-parts">${[0, 1, 2, 3].map(p => `<button type="button" class="f-pt" data-p="${p}">${NAMES[p]}</button>`).join('')}</div><button type="button" class="f-key f-song"><i></i>SONG</button></div>
+  <div class="f-trackbox"><div class="f-cap">TRACK <span class="tn">1</span></div>
+    <div class="f-knob" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="-60" aria-valuemax="6"><svg viewBox="-40 -40 80 80" aria-hidden="true">${TICKS}</svg><div class="f-kcap"><i class="f-kptr"></i></div></div>
+    <div class="f-klab">VOLUME<span class="f-db"></span></div>
+    <button type="button" class="f-key f-onoff">ON/OFF</button></div>
+  <div class="f-keys">${['STOP/PLAY', 'UNDO', 'REDO', 'CLEAR', 'CLEAR ALL'].map(k => `<button type="button" class="f-key" data-k="${k}">${k}</button>`).join('')}</div>
+  <div class="f-prog"><i class="pg-fill"></i></div>
+  <div class="f-strip"><div class="ss-rule"></div><div class="ss-cap">SONG STEPS</div><div class="ss-hint">CLICK: PART · SCROLL: REPEATS</div><div class="ss-row">${steps.map((_, j) => `<button type="button" class="ss-step" data-j="${j}"></button>`).join('')}</div></div>
+</div>`;
+const grid = $('#grid');
+grid.innerHTML = THEMES.map((th, i) => `<section class="card${th.pick ? ' pick' : ''}"><h2>${th.name}</h2><p>${th.blurb}</p><div class="stage"><div class="holder">${faceHTML(th.id, i, th.rn)}</div></div></section>`).join('');
+const faces = $$('.face');
+
+function setHeads() {
+  faces.forEach(F => {
+    $('.f-head', F).outerHTML = headSVG(S.ch, F.dataset.i);
+    F.h = { cav: $('.cav', F), clip: $('.cav-clip', F), line: $('.cav-line', F), tt: $('.tt', F), tb: $('.tb', F), tongue: $('.tongue', F), spins: $$('.spin', F),
+      prog: $('.f-prog', F), ring: $('.pg-ring', F), stops: $$('.hg stop', F), hair: $('.hair', F) };
+  });
+}
+function drawSteps() {
+  const end = steps.findIndex(s => s[0] >= LOOP);
+  $$('.ss-row').forEach(row => [...row.children].forEach((b, j) => {
+    const [p, r] = steps[j];
+    b.innerHTML = p >= LOOP ? NAMES[p] : `${NAMES[p]}<small>×${r}</small>`;
+    b.classList.toggle('end', p >= LOOP);
+    b.classList.toggle('dead', end >= 0 && j > end);
+    b.classList.toggle('now', j === S.now);
+    b.setAttribute('aria-label', `Step ${j + 1}: ${p === LOOP ? 'Loop' : p === STOP ? 'Stop' : 'part ' + NAMES[p] + ' times ' + r}`);
+  }));
+}
+const pwRow = $('#pw-row');
+pwRow.innerHTML = POWERS.map(p => `<button type="button" class="pw-tile" data-v="${p.v}"><span class="sw"><span><span class="smp">${powerSVG(p.v)}</span>ON</span><span class="is-dead"><span class="smp">${powerSVG(p.v)}</span>OFF</span></span><b>${p.name}</b><small>${p.d}</small></button>`).join('');
+pwRow.addEventListener('click', e => { const b = e.target.closest('.pw-tile'); if (b) { S.power = b.dataset.v; render(); } });
+function render() {
+  $$('.pw-tile').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === S.power));
+  faces.forEach(F => {
+    const byp = $('.f-bypass', F);
+    if (byp.dataset.v !== S.power) { byp.dataset.v = S.power; byp.innerHTML = powerSVG(S.power); }
+    for (const k of ['stop', 'play', 'wait', 'rec']) F.classList.toggle('st-' + k, S.tr === k);
+    for (const k of ['bar', 'ring', 'hair']) F.classList.toggle('pg-' + k, S.pg === k);
+    if (F.h.hair) F.h.hair.style.fill = S.pg === 'hair' ? `url(#hg${F.dataset.i})` : '';
+    const nl = LOOPS[S.t - 1];
+    F.h.prog.querySelectorAll('.pg-tick').forEach(x => x.remove());
+    for (let j = 1; j < nl; j++) F.h.prog.insertAdjacentHTML('beforeend', `<i class="pg-tick" style="left:${(100 * j / nl).toFixed(2)}%"></i>`);
+    $$('.f-trk', F).forEach(b => { const n = +b.dataset.t; b.classList.toggle('sel', n === S.t); b.classList.toggle('off', !S.on[n - 1]); b.setAttribute('aria-pressed', n === S.t); });
+    $('.tn', F).textContent = S.t;
+    const db = S.db[S.t - 1], knob = $('.f-knob', F);
+    knob.style.setProperty('--v', ((db + 60) / 66).toFixed(4));
+    knob.setAttribute('aria-valuenow', db);
+    $('.f-db', F).textContent = (db > 0 ? '+' : db < 0 ? '−' : '') + Math.abs(db).toFixed(1) + ' dB';
+    $$('.f-pt', F).forEach(b => { const on = +b.dataset.p === S.part; b.classList.toggle('sel', on); b.setAttribute('aria-pressed', on); });
+    const sg = $('.f-song', F); sg.classList.toggle('lit', S.song); sg.setAttribute('aria-pressed', S.song);
+  });
+  drawSteps();
+  for (const id of ['power', 'tr']) $$(`#${id} button`).forEach(b => b.setAttribute('aria-pressed', b.dataset.v === S[id]));
+}
+const setDb = d => { S.db[S.t - 1] = clamp(Math.round(d * 10) / 10, -60, 6); render(); };
+
+// ----- bar -----
+let waitTimer = 0;
+for (const id of ['power', 'tr']) $('#' + id).addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  S[id] = b.dataset.v; clearTimeout(waitTimer); render();
+});
+$('#zoom').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.documentElement.style.setProperty('--z', b.dataset.z);
+  grid.classList.toggle('big', b.dataset.z !== '1');
+  $$('#zoom button').forEach(x => x.setAttribute('aria-pressed', x === b));
+});
+
+// ----- the boxes' own controls (one set of state, four views) -----
+let drag = null;
+grid.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const F = b.closest('.face');
+  if (b.classList.contains('ss-step')) {
+    const moved = drag && drag.moved; drag = null; if (moved) return;
+    const j = +b.dataset.j; steps[j][0] = (steps[j][0] + 1) % 6; drawSteps(); return;
+  }
+  if (b.classList.contains('f-bypass')) { const off = F.classList.toggle('is-dead'); b.setAttribute('aria-pressed', !off); return; }
+  if (b.classList.contains('f-rec')) {
+    clearTimeout(waitTimer);
+    if (S.tr === 'rec' || S.tr === 'wait') S.tr = 'play';
+    else { S.tr = 'wait'; waitTimer = setTimeout(() => { S.tr = 'rec'; render(); }, 1500); }
+  }
+  else if (b.dataset.t) S.t = +b.dataset.t;
+  else if (b.dataset.p) S.part = +b.dataset.p;
+  else if (b.classList.contains('f-song')) { S.song = !S.song; if (!S.song) S.now = -1; }
+  else if (b.classList.contains('f-onoff')) S.on[S.t - 1] ^= 1;
+  else if (b.dataset.k === 'STOP/PLAY') S.tr = S.tr === 'stop' ? 'play' : 'stop';
+  if (e.detail === 0 && b.matches('.f-keys .f-key, .f-onoff')) { b.classList.add('on'); setTimeout(() => b.classList.remove('on'), 150); }
+  render();
+});
+grid.addEventListener('pointerdown', e => {
+  const key = e.target.closest('.f-keys .f-key, .f-onoff');
+  if (key) {
+    const at = Date.now(); key.classList.add('on');
+    const up = () => { setTimeout(() => key.classList.remove('on'), Math.max(0, 120 - (Date.now() - at))); removeEventListener('pointerup', up); removeEventListener('pointercancel', up); };
+    addEventListener('pointerup', up); addEventListener('pointercancel', up);
+    return;
+  }
+  const st = e.target.closest('.ss-step'), kn = e.target.closest('.f-knob');
+  if (st) { const j = +st.dataset.j; drag = { kind: 'step', el: st, j, y0: e.clientY, r0: steps[j][1], moved: false }; st.setPointerCapture(e.pointerId); }
+  else if (kn) { drag = { kind: 'knob', el: kn, y0: e.clientY, d0: S.db[S.t - 1] }; kn.setPointerCapture(e.pointerId); }
+});
+grid.addEventListener('pointermove', e => {
+  if (!drag || !drag.el.hasPointerCapture(e.pointerId)) return;
+  const dy = drag.y0 - e.clientY;
+  if (drag.kind === 'knob') setDb(drag.d0 + dy * 66 / 160);
+  else if (steps[drag.j][0] < LOOP) { const d = Math.round(dy / 8); if (d) drag.moved = true; steps[drag.j][1] = clamp(drag.r0 + d, 1, 16); drawSteps(); }
+});
+grid.addEventListener('pointerup', () => { if (drag && drag.kind === 'knob') drag = null; });
+// One step per wheel notch: high-resolution and smooth-scrolling wheels send several small events per notch, so add
+// up the distance (50 px a step) and take at most one step per 80 ms.
+let wAcc = 0, wAt = 0, wStep = 0, wEl = null;
+function wheelSteps(e, el) {
+  const now = performance.now();
+  if (el !== wEl || now - wAt > 250) wAcc = 0;
+  wEl = el; wAt = now;
+  wAcc += e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1);
+  if (Math.abs(wAcc) < 50 || now - wStep < 80) return 0;
+  const s = Math.sign(wAcc); wAcc = 0; wStep = now; return s;
+}
+grid.addEventListener('wheel', e => {
+  const st = e.target.closest('.ss-step'), kn = e.target.closest('.f-knob');
+  if (!st && !kn) return;
+  e.preventDefault();
+  const n = wheelSteps(e, st || kn); if (!n) return;
+  if (st) { const j = +st.dataset.j; if (steps[j][0] < LOOP) { steps[j][1] = clamp(steps[j][1] - n, 1, 16); drawSteps(); } }
+  else setDb(S.db[S.t - 1] - n);
+}, { passive: false });
+grid.addEventListener('keydown', e => {
+  if (!e.target.classList.contains('f-knob')) return;
+  const s = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 }[e.key];
+  if (s) { e.preventDefault(); setDb(S.db[S.t - 1] + s); }
+});
+
+// ----- live: a 4 s loop; the eyes turn with it, the song moves on pass by pass -----
+function nextStep() {
+  let j = S.now + 1;
+  if (j >= 16 || steps[j][0] === LOOP) j = 0;
+  if (steps[j][0] >= LOOP) { S.now = -1; return; }   // demo: a Stop step starts the song over; an empty song stays put
+  S.now = j; S.left = steps[j][1]; S.part = steps[j][0];
+}
+const hash = k => { const x = Math.sin(k * 12.9898) * 43758.5453; return x - Math.floor(x); };
+let clock = 0, lastT = 0, pass = -1;
+function frame(t) {
+  const run = S.tr !== 'stop';
+  if (lastT && run) clock += Math.min(100, t - lastT);
+  lastT = t;
+  const phase = (clock / LOOP_MS) % 1, p = Math.floor(clock / LOOP_MS);
+  if (p !== pass) { pass = p; if (S.song) { if (S.now < 0 || --S.left <= 0) nextStep(); render(); } }
+  let o = 0;
+  if (run) {
+    if (S.mouth === 'sing') { const b = clock / LOOP_MS * 8, k = Math.floor(b); o = Math.exp(-(b - k) * 4.5) * (.45 + .55 * hash(k)) * (S.tr === 'rec' ? 1 : .8) + .06 * Math.sin(t / 37); }
+    else if (S.mouth === 'scream') o = S.tr === 'rec' ? .82 + .18 * Math.sin(t / 45) : S.tr === 'wait' ? .36 + .07 * Math.sin(t / 19) : 0;
+    else o = phase < .94 ? Math.pow(phase / .94, 1.6) : 1 - (phase - .94) / .06;
+  }
+  const nl = LOOPS[S.t - 1], prog = ((p % nl) + phase) / nl;
+  const C = CHARS[S.ch], m = mouth(clamp(o, 0, 1), C.teeth, C.n);
+  faces.forEach(F => {
+    const h = F.h, dead = F.classList.contains('is-dead');
+    const d = dead ? DEAD_MOUTH : m.cav;
+    h.cav.setAttribute('d', d); h.clip.setAttribute('d', d); h.line.setAttribute('d', d);
+    h.tt.setAttribute('d', m.tt); h.tb.setAttribute('d', m.tb);
+    if (h.tongue) { h.tongue.setAttribute('cx', 6); h.tongue.setAttribute('cy', f1(m.yb - 3)); }
+    h.spins.forEach(g => g.setAttribute('transform', `rotate(${f1(phase * 360 * g.dataset.spd % 360)})`));
+    h.prog.style.setProperty('--p', prog.toFixed(4));
+    h.ring.setAttribute('stroke-dasharray', `${prog.toFixed(4)} 1`);
+    if (h.stops.length) { h.stops[1].setAttribute('offset', prog.toFixed(4)); h.stops[2].setAttribute('offset', prog.toFixed(4)); }
+  });
+  requestAnimationFrame(frame);
+}
+setHeads();
+render();
+requestAnimationFrame(frame);
+</script>
+
+</body></html>
