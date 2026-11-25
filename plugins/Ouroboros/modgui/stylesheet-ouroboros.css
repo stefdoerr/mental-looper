@@ -1,191 +1,389 @@
 /*
- * Ouroboros — MOD pedal stylesheet.
+ * Mental Looper — MOD pedal stylesheet (the Fluoro face with the Mohawk head).
  *
- * Deliberately minimal: only positions our own controls and the audio
- * jacks. The pedal frame texture, brand/label fonts, bypass light and
- * footswitch visuals are all left to MOD-UI's built-in skin (selected
- * by `modgui:model` / `modgui:panel` / `modgui:color` / `modgui:knob`
- * in modgui.ttl). If you want a custom look, add `background:`,
- * `box-shadow:`, custom `.mod-plugin-brand h1 { ... }` etc. here.
+ * Design: docs/superpowers/specs/2026-11-25-mental-looper-face-design.md; the mockup next to it is the reference for
+ * every pixel value. The rules from Boreas and Sitar that keep a restyled face working in mod-ui:
+ *   - Every selector carries {{{cns}}} (mod-ui renders it per plugin URI + version and keeps each loaded version's
+ *     stylesheet in <head>, so without it a stable and a beta copy on one page restyle each other). @keyframes names
+ *     are ml-prefixed and carry {{{cns}}} too.
+ *   - font-family is always !important: mod-ui's main.css forces *{font-family:"cooper hewitt" !important}. Fonts are
+ *     bundled (fonts/, OFL) under plugin-unique family names.
+ *   - Only transform and opacity animate (the compositor runs those off the main thread), so a board with several
+ *     Mental Loopers stays cheap. The script animates nothing: it sets classes, --v, --p and the eyes' angle.
+ *   - box-sizing: border-box everywhere; the footswitch's z-index is pinned (pedals.css sets 20).
  *
- * Conventions:
- *   - The pedal MUST be position:absolute with a fixed pixel
- *     width/height — MOD's pedalboard places pedals at absolute
- *     coordinates on the board.
- *   - Don't set overflow:hidden on the pedal — MOD-UI positions the
- *     audio jacks outside the pedal frame (left:-44px / right:-44px)
- *     and clipping would hide the cable endpoints.
- *   - MOD-UI provides default visuals for .mod-input / .mod-output
- *     (audio jacks), .mod-knob-image (rotary knobs), .mod-light, and
- *     .mod-footswitch. We only position them.
+ * NOTE: the pedal size (520 x 420) must match WIDTH/HEIGHT in render_screenshot.py.
  */
 
-/* ============================ Pedal frame ============================ */
-.ouroboros-pedal {
-    width: 340px;
-    height: 220px;
-    position: absolute;
-    /* Self-contained skin so the pedal renders without MOD's built-in panel
-       image — used by render_screenshot.py, and a clean base to restyle. */
-    background: linear-gradient(135deg, #4a3524 0%, #6a4a30 50%, #34241a 100%);
-    border-radius: 12px;
-    box-shadow:
-        inset 0 0 0 2px rgba(255, 220, 160, 0.15),
-        inset 0 0 24px rgba(0, 0, 0, 0.5),
-        0 4px 10px rgba(0, 0, 0, 0.5);
-    color: #f0e2c8;
-    font-family: "Lato", "Helvetica Neue", Helvetica, Arial, sans-serif;
+@font-face {
+    font-family: "MentalLooperAnton";
+    font-weight: 400; font-style: normal;
+    src: url(/resources/fonts/anton-400.woff2{{{ns}}}) format("woff2");
+}
+@font-face {
+    font-family: "MentalLooperArchivo";
+    font-weight: 100 900; font-stretch: 62.5% 125%; font-style: normal;
+    src: url(/resources/fonts/archivo-var.woff2{{{ns}}}) format("woff2");
 }
 
-/* Drag handle covers the whole pedal so it can be dragged anywhere on
-   it. Lives behind all interactive controls (z-index 0) so they remain
-   clickable. */
-.ouroboros-pedal .mod-drag-handle {
+/* ============================ The box ============================ */
+.ml-pedal{{{cns}}},
+.ml-pedal{{{cns}}} * {
+    box-sizing: border-box;
+    font-family: "MentalLooperArchivo", "Helvetica Neue", Arial, sans-serif !important;
+}
+.ml-pedal{{{cns}}} {
+    position: relative;
+    width: 520px;
+    height: 420px;
+    border-radius: 12px;
+    background: #f3e813;
+    color: #111;
+    font-size: 15px;
+    line-height: 1.55;          /* the mockup's; mod-ui's pages set their own */
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .2), 0 10px 24px rgba(0, 0, 0, .55);
+    -webkit-user-select: none;
+    user-select: none;
+}
+/* Pink halftone dots, fading in towards the edges. */
+.ml-pedal{{{cns}}}::before {
+    content: "";
     position: absolute;
     inset: 0;
-    z-index: 0;
-    cursor: move;
-}
-
-/* All interactive / informative elements sit above the drag handle. */
-.ouroboros-pedal .mod-plugin-brand,
-.ouroboros-pedal .mod-plugin-name,
-.ouroboros-pedal .ouroboros-controls,
-.ouroboros-pedal .ouroboros-keys,
-.ouroboros-pedal .mod-light,
-.ouroboros-pedal .mod-footswitch,
-.ouroboros-pedal .mod-pedal-input,
-.ouroboros-pedal .mod-pedal-output {
-    z-index: 1;
-}
-
-/* ============================ Branding text ============================
-   MOD-UI styles the text itself (font, colour, weight) via its built-in
-   panel CSS. We only position the containers. */
-.ouroboros-pedal .mod-plugin-brand {
-    position: absolute;
-    top: 10px;
-    left: 0;
-    right: 0;
-    text-align: center;
+    border-radius: inherit;
     pointer-events: none;
+    opacity: .55;
+    background: radial-gradient(circle, #ff3d8b 1.15px, transparent 1.6px) 0 0 / 6px 6px;
+    -webkit-mask: radial-gradient(ellipse 70% 65% at 50% 47%, transparent 55%, #000 100%);
+    mask: radial-gradient(ellipse 70% 65% at 50% 47%, transparent 55%, #000 100%);
 }
-.ouroboros-pedal .mod-plugin-name {
-    position: absolute;
-    top: 28px;
-    left: 0;
-    right: 0;
-    text-align: center;
-    pointer-events: none;
-}
-.ouroboros-pedal .mod-plugin-brand h1 {
-    margin: 0; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase;
-    color: rgba(240, 226, 200, 0.7); font-weight: 400;
-}
-.ouroboros-pedal .mod-plugin-name h1 {
-    margin: 0; font-size: 18px; letter-spacing: 0.12em; text-transform: uppercase;
-    color: #f0e2c8; font-weight: 700; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
-}
-
-/* ============================ Controls ============================
-   MOD-UI applies its built-in knob sprite from `modgui:knob` in
-   modgui.ttl. Don't override .mod-knob-image's background-image unless
-   you want a custom sprite (drop it at modgui/knobs/<name>.png and
-   reference via `background-image: url(/resources/knobs/<name>.png{{{ns}}}`).
-   The film_strip widget rotates frames by setting
-   background-position-x at runtime; width/height set display size. */
-.ouroboros-pedal .ouroboros-controls {
-    position: absolute;
-    top: 56px;
-    left: 0;
-    right: 0;
-    display: flex;
-    justify-content: center;
-    gap: 44px;
-}
-.ouroboros-pedal .ouroboros-knob {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-}
-.ouroboros-pedal .ouroboros-knob .mod-knob-image {
-    /* Use the bundled knob film-strip (knobs/black.png) rather than MOD's
-       built-in knob, so the pedal is fully self-contained and can be rendered
-       to a screenshot by render_screenshot.py. Swap the sprite to reskin. */
-    background-image: url(/resources/knobs/black.png{{{ns}}});
-    background-repeat: no-repeat;
-    background-position: left center;
-    width: 52px;
-    height: 52px;
-    background-size: auto 52px;
-}
-.ouroboros-pedal .ouroboros-knob .mod-knob-title {
-    font-size: 10px;
-    letter-spacing: 0.18em;
-    color: rgba(240, 226, 200, 0.85);
-}
-
-/* ============================ Trigger buttons ============================
-   Two rows of four. Plain flat keys, no custom art (v1). */
-.ouroboros-pedal .ouroboros-keys {
-    position: absolute;
-    top: 138px;
-    left: 70px;
-    right: 14px;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
-}
-.ouroboros-pedal .ouroboros-key {
+.ml-pedal{{{cns}}} .mod-drag-handle { position: absolute; inset: 0; z-index: 0; cursor: move; }
+.ml-pedal{{{cns}}} .ml-brand,
+.ml-pedal{{{cns}}} .ml-fine,
+.ml-pedal{{{cns}}} .ml-title,
+.ml-pedal{{{cns}}} .ml-head,
+.ml-pedal{{{cns}}} .ml-rec,
+.ml-pedal{{{cns}}} .ml-trk,
+.ml-pedal{{{cns}}} .ml-part,
+.ml-pedal{{{cns}}} .ml-trackbox,
+.ml-pedal{{{cns}}} .ml-keys,
+.ml-pedal{{{cns}}} .ml-prog,
+.ml-pedal{{{cns}}} .ml-strip { position: absolute; z-index: 1; }
+.ml-pedal{{{cns}}} .ml-part > *,
+.ml-pedal{{{cns}}} .ml-trackbox > *,
+.ml-pedal{{{cns}}} .ml-strip > * { position: absolute; }
+.ml-pedal{{{cns}}} button {
     margin: 0;
-    padding: 5px 4px;
-    border: 1px solid rgba(255, 220, 160, 0.3);
-    border-radius: 4px;
-    background: linear-gradient(180deg, #3d2a1c, #271a11);
-    color: #f0e2c8;
-    font-family: inherit;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    line-height: 12px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
     cursor: pointer;
-    pointer-events: auto;
+    font-size: inherit;
 }
-.ouroboros-pedal .ouroboros-key-main { border-color: #d9a441; color: #ffd98a; }
-.ouroboros-pedal .ouroboros-key:focus-visible { outline: 2px solid #d9a441; }
-.ouroboros-pedal .ouroboros-key.on {
-    background: linear-gradient(180deg, #ffd98a, #d9a441);
-    color: #2a1a0a;
-}
+.ml-pedal{{{cns}}} button:focus-visible { outline: 2px solid #ff3d8b; outline-offset: 2px; }
 
-/* ============================ Bypass light + footswitch ============================
-   MOD-UI draws the actual graphics (LED, switch) from the panel skin.
-   We only position the containers. .on is toggled by MOD-UI on bypass
-   state changes — the default styling already animates correctly. */
-.ouroboros-pedal .mod-light {
+/* ============================ Top row ============================ */
+.ml-pedal{{{cns}}} .ml-brand {
+    top: 20px; left: 0; right: 0;
+    text-align: center;
+    font-weight: 600; font-size: 8px; letter-spacing: .5em; text-indent: .5em;
+    color: #4a4300;
+    pointer-events: none;
+}
+.ml-pedal{{{cns}}} .ml-fine {
+    top: 27px; right: 30px;
+    text-align: right;
+    font-weight: 600; font-size: 7.5px; letter-spacing: .18em; line-height: 1.6;
+    opacity: .75;
+    pointer-events: none;
+}
+.ml-pedal{{{cns}}} .ml-title { top: 22px; left: 0; width: 520px; height: 48px; pointer-events: none; }
+
+/* The badge is the bypass light; the footswitch is a transparent hit area on top. pedals.css paints light images on
+   .mod-light and sets .mod-footswitch{z-index:20}, hence the !important overrides. */
+.ml-pedal{{{cns}}} .mod-light,
+.ml-pedal{{{cns}}} .mod-footswitch {
     position: absolute;
-    bottom: 14px;
-    left: 18px;
+    left: 26px; top: 22px;
+    width: 46px; height: 46px;
+    margin: 0; padding: 0; border: 0;
+    border-radius: 50%;
+    background: none !important;
+    box-shadow: none;
 }
-.ouroboros-pedal .mod-footswitch {
+.ml-pedal{{{cns}}} .mod-light { z-index: 21; pointer-events: none; }
+.ml-pedal{{{cns}}} .mod-footswitch { z-index: 26 !important; cursor: pointer; }
+.ml-pedal{{{cns}}} .ml-badge { display: block; width: 100%; height: 100%; overflow: visible; }
+.ml-pedal{{{cns}}} .ml-badge-disc { fill: #ff3d8b; stroke: #111; stroke-width: 2.5; }
+.ml-pedal{{{cns}}} .ml-badge text {
+    font-family: "MentalLooperAnton", Impact, sans-serif !important;
+    font-size: 16px;
+    fill: #111;
+    text-anchor: middle;
+}
+.ml-pedal{{{cns}}} .ml-badge .ml-badge-off { font-size: 13px; display: none; }
+.ml-pedal{{{cns}}} .ml-badge-shine { fill: none; stroke: #fff; stroke-width: 2.6; stroke-linecap: round; opacity: .85; }
+.ml-pedal{{{cns}}} .mod-light.off .ml-badge-disc { fill: #fff; }
+.ml-pedal{{{cns}}} .mod-light.off .ml-badge-on { display: none; }
+.ml-pedal{{{cns}}} .mod-light.off .ml-badge .ml-badge-off { display: inline; }
+
+/* ============================ The head ============================ */
+.ml-pedal{{{cns}}} .ml-head { left: 150px; top: 82px; width: 220px; height: 220px; overflow: visible; pointer-events: none; }
+.ml-pedal{{{cns}}} .ml-skull { fill: #fff; stroke: #111; stroke-width: 4px; }
+.ml-pedal{{{cns}}} .ml-hair { fill: #ff3d8b; stroke: #111; stroke-width: 4px; stroke-linejoin: round; }
+.ml-pedal{{{cns}}} .ml-white { fill: #fff; stroke: #111; stroke-width: 4px; }
+.ml-pedal{{{cns}}} .ml-spiral { fill: none; stroke: #111; stroke-linecap: round; }
+.ml-pedal{{{cns}}} .ml-xx { fill: none; stroke: #111; stroke-width: 4px; stroke-linecap: round; display: none; }
+.ml-pedal{{{cns}}} .ml-brow {
+    fill: none; stroke: #111; stroke-width: 5.5px; stroke-linecap: round;
+    transition: transform .25s;
+    transform-box: fill-box; transform-origin: center;
+}
+.ml-pedal{{{cns}}} .ml-cav { fill: #ff3d8b; }
+.ml-pedal{{{cns}}} .ml-cav-line { fill: none; stroke: #111; stroke-width: 4px; stroke-linejoin: round; stroke-linecap: round; }
+.ml-pedal{{{cns}}} .ml-teeth { fill: #fff; stroke: #111; stroke-width: 1.4px; stroke-linejoin: round; }
+.ml-pedal{{{cns}}} .ml-scar { fill: none; stroke: #111; stroke-width: 2.2px; stroke-linecap: round; }
+.ml-pedal{{{cns}}} .ml-chin {
+    fill: #111;
+    font-weight: 700; font-size: 7.5px; letter-spacing: .3em;
+    text-anchor: middle;
+}
+.ml-pedal{{{cns}}}.ml-rec-on .ml-chin { fill: #ff3d8b; }
+.ml-pedal{{{cns}}} .ml-free { transform-box: fill-box; transform-origin: center; }
+.ml-pedal{{{cns}}} .ml-mouth { transform-box: fill-box; transform-origin: 50% 0; }
+
+/* State (looper output): 0 nothing recorded, 1 stopped, 2 playing, 3 recording or overdubbing, 4 first take,
+   5 waiting to record. Grit for 0-2, scream for 3-4, the trembling half-open mouth for 5. */
+.ml-pedal{{{cns}}} .ml-m-wait,
+.ml-pedal{{{cns}}} .ml-m-scream,
+.ml-pedal{{{cns}}} .ml-m-dead { display: none; }
+.ml-pedal{{{cns}}}.ml-st-3 .ml-m-grit,
+.ml-pedal{{{cns}}}.ml-st-4 .ml-m-grit,
+.ml-pedal{{{cns}}}.ml-st-5 .ml-m-grit { display: none; }
+.ml-pedal{{{cns}}}.ml-st-3 .ml-m-scream,
+.ml-pedal{{{cns}}}.ml-st-4 .ml-m-scream,
+.ml-pedal{{{cns}}}.ml-st-5 .ml-m-wait { display: inline; }
+.ml-pedal{{{cns}}}.ml-st-3 .ml-m-scream,
+.ml-pedal{{{cns}}}.ml-st-4 .ml-m-scream { animation: ml-scream{{{cns}}} .14s ease-in-out infinite alternate; }
+.ml-pedal{{{cns}}}.ml-st-5 .ml-m-wait { animation: ml-tremble{{{cns}}} .06s ease-in-out infinite alternate; }
+.ml-pedal{{{cns}}}.ml-st-3 .ml-hd,
+.ml-pedal{{{cns}}}.ml-st-4 .ml-hd { animation: ml-shake{{{cns}}} .16s linear infinite; }
+.ml-pedal{{{cns}}}.ml-st-4 .ml-free-l { animation: ml-spin{{{cns}}} 2s linear infinite; }
+.ml-pedal{{{cns}}}.ml-st-4 .ml-free-r { animation: ml-spin{{{cns}}} 1s linear infinite reverse; }
+.ml-pedal{{{cns}}}.ml-st-2 .ml-brow-l { transform: translateY(-4px) rotate(-14deg); }
+.ml-pedal{{{cns}}}.ml-st-2 .ml-brow-r { transform: rotate(10deg); }
+.ml-pedal{{{cns}}}.ml-st-3 .ml-brow-l,
+.ml-pedal{{{cns}}}.ml-st-4 .ml-brow-l { transform: translateY(4px) rotate(22deg); }
+.ml-pedal{{{cns}}}.ml-st-3 .ml-brow-r,
+.ml-pedal{{{cns}}}.ml-st-4 .ml-brow-r { transform: translateY(4px) rotate(-22deg); }
+.ml-pedal{{{cns}}}.ml-st-5 .ml-brow { transform: translateY(-8px); }
+
+/* Bypassed (ml-off) wins over every state: X eyes, a flat mouth, faded, nothing moves. */
+.ml-pedal{{{cns}}}.ml-off .ml-head { opacity: .5; }
+.ml-pedal{{{cns}}}.ml-off .ml-head .ml-xx { display: inline; }
+.ml-pedal{{{cns}}}.ml-off .ml-head .ml-free { display: none; }
+.ml-pedal{{{cns}}}.ml-off .ml-head .ml-mouth { display: none; }
+.ml-pedal{{{cns}}}.ml-off .ml-head .ml-m-dead { display: inline; }
+.ml-pedal{{{cns}}}.ml-off .ml-head .ml-hd,
+.ml-pedal{{{cns}}}.ml-off .ml-head .ml-mouth,
+.ml-pedal{{{cns}}}.ml-off .ml-head .ml-free { animation: none; }
+.ml-pedal{{{cns}}}.ml-off .ml-head .ml-brow { transform: none; }
+
+@keyframes ml-scream{{{cns}}} { from { transform: scaleY(.93); } to { transform: scaleY(1.07); } }
+@keyframes ml-tremble{{{cns}}} { from { transform: scaleY(.91); } to { transform: scaleY(1.09); } }
+@keyframes ml-spin{{{cns}}} { to { transform: rotate(360deg); } }
+@keyframes ml-shake{{{cns}}} {
+    25% { transform: translate(1.5px, -1px) rotate(1.2deg); }
+    50% { transform: translate(-1px, 1px) rotate(-1deg); }
+    75% { transform: translate(1px, 1.5px) rotate(.6deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ml-pedal{{{cns}}} .ml-hd,
+    .ml-pedal{{{cns}}} .ml-mouth { animation: none !important; }
+    .ml-pedal{{{cns}}} .ml-brow { transition: none; }
+}
+
+/* The mouth is REC. */
+.ml-pedal{{{cns}}} .ml-rec { left: 208px; top: 202px; width: 104px; height: 82px; border-radius: 40%; }
+.ml-pedal{{{cns}}} .ml-rec:hover { outline: 1.5px dashed #ff3d8b; outline-offset: -3px; }
+
+/* ============================ Tracks, parts, the volume knob ============================ */
+.ml-pedal{{{cns}}} .ml-trk {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 2px solid #111;
+    background: #fff;
+    color: #111;
+    font-family: "MentalLooperAnton", Impact, sans-serif !important;
+    font-size: 13px; line-height: 1; text-align: center;
+}
+.ml-pedal{{{cns}}} .ml-trk.sel { background: #111; color: #f6ec1a; }
+.ml-pedal{{{cns}}} .ml-trk.off { opacity: .35; text-decoration: line-through; }
+.ml-pedal{{{cns}}} .ml-t1 { left: 172.5px; top: 104.5px; }
+.ml-pedal{{{cns}}} .ml-t2 { left: 319.5px; top: 104.5px; }
+.ml-pedal{{{cns}}} .ml-t3 { left: 319.5px; top: 251.5px; }
+.ml-pedal{{{cns}}} .ml-t4 { left: 172.5px; top: 251.5px; }
+
+.ml-pedal{{{cns}}} .ml-part,
+.ml-pedal{{{cns}}} .ml-trackbox { top: 108px; width: 130px; height: 150px; }
+.ml-pedal{{{cns}}} .ml-part { left: 30px; }
+.ml-pedal{{{cns}}} .ml-trackbox { left: 360px; }
+.ml-pedal{{{cns}}} .ml-cap {
+    top: 0; left: 0; right: 0;
+    text-align: center;
+    font-weight: 800; font-size: 7.5px; letter-spacing: .3em; text-indent: .3em;
+    color: #4a4300;
+}
+.ml-pedal{{{cns}}} .ml-parts { top: 20px; left: 21px; width: 88px; display: grid; grid-template-columns: 40px 40px; gap: 8px; }
+.ml-pedal{{{cns}}} .ml-pt {
+    height: 28px;
+    border: 2px solid #111;
+    border-radius: 3px;
+    background: #fff;
+    color: #111;
+    box-shadow: 2px 2px 0 #111;
+    font-family: "MentalLooperAnton", Impact, sans-serif !important;
+    font-size: 15px;
+}
+.ml-pedal{{{cns}}} .ml-pt.sel { background: #ff3d8b; }
+
+/* Black keys with yellow Anton text; pink while pressed or while the port is on. */
+.ml-pedal{{{cns}}} .ml-key {
+    border-radius: 3px;
+    background: #111;
+    color: #f6ec1a;
+    font-family: "MentalLooperAnton", Impact, sans-serif !important;
+    font-size: 11px; letter-spacing: .1em;
+}
+.ml-pedal{{{cns}}} .ml-key.on { background: #ff3d8b; color: #111; }
+.ml-pedal{{{cns}}} .ml-song,
+.ml-pedal{{{cns}}} .ml-onoff { top: 112px; left: 21px; width: 88px; height: 28px; }
+.ml-pedal{{{cns}}} .ml-song i {
+    display: inline-block;
+    width: 6px; height: 6px;
+    margin-right: 7px;
+    vertical-align: 1px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: .35;
+}
+.ml-pedal{{{cns}}} .ml-song.lit i { background: #ff3d8b; opacity: 1; }
+
+.ml-pedal{{{cns}}} .ml-knob { top: 18px; left: 37px; width: 56px; height: 56px; margin: 0; border-radius: 50%; }
+.ml-pedal{{{cns}}} .ml-ticks { position: absolute; left: -12px; top: -12px; width: 80px; height: 80px; overflow: visible; pointer-events: none; }
+.ml-pedal{{{cns}}} .ml-ticks line { stroke: #111; stroke-width: 1.2; stroke-linecap: round; opacity: .6; }
+.ml-pedal{{{cns}}} .ml-kcap {
     position: absolute;
-    bottom: 6px;
-    left: 38px;
+    inset: 0;
+    border-radius: 50%;
+    transform: rotate(calc(var(--v, 0) * 270deg - 135deg));
+    background: repeating-conic-gradient(#2c2c2e 0 6deg, #141415 6deg 12deg);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, .3);
+    pointer-events: none;
+}
+.ml-pedal{{{cns}}} .ml-kcap::before {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 42% 34%, #323234, #161617);
+}
+.ml-pedal{{{cns}}} .ml-kcap i {
+    position: absolute;
+    left: 50%; top: 4px;
+    width: 2.5px; height: 16px;
+    margin-left: -1.25px;
+    border-radius: 1px;
+    background: #fff;
+}
+.ml-pedal{{{cns}}} .mod-knob-image {
+    position: absolute;
+    inset: 0;
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background-image: url(/resources/knobs/clear.png{{{ns}}});
+    background-repeat: no-repeat;
+    background-size: auto 56px;
+    cursor: ns-resize;
+}
+.ml-pedal{{{cns}}} .ml-klab {
+    top: 80px; left: 0; right: 0;
+    text-align: center;
+    font-weight: 800; font-size: 8px; letter-spacing: .24em;
+    pointer-events: none;
+}
+.ml-pedal{{{cns}}} .ml-db {
+    display: block;
+    margin-top: 1px;
+    font-weight: 500; font-size: 9px; letter-spacing: .08em;
+    opacity: .8;
+    font-variant-numeric: tabular-nums;
 }
 
-/* ============================ Audio I/O jacks ============================
-   No overrides. MOD-UI's pedals.css + dashboard.css fully styles and
-   positions the jacks (left:-87px / right:-87px, top:106px, 56 px tall
-   with 13 px margin-bottom between siblings, jack visuals from the
-   bundled PNG sprites). Its drag handler computes cable endpoints
-   against those exact defaults — any custom top / left / right /
-   margin we apply re-introduces drift between the cable end and the
-   visual plug. (Stereo plugins exhibit a known MOD-UI bug where the
-   bottom output cable drifts after a drag; this also reproduces on
-   stock plugins like TAP Chorus/Flanger, so it's not a plugin-side
-   issue to fix.)
+/* ============================ Keys row, progress bar, song steps ============================ */
+.ml-pedal{{{cns}}} .ml-keys { left: 30px; right: 30px; top: 292px; height: 28px; display: flex; gap: 10px; }
+.ml-pedal{{{cns}}} .ml-keys .ml-key { height: 28px; flex: 1 1 auto; padding: 0 6px; white-space: nowrap; }
 
-   If the jack stack ends up off-centre on a custom-sized pedal, the
-   right fix is to keep the pedal close to MOD-UI's standard pedal
-   height (~160-220 px), NOT to nudge the jacks. */
+/* The selected track's position, by the display's rule (fill = --p, a tick per loop); the first take shows its time. */
+.ml-pedal{{{cns}}} .ml-prog {
+    left: 30px; right: 30px; top: 330px; height: 12px;
+    border-radius: 3px;
+    background: #fff;
+    overflow: hidden;
+}
+.ml-pedal{{{cns}}} .ml-prog::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 2px #111;
+}
+.ml-pedal{{{cns}}} .ml-prog-fill {
+    position: absolute;
+    left: 0; right: 0; top: 0; bottom: 0;
+    background: #ff3d8b;
+    transform: scaleX(var(--p, 0));
+    transform-origin: 0 50%;
+}
+.ml-pedal{{{cns}}} .ml-prog-ticks i { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #111; }
+.ml-pedal{{{cns}}} .ml-prog-time {
+    display: none;
+    position: absolute;
+    left: 7px; top: 0;
+    font-weight: 700; font-size: 9px; line-height: 12px; letter-spacing: .06em;
+    font-variant-numeric: tabular-nums;
+}
+.ml-pedal{{{cns}}} .ml-prog.ml-first .ml-prog-fill,
+.ml-pedal{{{cns}}} .ml-prog.ml-first .ml-prog-ticks { display: none; }
+.ml-pedal{{{cns}}} .ml-prog.ml-first .ml-prog-time { display: block; }
+
+.ml-pedal{{{cns}}} .ml-strip { left: 30px; right: 30px; top: 352px; height: 52px; }
+.ml-pedal{{{cns}}} .ml-rule { left: 0; right: 0; top: 0; height: 1px; background: #111; opacity: .14; }
+.ml-pedal{{{cns}}} .ml-scap { left: 0; top: 9px; font-weight: 800; font-size: 7.5px; letter-spacing: .3em; color: #4a4300; }
+.ml-pedal{{{cns}}} .ml-hint { right: 0; top: 9px; font-weight: 800; font-size: 7px; letter-spacing: .16em; color: #4a4300; }
+.ml-pedal{{{cns}}} .ml-steps { left: 0; right: 0; top: 22px; display: flex; gap: 4px; }
+.ml-pedal{{{cns}}} .ml-step {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 30px;
+    border-radius: 3px;
+    background: #fff;
+    color: #111;
+    box-shadow: inset 0 0 0 2px #111;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    line-height: 1;
+    touch-action: none;
+}
+.ml-pedal{{{cns}}} .ml-step b { font-family: "MentalLooperAnton", Impact, sans-serif !important; font-weight: 400; font-size: 13px; }
+.ml-pedal{{{cns}}} .ml-step small { font-weight: 600; font-size: 7.5px; letter-spacing: .04em; opacity: .7; margin-top: 3px; }
+.ml-pedal{{{cns}}} .ml-step:nth-child(4n):not(:last-child) { margin-right: 5px; }
+.ml-pedal{{{cns}}} .ml-step.end { background: transparent; }
+.ml-pedal{{{cns}}} .ml-step.dead { opacity: .3; }
+.ml-pedal{{{cns}}} .ml-step.now { background: #ff3d8b; }
+
+/* ============================ Audio jacks ============================
+   Mono in, two outs (the loops, the click); each jack 56 px tall with 13 px between: centred on the 420 px box.
+   mod-ui anchors cables to the jacks' rendered position, so cables follow (as on Boreas). */
+.ml-pedal{{{cns}}} .mod-pedal-input  { top: 182px; z-index: 1; }
+.ml-pedal{{{cns}}} .mod-pedal-output { top: 148px; z-index: 1; }

@@ -6,6 +6,8 @@ mockup next to it is the reference for every shape):
   fonts()  Anton and Archivo (SIL OFL) from the google/fonts repo, subset to woff2 in fonts/, with their licences.
   title()  "MENTAL LOOPER" in cut-out letters as outlines in face/title.svg: the mockup's ransom() with seed 11 and the
            Fluoro looks, so the face ships no fonts for it.
+  head()   the Mohawk head as inline SVG between the <!-- ml-head:begin/end --> markers of icon-ouroboros.html: the
+           mockup's spiral(), hairPath() and mouth(o, 'gap', 6), baked for every state (no ids: two pedals share a page).
 
 Fonts are downloaded into build/face-fonts/ (not committed). Run from the repo root:
     make face-assets     (uv run --with fonttools --with brotli python3 plugins/Ouroboros/modgui/generate_face.py)
@@ -138,6 +140,98 @@ def title():
         f.write("\n".join(out) + "\n")
 
 
+def f1(v):
+    s = "%.1f" % v
+    return "0.0" if s == "-0.0" else s
+
+
+def spiral(R, turns=3):
+    n, d = turns * 40, []
+    for i in range(n + 1):
+        a, r = i / n * turns * 2 * math.pi, R * i / n
+        d.append(("L" if i else "M") + f1(r * math.cos(a)) + "," + f1(r * math.sin(a)))
+    return "".join(d)
+
+
+def hair_path():
+    def P(a, r):
+        return f1(r * math.cos(math.radians(a))) + "," + f1(r * math.sin(math.radians(a)))
+    n, a0, a1 = 6, -124, -56
+    st = (a1 - a0) / n
+    pts = [P(a0, 88)]
+    for k in range(n):
+        pts += [P(a0 + st * (k + .5), 104 if k % 2 else 111), P(a0 + st * (k + 1), 88)]
+    a = a1 - 4
+    while a > a0:
+        pts.append(P(a, 87.5))
+        a -= 4
+    return "M" + "L".join(pts) + "Z"
+
+
+def mouth(o, n=6):
+    """The mockup's mouth(o, 'gap', n): the cavity, and the teeth (the third top one missing). The mockup clips the
+    teeth to the cavity; with no clip (no ids), each row stops at the outline's centre line (its 4 px stroke covers the
+    rest), and the outer teeth stay inside the slanted sides."""
+    w, y0 = 44, 20
+    yb, A, B, bw, L, s = y0 + 12 + 30 * o, 5 * o, 8 * o, w * .86, 8, 2 * w / n
+    yt = lambda x: y0 - A * (1 - min(1, (x / w) ** 2))
+    ybx = lambda x: yb + B * (1 - min(1, (x / bw) ** 2))
+    side = lambda y: w - (w - bw) * min(1, max(0, (y - y0) / (yb - y0)))   # the cavity's half-width at y
+    cav = "M%d,%dQ0,%s %d,%dL%s,%sQ0,%s %s,%sZ" % (-w, y0, f1(y0 - 2 * A), w, y0, f1(bw), f1(yb), f1(yb + 2 * B),
+                                                f1(-bw), f1(yb))
+    top, bottom = [], []
+    for k in range(n):
+        x0 = -w + k * s + 1.2
+        x1 = x0 + s - 2.4
+        e, b = yt((x0 + x1) / 2), ybx((x0 + x1) / 2)
+        if k != 2:
+            h = side(e + L - 2) - .6
+            tx0, tx1 = max(x0, -h), min(x1, h)
+            txm = (tx0 + tx1) / 2
+            top.append("M%s,%sH%sV%sQ%s,%s %s,%sZ" % (f1(tx0), f1(e), f1(tx1), f1(e + L - 2), f1(txm), f1(e + L + 1),
+                                                     f1(tx0), f1(e + L - 2)))
+        h = side(b) - .6
+        bx0, bx1 = max(x0, -h), min(x1, h)
+        bxm = (bx0 + bx1) / 2
+        bottom.append("M%s,%sH%sV%sQ%s,%s %s,%sZ" % (f1(bx0), f1(b), f1(bx1), f1(b - L + 2), f1(bxm), f1(b - L - 1),
+                                                    f1(bx0), f1(b - L + 2)))
+    return cav, "".join(top), "".join(bottom)   # two paths: their teeth overlap, and wind opposite ways
+
+
+DEAD_MOUTH = "M-30,34Q0,30 30,34"
+EYES = [(-36, -24, 25, 1, "l"), (38, -28, 15, -2, "r")]      # x, y, R, turns per loop, side
+MOUTHS = [("grit", 0.0), ("wait", 0.36), ("scream", 0.91)]
+
+
+def head_svg():
+    s = ['<svg class="ml-head" viewBox="-110 -110 220 220" aria-hidden="true"><g class="ml-hd">',
+         '<path class="ml-hair" d="%s"/>' % hair_path(), '<circle class="ml-skull" r="88"/>',
+         '<path class="ml-scar" d="M50,6L72,24M53,16l7,-7M59,21l7,-7M65,26l7,-7"/>']
+    for x, y, R, spd, side in EYES:
+        s.append('<g transform="translate(%d,%d)"><path class="ml-brow ml-brow-%s" d="M%d,%dL%d,%d"/></g>'
+                 % (x, y, side, -R + 2, -R - 12, R - 2, -R - 12))
+        s.append('<g transform="translate(%d,%d)"><circle class="ml-white" r="%d"/>'
+                 '<g class="ml-free ml-free-%s"><circle r="%d" fill="none"/><g class="ml-spin" data-spd="%d">'
+                 '<path class="ml-spiral" style="stroke-width:%spx" d="%s"/></g></g>'
+                 '<path class="ml-xx" d="M-10,-10L10,10M10,-10L-10,10"/></g>'
+                 % (x, y, R + 3, side, R, spd, ("%.2f" % (R / 3 * .44)), spiral(R)))
+    for name, o in MOUTHS:
+        cav, top, bottom = mouth(o)
+        s.append('<g class="ml-mouth ml-m-%s"><path class="ml-cav" d="%s"/><path class="ml-teeth" d="%s"/>'
+                 '<path class="ml-teeth" d="%s"/><path class="ml-cav-line" d="%s"/></g>' % (name, cav, top, bottom, cav))
+    s.append('<g class="ml-mouth ml-m-dead"><path class="ml-cav-line" d="%s"/></g>' % DEAD_MOUTH)
+    s.append('<text class="ml-chin" y="81">REC</text></g></svg>')
+    return "\n".join(s)
+
+
+def head(template=os.path.join(HERE, "icon-ouroboros.html")):
+    src = open(template, encoding="utf-8").read()
+    m = re.search(r"(<!-- ml-head:begin -->)(.*?)([ \t]*<!-- ml-head:end -->)", src, re.DOTALL)
+    assert m, "the icon has no <!-- ml-head:begin/end --> markers"
+    with open(template, "w", encoding="utf-8") as f:
+        f.write(src[:m.end(1)] + "\n" + head_svg() + "\n" + src[m.start(3):])
+
+
 def check():
     svg = open(os.path.join(HERE, "face", "title.svg"), encoding="utf-8").read()
     root = ET.fromstring(svg)
@@ -155,7 +249,10 @@ def check():
 
 if __name__ == "__main__":
     import sys
-    if sys.argv[1:] != ["--check"]:
+    if sys.argv[1:] == ["--head"]:       # the head alone: no fonts or network needed
+        head()
+    elif sys.argv[1:] != ["--check"]:
         fonts()
         title()
+        head()
     check()

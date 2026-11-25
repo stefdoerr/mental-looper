@@ -37,12 +37,11 @@
         modgui:color "wood3" ;
         modgui:knob  "gold" ;
 
-        # Every LV2 port the modgui binds to must be listed here. Symbols
-        # must match the `lv2:symbol` strings in the generated <plugin>.ttl
-        # (which come from initParameter()'s `parameter.symbol` field).
-        # stop_clear (the momentary footswitch port) is deliberately NOT on
-        # the face: its gestures (tap, hold, double-tap) are made for a foot.
-        # The face has their clicks instead: onoff, clear_track, stop_play.
+        # Every LV2 port the face writes must be listed here. Symbols must match the `lv2:symbol` strings in the
+        # generated <plugin>.ttl (initParameter()). stop_clear (footswitch C) has no control on the face: its gestures
+        # (tap, hold, double-tap) are made for a foot; the face follows it (it lights STOP/PLAY). The hidden song steps
+        # (stepN_part / stepN_repeats) are written through set_port_value without being listed: mod-ui's setPortValue
+        # covers every input port.
         modgui:port [ lv2:symbol "track" ; lv2:name "Track" ] ;
         modgui:port [ lv2:symbol "volume" ; lv2:name "Volume" ] ;
         modgui:port [ lv2:symbol "rec" ; lv2:name "Rec" ] ;
@@ -51,5 +50,12 @@
         modgui:port [ lv2:symbol "redo" ; lv2:name "Redo" ] ;
         modgui:port [ lv2:symbol "onoff" ; lv2:name "On/Off" ] ;
         modgui:port [ lv2:symbol "clear_track" ; lv2:name "Clear Track" ] ;
-        modgui:port [ lv2:symbol "clear_all" ; lv2:name "Clear All" ]
+        modgui:port [ lv2:symbol "clear_all" ; lv2:name "Clear All" ] ;
+        modgui:port [ lv2:symbol "part" ; lv2:name "Part" ] ;
+        modgui:port [ lv2:symbol "song" ; lv2:name "Song" ] ;
+
+        # The face's outputs (OuroborosPlugin.hpp, hmi/FaceView.hpp): mod-ui forwards an output to the face script as
+        # a change event only when it is listed here.
+        modgui:monitoredOutputs [ lv2:symbol "progress" ] , [ lv2:symbol "progress_loops" ] , [ lv2:symbol "looper" ] ,
+                                [ lv2:symbol "take_secs" ] , [ lv2:symbol "song_step" ]
     ] .

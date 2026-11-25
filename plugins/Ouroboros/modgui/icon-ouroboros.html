@@ -1,49 +1,117 @@
 <!--
-  Ouroboros — MOD pedalboard icon template.
+  Mental Looper face (still named Ouroboros in MOD's lists until the rename).
+  Design: docs/superpowers/specs/2026-11-25-mental-looper-face-design.md; the mockup next to it is the reference for
+  every pixel value.
 
-  Mustache tokens ({{brand}}, {{label}}, {{color}}) are substituted by
-  MOD-UI at render time using the values from modgui.ttl. Every
-  mod-port-symbol below must exist in modgui.ttl AND in the plugin's
-  generated TTL (initParameter()). The momentary stop_clear port is
-  footswitch-only and deliberately has no button here.
-
-  Required structural elements: drag-handle, bypass-light, bypass
-  footswitch, and the audio I/O loops.
+  - Every selector in the stylesheet carries {{{cns}}}, and the root here does too, so a stable and a beta copy on one
+    page can't restyle each other. No id= attributes: two pedals on a page would share them.
+  - The head between the ml-head markers is baked by generate_face.py (make face-assets): don't edit it by hand.
+  - script-ouroboros.js sets the state classes (ml-st-0..5 from the looper output, ml-off when bypassed, ml-rec-on)
+    and writes the ports. The markup below is the pose before it runs: nothing recorded, track 1, part A, 0 dB, the
+    default song.
+  - The beta build's Makefile adds BETA to the fine print.
 -->
-<div class="mod-pedal ouroboros-pedal mod-pedal-ouroboros mod-{{color}} {{color}}">
+<div class="mod-pedal ml-pedal{{{cns}}} mod-no-shadow ml-st-0">
 
     <div mod-role="drag-handle" class="mod-drag-handle"></div>
 
-    <div class="mod-plugin-brand"><h1>{{brand}}</h1></div>
-    <div class="mod-plugin-name"><h1>{{label}}</h1></div>
+    <div class="ml-brand">STEFAN</div>
+    <div class="ml-fine">ML-4<br>4 TRACKS</div>
+    <img class="ml-title" src="/resources/face/title.svg{{{ns}}}" alt="Mental Looper" draggable="false">
 
-    <!-- Bypass light + footswitch (required by MOD pedalboard) -->
-    <div class="mod-light on" mod-role="bypass-light"></div>
-    <div class="mod-footswitch" mod-role="bypass"></div>
+    <!-- On/off: the badge IS the bypass light (mod-ui sets .on / .off, also for a footswitch, MIDI or the HMI); the
+         footswitch is a transparent hit area on top of it. -->
+    <div class="mod-light on" mod-role="bypass-light">
+        <svg class="ml-badge" viewBox="-24 -24 48 48" aria-hidden="true"><g transform="rotate(-8)">
+            <circle class="ml-badge-disc" r="20"/>
+            <text class="ml-badge-on" y="6">ON</text>
+            <text class="ml-badge-off" y="5">OFF</text>
+            <path class="ml-badge-shine" d="M-15.5,-5A16.5,16.5 0 0 1 -6,-15.5"/>
+        </g></svg>
+    </div>
+    <div class="mod-footswitch" mod-role="bypass" title="On/Off"></div>
 
-    <div class="ouroboros-controls">
-        <div class="mod-knob ouroboros-knob">
-            <div class="mod-knob-image" mod-role="input-control-port" mod-port-symbol="track"></div>
-            <span class="mod-knob-title">TRACK</span>
+    <!-- ml-head:begin -->
+<svg class="ml-head" viewBox="-110 -110 220 220" aria-hidden="true"><g class="ml-hd">
+<path class="ml-hair" d="M-49.2,-73.0L-52.7,-97.7L-33.9,-81.2L-30.4,-99.5L-17.3,-86.3L-11.0,-110.5L0.0,-88.0L10.3,-103.5L17.3,-86.3L32.5,-106.1L33.9,-81.2L49.4,-91.5L49.2,-73.0L43.8,-75.8L38.4,-78.6L32.8,-81.1L27.0,-83.2L21.2,-84.9L15.2,-86.2L9.1,-87.0L3.1,-87.4L-3.1,-87.4L-9.1,-87.0L-15.2,-86.2L-21.2,-84.9L-27.0,-83.2L-32.8,-81.1L-38.4,-78.6L-43.7,-75.8Z"/>
+<circle class="ml-skull" r="88"/>
+<path class="ml-scar" d="M50,6L72,24M53,16l7,-7M59,21l7,-7M65,26l7,-7"/>
+<g transform="translate(-36,-24)"><path class="ml-brow ml-brow-l" d="M-23,-37L23,-37"/></g>
+<g transform="translate(-36,-24)"><circle class="ml-white" r="28"/><g class="ml-free ml-free-l"><circle r="25" fill="none"/><g class="ml-spin" data-spd="1"><path class="ml-spiral" style="stroke-width:3.67px" d="M0.0,0.0L0.2,0.0L0.4,0.1L0.6,0.3L0.7,0.5L0.7,0.7L0.7,1.0L0.7,1.3L0.5,1.6L0.3,1.9L0.0,2.1L-0.4,2.3L-0.8,2.4L-1.2,2.4L-1.7,2.4L-2.2,2.2L-2.7,2.0L-3.2,1.6L-3.6,1.2L-3.9,0.6L-4.2,0.0L-4.3,-0.7L-4.4,-1.4L-4.3,-2.2L-4.0,-2.9L-3.7,-3.7L-3.2,-4.4L-2.6,-5.0L-1.8,-5.5L-0.9,-6.0L0.0,-6.2L1.0,-6.4L2.1,-6.3L3.1,-6.1L4.2,-5.7L5.2,-5.2L6.1,-4.4L6.9,-3.5L7.5,-2.4L8.0,-1.3L8.3,0.0L8.4,1.3L8.3,2.7L8.0,4.1L7.4,5.4L6.6,6.6L5.6,7.8L4.4,8.7L3.1,9.5L1.6,10.1L0.0,10.4L-1.7,10.5L-3.3,10.3L-5.0,9.8L-6.6,9.1L-8.1,8.1L-9.4,6.9L-10.6,5.4L-11.5,3.7L-12.1,1.9L-12.5,0.0L-12.6,-2.0L-12.3,-4.0L-11.7,-6.0L-10.8,-7.8L-9.6,-9.6L-8.1,-11.1L-6.3,-12.4L-4.4,-13.5L-2.2,-14.2L0.0,-14.6L2.3,-14.6L4.6,-14.3L6.9,-13.6L9.1,-12.5L11.0,-11.0L12.8,-9.3L14.3,-7.3L15.5,-5.0L16.3,-2.6L16.7,0.0L16.7,2.6L16.2,5.3L15.4,7.9L14.2,10.3L12.5,12.5L10.5,14.5L8.2,16.1L5.7,17.4L2.9,18.3L0.0,18.8L-3.0,18.7L-5.9,18.2L-8.8,17.3L-11.5,15.8L-14.0,14.0L-16.2,11.8L-18.0,9.2L-19.4,6.3L-20.4,3.2L-20.8,0.0L-20.8,-3.3L-20.2,-6.6L-19.1,-9.7L-17.5,-12.7L-15.5,-15.5L-13.0,-17.9L-10.1,-19.9L-7.0,-21.4L-3.6,-22.4L0.0,-22.9L3.6,-22.8L7.2,-22.2L10.7,-21.0L14.0,-19.2L16.9,-16.9L19.6,-14.2L21.7,-11.1L23.4,-7.6L24.5,-3.9L25.0,0.0"/></g></g><path class="ml-xx" d="M-10,-10L10,10M10,-10L-10,10"/></g>
+<g transform="translate(38,-28)"><path class="ml-brow ml-brow-r" d="M-13,-27L13,-27"/></g>
+<g transform="translate(38,-28)"><circle class="ml-white" r="18"/><g class="ml-free ml-free-r"><circle r="15" fill="none"/><g class="ml-spin" data-spd="-2"><path class="ml-spiral" style="stroke-width:2.20px" d="M0.0,0.0L0.1,0.0L0.2,0.1L0.3,0.2L0.4,0.3L0.4,0.4L0.4,0.6L0.4,0.8L0.3,1.0L0.2,1.1L0.0,1.2L-0.2,1.4L-0.5,1.4L-0.7,1.4L-1.0,1.4L-1.3,1.3L-1.6,1.2L-1.9,1.0L-2.1,0.7L-2.3,0.4L-2.5,0.0L-2.6,-0.4L-2.6,-0.8L-2.6,-1.3L-2.4,-1.8L-2.2,-2.2L-1.9,-2.6L-1.5,-3.0L-1.1,-3.3L-0.6,-3.6L0.0,-3.8L0.6,-3.8L1.2,-3.8L1.9,-3.7L2.5,-3.4L3.1,-3.1L3.6,-2.6L4.1,-2.1L4.5,-1.5L4.8,-0.8L5.0,0.0L5.1,0.8L5.0,1.6L4.8,2.4L4.4,3.2L4.0,4.0L3.4,4.7L2.7,5.2L1.9,5.7L1.0,6.0L0.0,6.2L-1.0,6.3L-2.0,6.2L-3.0,5.9L-4.0,5.5L-4.9,4.9L-5.7,4.1L-6.3,3.2L-6.9,2.2L-7.3,1.2L-7.5,0.0L-7.5,-1.2L-7.4,-2.4L-7.0,-3.6L-6.5,-4.7L-5.7,-5.7L-4.8,-6.7L-3.8,-7.5L-2.6,-8.1L-1.3,-8.5L0.0,-8.8L1.4,-8.8L2.8,-8.6L4.1,-8.1L5.4,-7.5L6.6,-6.6L7.7,-5.6L8.6,-4.4L9.3,-3.0L9.8,-1.5L10.0,0.0L10.0,1.6L9.7,3.2L9.2,4.7L8.5,6.2L7.5,7.5L6.3,8.7L4.9,9.7L3.4,10.5L1.7,11.0L0.0,11.2L-1.8,11.2L-3.6,10.9L-5.3,10.4L-6.9,9.5L-8.4,8.4L-9.7,7.1L-10.8,5.5L-11.7,3.8L-12.2,1.9L-12.5,0.0L-12.5,-2.0L-12.1,-3.9L-11.5,-5.8L-10.5,-7.6L-9.3,-9.3L-7.8,-10.7L-6.1,-11.9L-4.2,-12.8L-2.1,-13.5L0.0,-13.8L2.2,-13.7L4.3,-13.3L6.4,-12.6L8.4,-11.5L10.2,-10.2L11.7,-8.5L13.0,-6.6L14.0,-4.6L14.7,-2.3L15.0,0.0"/></g></g><path class="ml-xx" d="M-10,-10L10,10M10,-10L-10,10"/></g>
+<g class="ml-mouth ml-m-grit"><path class="ml-cav" d="M-44,20Q0,20.0 44,20L37.8,32.0Q0,32.0 -37.8,32.0Z"/><path class="ml-teeth" d="M-40.3,20.0H-30.5V26.0Q-35.4,29.0 -40.3,26.0ZM-28.1,20.0H-15.9V26.0Q-22.0,29.0 -28.1,26.0ZM1.2,20.0H13.5V26.0Q7.3,29.0 1.2,26.0ZM15.9,20.0H28.1V26.0Q22.0,29.0 15.9,26.0ZM30.5,20.0H40.3V26.0Q35.4,29.0 30.5,26.0Z"/><path class="ml-teeth" d="M-37.2,32.0H-30.5V26.0Q-33.9,23.0 -37.2,26.0ZM-28.1,32.0H-15.9V26.0Q-22.0,23.0 -28.1,26.0ZM-13.5,32.0H-1.2V26.0Q-7.3,23.0 -13.5,26.0ZM1.2,32.0H13.5V26.0Q7.3,23.0 1.2,26.0ZM15.9,32.0H28.1V26.0Q22.0,23.0 15.9,26.0ZM30.5,32.0H37.2V26.0Q33.9,23.0 30.5,26.0Z"/><path class="ml-cav-line" d="M-44,20Q0,20.0 44,20L37.8,32.0Q0,32.0 -37.8,32.0Z"/></g>
+<g class="ml-mouth ml-m-wait"><path class="ml-cav" d="M-44,20Q0,16.4 44,20L37.8,42.8Q0,48.6 -37.8,42.8Z"/><path class="ml-teeth" d="M-41.9,19.4H-30.5V25.4Q-36.2,28.4 -41.9,25.4ZM-28.1,18.6H-15.9V24.6Q-22.0,27.6 -28.1,24.6ZM1.2,18.2H13.5V24.2Q7.3,27.2 1.2,24.2ZM15.9,18.6H28.1V24.6Q22.0,27.6 15.9,24.6ZM30.5,19.4H41.9V25.4Q36.2,28.4 30.5,25.4Z"/><path class="ml-teeth" d="M-37.2,43.0H-30.5V37.0Q-33.9,34.0 -37.2,37.0ZM-28.1,44.7H-15.9V38.7Q-22.0,35.7 -28.1,38.7ZM-13.5,45.6H-1.2V39.6Q-7.3,36.6 -13.5,39.6ZM1.2,45.6H13.5V39.6Q7.3,36.6 1.2,39.6ZM15.9,44.7H28.1V38.7Q22.0,35.7 15.9,38.7ZM30.5,43.0H37.2V37.0Q33.9,34.0 30.5,37.0Z"/><path class="ml-cav-line" d="M-44,20Q0,16.4 44,20L37.8,42.8Q0,48.6 -37.8,42.8Z"/></g>
+<g class="ml-mouth ml-m-scream"><path class="ml-cav" d="M-44,20Q0,10.9 44,20L37.8,59.3Q0,73.9 -37.8,59.3Z"/><path class="ml-teeth" d="M-42.7,18.6H-30.5V24.6Q-36.6,27.6 -42.7,24.6ZM-28.1,16.6H-15.9V22.6Q-22.0,25.6 -28.1,22.6ZM1.2,15.6H13.5V21.6Q7.3,24.6 1.2,21.6ZM15.9,16.6H28.1V22.6Q22.0,25.6 15.9,22.6ZM30.5,18.6H42.7V24.6Q36.6,27.6 30.5,24.6Z"/><path class="ml-teeth" d="M-37.2,59.7H-30.5V53.7Q-33.9,50.7 -37.2,53.7ZM-28.1,64.1H-15.9V58.1Q-22.0,55.1 -28.1,58.1ZM-13.5,66.3H-1.2V60.3Q-7.3,57.3 -13.5,60.3ZM1.2,66.3H13.5V60.3Q7.3,57.3 1.2,60.3ZM15.9,64.1H28.1V58.1Q22.0,55.1 15.9,58.1ZM30.5,59.7H37.2V53.7Q33.9,50.7 30.5,53.7Z"/><path class="ml-cav-line" d="M-44,20Q0,10.9 44,20L37.8,59.3Q0,73.9 -37.8,59.3Z"/></g>
+<g class="ml-mouth ml-m-dead"><path class="ml-cav-line" d="M-30,34Q0,30 30,34"/></g>
+<text class="ml-chin" y="81">REC</text></g></svg>
+    <!-- ml-head:end -->
+    <button type="button" class="ml-rec" title="REC: click the mouth" aria-label="Record"></button>
+
+    <button type="button" class="ml-trk ml-t1 sel" data-track="1" title="Track 1">1</button>
+    <button type="button" class="ml-trk ml-t2" data-track="2" title="Track 2">2</button>
+    <button type="button" class="ml-trk ml-t3" data-track="3" title="Track 3">3</button>
+    <button type="button" class="ml-trk ml-t4" data-track="4" title="Track 4">4</button>
+
+    <div class="ml-part">
+        <div class="ml-cap">PART</div>
+        <div class="ml-parts">
+            <button type="button" class="ml-pt sel" data-part="0">A</button>
+            <button type="button" class="ml-pt" data-part="1">B</button>
+            <button type="button" class="ml-pt" data-part="2">C</button>
+            <button type="button" class="ml-pt" data-part="3">D</button>
         </div>
-        <div class="mod-knob ouroboros-knob">
+        <button type="button" class="ml-key ml-song" title="Play the song steps"><i></i>SONG</button>
+    </div>
+
+    <div class="ml-trackbox">
+        <div class="ml-cap">TRACK <span class="ml-tn">1</span></div>
+        <!-- The knob is drawn from --v (0..1, set by the script from the volume port; inline: the 0 dB default). The
+             transparent mod-knob-image on top is what mod-ui's film widget drags. -->
+        <div class="mod-knob ml-knob" style="--v:0.9091">
+            <svg class="ml-ticks" viewBox="-40 -40 80 80" aria-hidden="true"><line x1="-21.9" y1="21.9" x2="-25.1" y2="25.1"/><line x1="-29.5" y1="9.6" x2="-32.3" y2="10.5"/><line x1="-30.6" y1="-4.8" x2="-33.6" y2="-5.3"/><line x1="-25.1" y1="-18.2" x2="-27.5" y2="-20.0"/><line x1="-14.1" y1="-27.6" x2="-15.4" y2="-30.3"/><line x1="0.0" y1="-31.0" x2="0.0" y2="-35.5"/><line x1="14.1" y1="-27.6" x2="15.4" y2="-30.3"/><line x1="25.1" y1="-18.2" x2="27.5" y2="-20.0"/><line x1="30.6" y1="-4.8" x2="33.6" y2="-5.3"/><line x1="29.5" y1="9.6" x2="32.3" y2="10.5"/><line x1="21.9" y1="21.9" x2="25.1" y2="25.1"/></svg>
+            <div class="ml-kcap"><i></i></div>
             <div class="mod-knob-image" mod-role="input-control-port" mod-port-symbol="volume"></div>
-            <span class="mod-knob-title">VOLUME</span>
+        </div>
+        <div class="ml-klab">VOLUME<span class="ml-db">0.0 dB</span></div>
+        <button type="button" class="ml-key ml-onoff" data-port="onoff" title="Switch the selected track on or off">ON/OFF</button>
+    </div>
+
+    <div class="ml-keys">
+        <button type="button" class="ml-key" data-port="stop_play" title="Stop all tracks, or start them again from the top">STOP/PLAY</button>
+        <button type="button" class="ml-key" data-port="undo" title="Undo the newest layer of the selected track">UNDO</button>
+        <button type="button" class="ml-key" data-port="redo" title="Redo the layer you just undid">REDO</button>
+        <button type="button" class="ml-key" data-port="clear_track" title="Clear the selected track">CLEAR</button>
+        <button type="button" class="ml-key" data-port="clear_all" title="Clear all four tracks">CLEAR ALL</button>
+    </div>
+
+    <div class="ml-prog" style="--p:0"><i class="ml-prog-fill"></i><span class="ml-prog-ticks"></span><span class="ml-prog-time">0:00</span></div>
+
+    <div class="ml-strip">
+        <div class="ml-rule"></div>
+        <div class="ml-scap">SONG STEPS</div>
+        <div class="ml-hint">CLICK: PART · SCROLL: REPEATS</div>
+        <div class="ml-steps">
+            <button type="button" class="ml-step" data-step="1" aria-label="Step 1"><b>A</b><small>×1</small></button>
+            <button type="button" class="ml-step end" data-step="2" aria-label="Step 2"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="3" aria-label="Step 3"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="4" aria-label="Step 4"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="5" aria-label="Step 5"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="6" aria-label="Step 6"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="7" aria-label="Step 7"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="8" aria-label="Step 8"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="9" aria-label="Step 9"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="10" aria-label="Step 10"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="11" aria-label="Step 11"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="12" aria-label="Step 12"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="13" aria-label="Step 13"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="14" aria-label="Step 14"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="15" aria-label="Step 15"><b>↺</b><small></small></button>
+            <button type="button" class="ml-step end dead" data-step="16" aria-label="Step 16"><b>↺</b><small></small></button>
         </div>
     </div>
 
-    <!-- Trigger buttons: script-ouroboros.js writes 1 on press, 0 on release. -->
-    <div class="ouroboros-keys">
-        <button type="button" class="ouroboros-key ouroboros-key-main" data-port="rec" title="Rec / Play / Dub on the selected track">REC</button>
-        <button type="button" class="ouroboros-key" data-port="stop_play" title="Stop all tracks, or start them again from the top">STOP/<wbr>PLAY</button>
-        <button type="button" class="ouroboros-key" data-port="undo" title="Undo the newest layer of the selected track">UNDO</button>
-        <button type="button" class="ouroboros-key" data-port="redo" title="Redo the layer you just undid">REDO</button>
-        <button type="button" class="ouroboros-key" data-port="onoff" title="Switch the selected track on or off">ON/OFF</button>
-        <button type="button" class="ouroboros-key" data-port="clear_track" title="Clear the selected track">CLEAR</button>
-        <button type="button" class="ouroboros-key" data-port="clear_all" title="Clear all four tracks">CLEAR ALL</button>
-    </div>
-
-    <!-- Audio I/O — required structure for pedalboard connections. -->
+    <!-- Audio I/O: required structure for pedalboard connections. -->
     <div class="mod-pedal-input">
         {{#effect.ports.audio.input}}
         <div class="mod-input mod-input-disconnected" title="{{name}}"
