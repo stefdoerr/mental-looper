@@ -118,8 +118,8 @@ plugin: dpf-patch
 ttl: plugin dpf/utils/lv2_ttl_generator
 	@$(CURDIR)/dpf/utils/generate-ttl.sh
 	@# Momentary footswitch: DPF can't emit MOD-specific port properties, so patch
-	@# mod:preferMomentaryOnByDefault into the undo_redo port here.
-	@for sym in undo_redo; do \
+	@# mod:preferMomentaryOnByDefault into the rec and stop_clear ports here.
+	@for sym in rec stop_clear; do \
 		sed -i "/lv2:symbol \"$$sym\" ;/a\        lv2:portProperty mod:preferMomentaryOnByDefault ;" "$(BUNDLE)/$(BUNDLE_NAME).ttl"; \
 	done
 	@# rangeSteps 133 on the volume ports: MOD's default knob step count, giving a

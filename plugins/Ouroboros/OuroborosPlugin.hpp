@@ -59,7 +59,7 @@ constexpr uint32_t paramFromLv2Index(uint32_t lv2Index)
 
 // Port order and symbols are frozen from the first release (saved pedalboards).
 enum ParamIndex {
-    kParamRec = 0, kParamUndoRedo, kParamTrack, kParamOnOff, kParamVolume,
+    kParamRec = 0, kParamStopClear, kParamTrack, kParamOnOff, kParamVolume,
     kParamUndo, kParamRedo, kParamClearTrack, kParamClearAll,
     kParamOn1, kParamOn2, kParamOn3, kParamOn4,
     kParamVolume1, kParamVolume2, kParamVolume3, kParamVolume4,
@@ -179,7 +179,7 @@ protected:
         if (lv2Index < kLv2FirstParam) return -1;
         switch (paramFromLv2Index(lv2Index)) {
         case kParamRec:      return ouro::kHmiRec;
-        case kParamUndoRedo: return ouro::kHmiUndo;
+        case kParamStopClear: return ouro::kHmiUndo;
         case kParamOnOff:    return ouro::kHmiOnOff;
         case kParamVolume:   return ouro::kHmiVolume;
         default:             return -1;
@@ -261,8 +261,8 @@ protected:
         enum { Trig, Bool, Int, Enum, Db, Ms };
         struct Def { const char* symbol; const char* name; int kind; float min, max, def; const char* unit; };
         static const Def defs[kParamStep1Part] = {
-            {"rec",             "Rec",                Trig, 0, 1, 0, ""},
-            {"undo_redo",       "Undo/Redo",          Bool, 0, 1, 0, ""},
+            {"rec",             "Rec/Undo",           Bool, 0, 1, 0, ""},
+            {"stop_clear",      "Stop/Clear",         Bool, 0, 1, 0, ""},
             {"track",           "Track",              Enum, 1, 4, 1, ""},
             {"onoff",           "On/Off",             Trig, 0, 1, 0, ""},
             {"volume",          "Volume",             Db,  -60, 6, 0, "dB"},
@@ -362,7 +362,7 @@ protected:
         haltPieces();
         fEngine.reset();
         fFirst = true;
-        fHold = 0;
+        fHold = 0; fBHold = 0; fBHeld = fBDone = false;
         fHeld = fDone = fTapPending = fStoppedPress = fTapStopped = fTapCancels = false;
         fSinceTap = 0; fTapTrack = 0;
     }
@@ -398,7 +398,8 @@ protected:
                     fLent = true;
                 }
                 for (uint32_t i = 0; i < kParamBypass; ++i) if (droppedDuringLoad(i)) fPrev[i] = fVal[i];
-                fTapPending = false; fHeld = on(kParamUndoRedo); fDone = true;
+                fTapPending = false; fHeld = on(kParamStopClear); fDone = true;
+                fBHeld = on(kParamRec); fBDone = true;
                 fClickAt = -1.0;                // no new tick (a running one ends)
                 if (!fLent) fEngine.process(inputs[0], outputs[0], frames);   // the Instant stop ramps out
                 else for (uint32_t i = 0; i < frames; ++i) outputs[0][i] = fDryGain * inputs[0][i];
@@ -539,7 +540,15 @@ protected:
         // ponytail: timed in whole blocks (<= one block of error); sample-exact if it matters.
         const uint64_t hold = uint64_t(fVal[kParamHoldTime] * 0.001 * getSampleRate());
         const uint64_t window = uint64_t(fVal[kParamDoubleTap] * 0.001 * getSampleRate());
-        if (on(kParamUndoRedo))
+        // B hold: one peel (the newest layer of the pressed track) once Hold Time has passed, unless the part changed.
+        if (on(kParamRec))
+        {
+            if (!fBHeld) { fBHeld = true; fBHold = 0; fBDone = false; fBTrack = sel; fBPart = fEngine.part(); }
+            fBHold += frames;
+            if (!fBDone && fBHold >= hold) { fBDone = true; if (fEngine.part() == fBPart) fEngine.peel(fBTrack); }
+        }
+        else fBHeld = false;
+        if (on(kParamStopClear))
         {
             if (!fHeld)
             {
@@ -843,6 +852,9 @@ private:
     int fSel = 0;                           // selected track, 0-3
     int fPart = 0;                          // the engine's part at the last run(): a switch re-requests track ports
     bool fFirst = true;                     // first run after activate(): apply every value, then snap gains
+    uint64_t fBHold = 0;                    // samples rec (B) has been held
+    bool fBHeld = false, fBDone = false;
+    int fBTrack = 0, fBPart = 0;
     uint64_t fHold = 0;                     // samples undo_redo has been held
     bool fHeld = false, fDone = false, fTapPending = false, fStoppedPress = false;
     bool fTapStopped = false;               // the pending tap was released while stopped: a double-tap resumes

@@ -65,7 +65,7 @@ static void recordBaseAndDub()
 static void layout()
 {
     fresh();
-    static const char* kSym[] = { "rec","undo_redo","track","onoff","volume","undo","redo","clear_track",
+    static const char* kSym[] = { "rec","stop_clear","track","onoff","volume","undo","redo","clear_track",
         "clear_all","on_1","on_2","on_3","on_4","volume_1","volume_2","volume_3","volume_4","after_rec",
         "dry","tail","hold_time","budget","offset","trigger_latency",
         "stop_play","stop_mode","fade_time","auto_rec","threshold","double_tap","sync","click","click_level","length",
@@ -108,7 +108,7 @@ static void layout()
     CHECK(std::strcmp(P().getPortGroupById(0).symbol, "g1_perform") == 0);
     CHECK(std::strcmp(P().getPortGroupById(1).symbol, "g2_tracks") == 0);
     CHECK(std::strcmp(P().getPortGroupById(2).symbol, "g3_settings") == 0);
-    CHECK(P().isParameterTrigger(kParamRec) && !P().isParameterTrigger(kParamUndoRedo));
+    CHECK(!P().isParameterTrigger(kParamRec) && !P().isParameterTrigger(kParamStopClear));
     CHECK(P().getParameterRanges(kParamVolume).def == 0.0f && P().getParameterRanges(kParamVolume).min == -60.0f);
     CHECK(P().getParameterRanges(kParamTail).def == 50.0f && P().getParameterRanges(kParamHoldTime).def == 500.0f);
     CHECK(P().getParameterRanges(kParamBudget).min == 16.0f && P().getParameterRanges(kParamBudget).def == 200.0f);
@@ -157,18 +157,22 @@ static void tapUndoHoldRedo()
     fresh();
     recordBaseAndDub();
     CHECK(eng().undoDepth(0) == 1);
-    set(kParamUndoRedo, 1); runN(37); set(kParamUndoRedo, 0); runN(152);    // ~99 ms tap, then the double-tap window
+    set(kParamStopClear, 1); runN(37); set(kParamStopClear, 0); runN(152);    // ~99 ms tap, then the double-tap window
     CHECK(eng().undoDepth(0) == 0 && eng().canRedo(0));
-    set(kParamUndoRedo, 1); runN(190);                                     // ~507 ms held
+    set(kParamStopClear, 1); runN(190);                                     // ~507 ms held
     CHECK(eng().undoDepth(0) == 1);                                        // redo fired while held
-    set(kParamUndoRedo, 0); runN(1); CHECK(eng().undoDepth(0) == 1);       // no undo on release
+    set(kParamStopClear, 0); runN(1); CHECK(eng().undoDepth(0) == 1);       // no undo on release
     // a hold_time of 2000 ms turns the same 507 ms hold into a plain undo on release
-    set(kParamHoldTime, 2000); set(kParamUndoRedo, 1); runN(190); CHECK(eng().undoDepth(0) == 1);
-    set(kParamUndoRedo, 0); runN(152); CHECK(eng().undoDepth(0) == 0);
+    set(kParamHoldTime, 2000); set(kParamStopClear, 1); runN(190); CHECK(eng().undoDepth(0) == 1);
+    set(kParamStopClear, 0); runN(152); CHECK(eng().undoDepth(0) == 0);
 }
 
-static void tapC() { set(kParamUndoRedo, 1); runN(20); set(kParamUndoRedo, 0); runN(1); }
-static void doubleTap() { tapC(); runN(29); set(kParamUndoRedo, 1); runN(1); set(kParamUndoRedo, 0); runN(1); }
+static void bDown() { set(kParamRec, 1); runN(1); }
+static void bUp()   { set(kParamRec, 0); runN(1); }
+static void cDown() { set(kParamStopClear, 1); runN(1); }
+static void cUp()   { set(kParamStopClear, 0); runN(1); }
+static void tapC() { cDown(); runN(19); cUp(); }
+static void doubleTap() { tapC(); runN(29); set(kParamStopClear, 1); runN(1); set(kParamStopClear, 0); runN(1); }
 
 static void tapUndoWaitsForTheWindow() {
     fresh(); recordBaseAndDub(); tapC();
@@ -177,8 +181,8 @@ static void tapUndoWaitsForTheWindow() {
 }
 static void doubleTapStops() {
     fresh(); recordBaseAndDub(); tapC(); runN(29);
-    set(kParamUndoRedo, 1); runN(1); CHECK(eng().transport() == ouro::Transport::Stopping);   // on the press
-    runN(20); set(kParamUndoRedo, 0); runN(200);
+    set(kParamStopClear, 1); runN(1); CHECK(eng().transport() == ouro::Transport::Stopping);   // on the press
+    runN(20); set(kParamStopClear, 0); runN(200);
     CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 1 && peak(gOut) == 0.0f);
 }
 static void bRestartsAfterStop() {
@@ -189,14 +193,14 @@ static void bRestartsAfterStop() {
 static void holdWhileStoppedClearsAll() {
     fresh(); recordBaseAndDub(); tapC(); runN(152); CHECK(eng().canRedo(0));
     doubleTap(); runN(20);
-    set(kParamUndoRedo, 1); runN(300); set(kParamUndoRedo, 0); runN(120);   // 800 ms: no redo, no undo
+    set(kParamStopClear, 1); runN(300); set(kParamStopClear, 0); runN(120);   // 800 ms: no redo, no undo
     CHECK(eng().undoDepth(0) == 0 && eng().loopLength() > 0 && eng().transport() == ouro::Transport::Stopped);
-    set(kParamUndoRedo, 1); runN(376);                                        // past 1000 ms
+    set(kParamStopClear, 1); runN(376);                                        // past 1000 ms
     CHECK(eng().loopLength() == 0 && eng().transport() == ouro::Transport::Running);
-    set(kParamUndoRedo, 0); runN(120); CHECK(eng().state(0) == ouro::TrackState::Empty);
+    set(kParamStopClear, 0); runN(120); CHECK(eng().state(0) == ouro::TrackState::Empty);
 }
 static void doubleTapThenHoldDoesNotClear() {
-    fresh(); recordBaseAndDub(); tapC(); runN(29); set(kParamUndoRedo, 1); runN(450);
+    fresh(); recordBaseAndDub(); tapC(); runN(29); set(kParamStopClear, 1); runN(450);
     CHECK(eng().transport() == ouro::Transport::Stopped && eng().loopLength() > 0);
 }
 static void tapWhileStoppedUndoes() {
@@ -218,10 +222,10 @@ static void doubleTapWhileStoppedResumes() {
     set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40);           // a second layer
     doubleTap(); runN(20);
     CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 2);
-    set(kParamUndoRedo, 1); runN(2); set(kParamUndoRedo, 0); runN(2);  // two quick taps: resume from the top
-    set(kParamUndoRedo, 1); runN(1);
+    set(kParamStopClear, 1); runN(2); set(kParamStopClear, 0); runN(2);  // two quick taps: resume from the top
+    set(kParamStopClear, 1); runN(1);
     CHECK(eng().transport() == ouro::Transport::Running);              // on the second press
-    runN(600); set(kParamUndoRedo, 0); runN(120);                       // held past 2x hold time: no clear
+    runN(600); set(kParamStopClear, 0); runN(120);                       // held past 2x hold time: no clear
     CHECK(eng().undoDepth(0) == 2 && eng().loopLength() > 0 && eng().transport() == ouro::Transport::Running);
     doubleTap(); runN(20);                                              // slow taps while stopped each undo
     tapC(); runN(152); tapC(); runN(152);
@@ -230,10 +234,10 @@ static void doubleTapWhileStoppedResumes() {
 static void doubleTapBegunWhileStoppingOnlyStops() {                   // first tap during a fade, second after the park
     fresh(); recordBaseAndDub(); set(kParamStopMode, 2); set(kParamFadeTime, 0.5f);
     set(kParamStopPlay, 1); runN(1); set(kParamStopPlay, 0); runN(170);   // 171 blocks into a 188-block fade
-    set(kParamUndoRedo, 1); runN(2); set(kParamUndoRedo, 0); runN(1);    // released while still stopping
+    set(kParamStopClear, 1); runN(2); set(kParamStopClear, 0); runN(1);    // released while still stopping
     CHECK(eng().transport() == ouro::Transport::Stopping);
     runN(20); CHECK(eng().transport() == ouro::Transport::Stopped);
-    set(kParamUndoRedo, 1); runN(1); set(kParamUndoRedo, 0); runN(120);
+    set(kParamStopClear, 1); runN(1); set(kParamStopClear, 0); runN(120);
     CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 1);
 }
 static void tapUndoesTheTrackItWasTappedOn() {                        // Review Focus 5
@@ -245,10 +249,10 @@ static void tapUndoesTheTrackItWasTappedOn() {                        // Review 
 }
 static void doubleTapDuringAShortFirstRecording() {                   // Review Focus 4
     fresh(); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(5);
-    set(kParamUndoRedo, 1); runN(2); set(kParamUndoRedo, 0); runN(2); set(kParamUndoRedo, 1); runN(1);
+    set(kParamStopClear, 1); runN(2); set(kParamStopClear, 0); runN(2); set(kParamStopClear, 1); runN(1);
     CHECK(eng().state(0) == ouro::TrackState::Empty && eng().loopLength() == 0
           && eng().transport() == ouro::Transport::Running);
-    set(kParamUndoRedo, 0); runN(200); CHECK(eng().state(0) == ouro::TrackState::Empty);
+    set(kParamStopClear, 0); runN(200); CHECK(eng().state(0) == ouro::TrackState::Empty);
 }
 static void stopPlayPortToggles() {
     fresh(); recordBaseAndDub();
@@ -472,17 +476,17 @@ static void waitingClose() {                                        // a first r
 static void tapCancelsAWaitingActionAtOnce() {
     for (double before : {14400.0, 1280.0}) {                       // 300 ms before the line; 27 ms (released after it)
         waitingClose(); runTo(192000 - before);
-        set(kParamUndoRedo, 1); runMod(true, 1); CHECK(!eng().waiting() && eng().state(0) == ouro::TrackState::Recording);
-        runMod(true, 19); set(kParamUndoRedo, 0); runMod(true, 200);  // a 53 ms tap; the line and the window pass
+        set(kParamStopClear, 1); runMod(true, 1); CHECK(!eng().waiting() && eng().state(0) == ouro::TrackState::Recording);
+        runMod(true, 19); set(kParamStopClear, 0); runMod(true, 200);  // a 53 ms tap; the line and the window pass
         CHECK(eng().state(0) == ouro::TrackState::Recording && eng().loopLength() == 0 && !eng().waiting());
         CHECK(eng().recordedSamples() > 192000);                    // still recording
     }
     waitingClose(); runTo(192000 - 14400);                          // a double-tap stops: whole bars kept
-    set(kParamUndoRedo, 1); runMod(true, 2); set(kParamUndoRedo, 0); runMod(true, 2);
-    set(kParamUndoRedo, 1); runMod(true, 1); set(kParamUndoRedo, 0); runMod(true, 40);
+    set(kParamStopClear, 1); runMod(true, 2); set(kParamStopClear, 0); runMod(true, 2);
+    set(kParamStopClear, 1); runMod(true, 1); set(kParamStopClear, 0); runMod(true, 40);
     CHECK(eng().transport() == ouro::Transport::Stopped && eng().loopLength() == 96000);
     waitingClose(); runTo(192000 - 30000);                          // B within the window: no undo, it closes again
-    set(kParamUndoRedo, 1); runMod(true, 2); set(kParamUndoRedo, 0); runMod(true, 20);
+    set(kParamStopClear, 1); runMod(true, 2); set(kParamStopClear, 0); runMod(true, 20);
     set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);
     CHECK(eng().state(0) == ouro::TrackState::Recording && eng().userWaiting(0));
     runTo(192000 + 128 * 200); CHECK(eng().loopLength() == 192000 && eng().state(0) == ouro::TrackState::Playing);
@@ -498,8 +502,8 @@ static void tapCancelsAWaitOnAnotherTrack() {
     runTo(2 * 96000 + 30000); set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);   // track 1 waits for the line
     CHECK(eng().userWaiting(0) && eng().waitingTrack() == 0);
     set(kParamTrack, 2); runMod(true, 1); runTo(3 * 96000 - 1280);
-    set(kParamUndoRedo, 1); runMod(true, 1); CHECK(!eng().waiting());
-    runMod(true, 19); set(kParamUndoRedo, 0); runMod(true, 200);
+    set(kParamStopClear, 1); runMod(true, 1); CHECK(!eng().waiting());
+    runMod(true, 19); set(kParamStopClear, 0); runMod(true, 200);
     CHECK(eng().state(0) == ouro::TrackState::Empty && !eng().waiting());
     CHECK(eng().state(1) == ouro::TrackState::Playing && !eng().canRedo(1));
 }
@@ -826,6 +830,53 @@ static void saveStoresTheBpm() {
     press(kParamLoad); CHECK(waitPieces() && status() == "1 BAR");
 }
 
+static void dubB(int blocks) { set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(blocks); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40); }
+
+static void holdBUndoesOneLayerPerHold() {
+    fresh(); recordBaseAndDub(); dubB(40);                              // depth 2
+    bDown(); runN(188); CHECK(eng().undoDepth(0) == 1 && eng().state(0) == ouro::TrackState::Playing);
+    bUp(); runN(10);
+    bDown(); runN(188); CHECK(eng().undoDepth(0) == 0); bUp(); runN(10);
+    bDown(); runN(188); CHECK(eng().undoDepth(0) == 0 && eng().state(0) == ouro::TrackState::Playing);  // first kept
+    bUp();
+}
+static void holdBDuringAnOverdubUndoesIt() {
+    fresh(); recordBaseAndDub();                                        // depth 1
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(60);           // an overdub running
+    bDown(); CHECK(eng().undoDepth(0) == 2);                            // the press closed it
+    runN(188); CHECK(eng().undoDepth(0) == 1); bUp();
+}
+static void holdBAfterRecDubKeepsTheRecording() {                       // Review Focus 1
+    fresh(); set(kParamAfterRec, 1);
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(187);
+    bDown(); CHECK(eng().state(0) == ouro::TrackState::Overdubbing);    // closed into an overdub
+    runN(188); CHECK(eng().state(0) == ouro::TrackState::Playing && eng().loopLength() > 0 && eng().undoDepth(0) == 0);
+    bUp();
+}
+static void holdBOnAnArmedEmptyTrackKeepsTheArm() {
+    fresh(); set(kParamAutoRec, 1); set(kParamThreshold, -10); bDown(); runN(188); CHECK(eng().armedTrack() == 0); bUp();
+}
+static void redoAfterHoldsBringsBackOnlyTheLast() {
+    fresh(); recordBaseAndDub(); dubB(40);                              // depth 2
+    bDown(); runN(188); bUp(); runN(10); bDown(); runN(188); bUp(); runN(10);
+    CHECK(eng().undoDepth(0) == 0);
+    set(kParamRedo, 1); runN(1); set(kParamRedo, 0); runN(10); CHECK(eng().undoDepth(0) == 1);
+    set(kParamRedo, 1); runN(1); set(kParamRedo, 0); runN(10); CHECK(eng().undoDepth(0) == 1 && !eng().canRedo(0));
+}
+static void holdBFromStoppedStartsThenUndoes() {
+    fresh(); recordBaseAndDub();
+    set(kParamStopPlay, 1); runN(1); set(kParamStopPlay, 0); runN(200);
+    CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 1);
+    bDown(); CHECK(eng().transport() == ouro::Transport::Running);
+    runN(188); CHECK(eng().undoDepth(0) == 0 && eng().transport() == ouro::Transport::Running); bUp();
+}
+static void holdBDroppedOnPartChange() {
+    fresh(); recordBaseAndDub(); set(kParamHoldTime, 2000);
+    set(kParamPart, 1); bDown(); runN(760);                             // the press starts an overdub; the switch comes at the loop end, before the hold
+    CHECK(eng().part() == 1); bUp();
+    set(kParamPart, 0); runN(300); CHECK(eng().part() == 0 && eng().undoDepth(0) == 2);   // the press's overdub, not peeled
+}
+
 int main()
 {
     char dir[] = "build/tests/pluginXXXXXX";                         // pieces go to a fresh folder, never $HOME
@@ -840,6 +891,9 @@ int main()
     layout();
     silentAndMono();
     recActsOnRisingEdgeOnly();
+    holdBUndoesOneLayerPerHold(); holdBDuringAnOverdubUndoesIt(); holdBAfterRecDubKeepsTheRecording();
+    holdBOnAnArmedEmptyTrackKeepsTheArm(); redoAfterHoldsBringsBackOnlyTheLast(); holdBFromStoppedStartsThenUndoes();
+    holdBDroppedOnPartChange();
     tapUndoHoldRedo();
     tapUndoWaitsForTheWindow();
     doubleTapStops();

@@ -310,6 +310,20 @@ static void piecePortsBeforeBypass(const std::string& ttlPath)
     CHECK(controls == 76);
 }
 
+// rec and stop_clear are the momentary footswitches: their port blocks carry mod:preferMomentaryOnByDefault.
+static void footswitchPortsAreMomentary(const std::string& ttlPath)
+{
+    std::ifstream ttl(ttlPath);
+    std::string tok, sym;
+    int found = 0;
+    while (ttl >> tok)
+    {
+        if (tok == "lv2:symbol") ttl >> sym;
+        else if (tok == "mod:preferMomentaryOnByDefault") found += (sym == "\"rec\"") + 2 * (sym == "\"stop_clear\"");
+    }
+    CHECK(found == 3);
+}
+
 static void addressedRecGetsLabel(const LV2_Descriptor* d, const std::string& ttlPath)
 {
     gHmiCalls.clear();
@@ -363,6 +377,7 @@ int main(int argc, char** argv)
     widgetRedrawsWhenProgressMoves(d, so.substr(0, so.size() - 3) + ".ttl");
     onlyVolumePortsHaveRangeSteps(so.substr(0, so.size() - 3) + ".ttl");
     piecePortsBeforeBypass(so.substr(0, so.size() - 3) + ".ttl");
+    footswitchPortsAreMomentary(so.substr(0, so.size() - 3) + ".ttl");
     rmdir(pieces);   // nothing saved: still empty
     REPORT();
 }
