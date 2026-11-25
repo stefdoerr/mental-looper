@@ -231,6 +231,41 @@ def test_step_repeats_clamp():                           # Review Focus 4
     assert writes(t) == [], writes(t)
 
 
+# The user's mod-ui fork (pedalboard.js, wheelClaimedByWidget) zooms the board on a legacy `mousewheel` listener in
+# the capture phase and stops the event, unless it is over a knob: without a claim from the face, a scroll on a step
+# would zoom the board instead.
+BOARD_ZOOM = """document.body.addEventListener('mousewheel', e => { window.zoomed = (window.zoomed || 0) + 1;
+    e.stopPropagation(); e.preventDefault(); }, { capture: true, passive: false });"""
+
+
+def test_step_wheel_beats_board_zoom():
+    t = face(step1_repeats=4)
+    t.evaluate("() => { %s }" % BOARD_ZOOM)
+    x, y = centre(t, '.ml-step[data-step="1"]')
+    t.mouse.move(x, y)
+    t.mouse.wheel(0, -120)
+    t.wait_for_timeout(100)
+    assert [(s, v) for s, v, _ in writes(t)] == [("step1_repeats", 5)], writes(t)
+    assert not t.evaluate("() => window.zoomed"), "the board zoomed"
+
+
+def test_zoom_gesture_sliding_onto_a_step_keeps_zooming():
+    t = face(step1_repeats=4)
+    t.evaluate("() => { %s }" % BOARD_ZOOM)
+    x, y = centre(t, ".ml-title")
+    t.mouse.move(x, y)
+    t.mouse.wheel(0, -120)                                   # a zoom starts off the steps...
+    x, y = centre(t, '.ml-step[data-step="1"]')
+    t.mouse.move(x, y)
+    t.mouse.wheel(0, -120)                                   # ...and slides onto one within 250 ms
+    t.wait_for_timeout(100)
+    assert writes(t) == [] and t.evaluate("() => window.zoomed") == 2, (writes(t), t.evaluate("() => window.zoomed"))
+    t.wait_for_timeout(300)
+    t.mouse.wheel(0, -120)                                   # after a pause the step takes the wheel
+    t.wait_for_timeout(100)
+    assert [(s, v) for s, v, _ in writes(t)] == [("step1_repeats", 5)], writes(t)
+
+
 def test_step_drag():
     t = face(step1_repeats=4)
     x, y = centre(t, '.ml-step[data-step="1"]')
@@ -292,6 +327,21 @@ def test_eyes_follow_loop():
     chg(t, "progress_loops", 4)
     chg(t, "progress", .3)
     assert abs(angle(t, 0) - 72) < .2, spin(t, 0)
+
+
+def test_eyes_hold_on_stop_whatever_the_order():
+    # mod-host sends a batch of postponed events newest first: the stop's progress = 0 can come before looper = 1.
+    # An Auto Rec arm while stopped (looper 5) holds them too: "as for the state it waits in".
+    t = face()
+    chg(t, "looper", 2)
+    chg(t, "progress_loops", 1)
+    chg(t, "progress", .25)
+    chg(t, "progress", 0)
+    chg(t, "looper", 1)
+    assert abs(angle(t, 0) - 90) < .2, spin(t, 0)
+    chg(t, "looper", 5)
+    chg(t, "progress", 0)
+    assert abs(angle(t, 0) - 90) < .2, spin(t, 0)
 
 
 def test_chin_and_stop_light_follow_ports():

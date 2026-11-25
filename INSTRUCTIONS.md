@@ -645,9 +645,9 @@ the symptoms are nasty and non-obvious:
   addressing"** — a red herring; nothing is actually addressed (the
   widget's `enabled` flag is set in the same init step that never ran).
 
-So a custom frame **must** ship a knob sprite and reference it in CSS. A
-ready-to-use sprite ships at `modgui/knobs/black.png` (horizontal
-film-strip, 65 square 128 px frames). Wire it up with an explicit box
+So a custom frame **must** ship a knob sprite and reference it in CSS. This face
+ships a transparent one, `modgui/knobs/clear.png` (horizontal film-strip,
+65 square 64 px frames), and draws the knob in CSS from `--v`. Wire it up with an explicit box
 size and `background-size` whose height equals the box height (frames are
 square, so MOD-UI counts them correctly):
 ```css
@@ -655,7 +655,7 @@ square, so MOD-UI counts them correctly):
     width: 64px;
     height: 64px;
     margin: 0 auto;
-    background-image: url(/resources/knobs/black.png{{{ns}}});
+    background-image: url(/resources/knobs/<name>.png{{{ns}}});
     background-repeat: no-repeat;
     background-size: auto 64px;   /* == box height; do NOT omit */
 }
@@ -750,8 +750,8 @@ strings in `modgui.ttl`. To go custom, override the relevant rule.
 ```
 
 **Custom knob sprite** (horizontal film-strip PNG, square frames):
-1. Drop the file at `modgui/knobs/<name>.png` — a ready-to-use
-   `black.png` (65 frames, 128 px each) ships in the template.
+1. Drop the file at `modgui/knobs/<name>.png` — this face ships a
+   transparent `clear.png` (65 frames, 64 px each) under a CSS-drawn knob.
 2. The Makefile copies the whole `knobs/` directory by default.
 3. Reference it in CSS with an explicit box size **and** `background-size`
    (height == box height). A custom pedal frame REQUIRES this or the knobs

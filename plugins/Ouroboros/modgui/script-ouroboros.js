@@ -80,9 +80,11 @@ function (event, funcs) {
     }
 
     // One turn per loop while the loop runs (playing, writing, waiting); otherwise the eyes keep their angle: the
-    // engine jumps back to 0 when it stops. The first take spins in CSS.
+    // engine jumps back to 0 when it stops. An exact 0 is that stop (mod-host can deliver it before looper = 1, and an
+    // arm while stopped is waiting too): hold. The first take spins in CSS.
     function eyes(st) {
         if (st.looper !== 2 && st.looper !== 3 && st.looper !== 5) return;
+        if (st.progress === 0) return;
         var x = st.progress * st.loops, a = (x - Math.floor(x)) * 360;
         qa('.ml-spin').forEach(function (g) {
             g.setAttribute('transform', 'rotate(' + ((a * +g.getAttribute('data-spd')) % 360).toFixed(1) + ')');
@@ -190,10 +192,7 @@ function (event, funcs) {
         });
         // High-resolution and smooth-scrolling wheels send several small events per notch: add up the distance
         // (lines x 40, pages x 800), take a step at 50 px, at most one per 80 ms, and start over after 250 ms of quiet.
-        q('.ml-steps').addEventListener('wheel', function (e) {
-            var b = e.target.closest ? e.target.closest('.ml-step') : null;
-            if (!b) return;
-            e.preventDefault();
+        st.onWheel = function (e, b) {
             var w = st.wheel, now = performance.now();
             if (b !== w.el || now - w.at > 250) w.acc = 0;
             w.el = b; w.at = now;
@@ -202,6 +201,29 @@ function (event, funcs) {
             var n = w.acc > 0 ? 1 : -1, j = +b.getAttribute('data-step') - 1;
             w.acc = 0; w.stepAt = now;
             setRepeats(j, st.steps[j][1] - n);
-        }, { passive: false });
+        };
+        routeWheel();
+    }
+
+    // A scroll over a step must reach it before the board: MOD's pedalboard can zoom on the wheel from a capture
+    // listener (a legacy `mousewheel` one in the user's mod-ui, which stops the event unless a knob is under it). One
+    // capture listener on the window, shared by every Mental Looper on the page, runs first and hands a scroll over a
+    // step to that face. A gesture that started elsewhere (a zoom) keeps going while it is under 250 ms old.
+    function routeWheel() {
+        if (window.mlWheelRouter) return;
+        var last = { at: 0, onStep: false };
+        window.mlWheelRouter = function (e) {
+            var b = e.target && e.target.closest ? e.target.closest('[class*="ml-pedal"] .ml-step') : null;
+            var now = performance.now(), elsewhere = now - last.at < 250 && !last.onStep;
+            last.at = now;
+            last.onStep = !!b && !elsewhere;
+            if (!last.onStep) return;
+            var r = b.closest('[class*="ml-pedal"]');
+            if (!r || !r._ml || !r._ml.onWheel) return;
+            e.preventDefault();
+            e.stopPropagation();
+            r._ml.onWheel(e, b);
+        };
+        window.addEventListener('wheel', window.mlWheelRouter, { capture: true, passive: false });
     }
 }
