@@ -634,7 +634,7 @@ protected:
                     for (int u = 0; u < 4; ++u) if (fEngine.state(u) != ouro::TrackState::Empty) heard |= uint8_t(1u << u);
                     remember(heard);
                     for (int u = 0; u < 4; ++u) if (heard >> u & 1) turn(u, u == fCTrack);
-                    fEngine.restart();
+                    if (!fEngine.userWaiting()) fEngine.restart();   // one queued while held (MOD's start) is kept
                     fCRestart = fEngine.userWaiting();
                 }
                 fTapPending = true; fSinceTap = 0;

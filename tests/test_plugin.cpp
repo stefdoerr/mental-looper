@@ -951,6 +951,14 @@ static void cSyncWaitPutsTracksBackWhenCancelled() {
     CHECK(eng().userWaiting() && stopped() && eng().isOn(0) && eng().isOn(1));
     runTo(96000 + 128 * 5); CHECK(eng().transport() == ouro::Transport::Running && eng().isOn(0) && eng().isOn(1));
 }
+// A restart queued while C is held (MOD starts mid-bar) is kept by the tap: it becomes the solo start.
+static void cTapKeepsARestartQueuedWhileHeld() {
+    twoTracksStopped(); gT = 50000; set(kParamSync, 1); set(kParamTrack, 2); runMod(false, 1);
+    set(kParamStopClear, 1); runMod(false, 1); runMod(true, 1); CHECK(eng().userWaiting() && stopped());
+    runMod(true, 15); set(kParamStopClear, 0); runMod(true, 1);
+    CHECK(eng().userWaiting() && stopped() && !eng().isOn(0) && eng().isOn(1));
+    runTo(96000 + 128 * 5); CHECK(eng().transport() == ouro::Transport::Running && !eng().isOn(0) && eng().isOn(1));
+}
 
 int main()
 {
@@ -975,7 +983,7 @@ int main()
     cGestureKeepsTheTrackItWasPressedOn(); cGestureDroppedOnPartChange();
     cTapWhileStoppedStartsTheSelectedTrackAlone(); cSoloStartLeavesEmptyTracksOn(); cDoubleTapWhileStoppedStartsEverything();
     cHoldWhileStoppedClearsTheTrackThenEverything(); cTapWhileStoppedOnAnEmptyTrackDoesNothing();
-    cSyncWaitPutsTracksBackWhenCancelled();
+    cSyncWaitPutsTracksBackWhenCancelled(); cTapKeepsARestartQueuedWhileHeld();
     doubleTapStops();
     bRestartsAfterStop();
     doubleTapThenHoldDoesNotClear();
