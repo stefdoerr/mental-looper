@@ -52,7 +52,8 @@ ssh root@192.168.51.1 'systemctl restart jack2 mod-ui'
 ### Desktop DAWs
 
 `make` also writes `bin/ouroboros.vst3` and `bin/ouroboros.clap`. Copy them into `~/.vst3/` and
-`~/.clap/`.
+`~/.clap/`. Rec/Undo and Stop/Clear are press-and-release switches: outside MOD, map them to a
+momentary control such as a MIDI footswitch.
 
 ## Manual
 
