@@ -17,7 +17,7 @@ as much as you like and undo one layer at a time. Built with the
 - Save the whole piece (4 parts, mix, arrangement) to one of 16 slots and load another between songs, on the Dwarf. Pieces are plain WAV folders you can copy.
 - Per-track volume and on/off. The Dwarf screen shows a progress bar, track states and layer counts
   (Starless 19 or later).
-- The output is only the loops: wire your dry signal around it, or turn on **Dry thru**.
+- The output is only the loops: wire your dry signal around it, or turn up **Dry**.
 
 **[Install](#install) · [Manual (PDF)](docs/manual/ouroboros-manual.pdf) · [Building](DEVELOPERS.md)**
 

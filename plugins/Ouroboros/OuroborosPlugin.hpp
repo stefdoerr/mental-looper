@@ -63,7 +63,7 @@ enum ParamIndex {
     kParamUndo, kParamRedo, kParamClearTrack, kParamClearAll,
     kParamOn1, kParamOn2, kParamOn3, kParamOn4,
     kParamVolume1, kParamVolume2, kParamVolume3, kParamVolume4,
-    kParamAfterRec, kParamDryThru, kParamTail, kParamHoldTime, kParamBudget,
+    kParamAfterRec, kParamDry, kParamTail, kParamHoldTime, kParamBudget,
     kParamOffset, kParamTriggerLatency,
     kParamStopPlay, kParamStopMode, kParamFadeTime, kParamAutoRec, kParamThreshold, kParamDoubleTap,
     kParamSync, kParamClick, kParamClickLevel, kParamLength,
@@ -279,7 +279,7 @@ protected:
             {"volume_3",        "Volume 3",           Db,  -60, 6, 0, "dB"},
             {"volume_4",        "Volume 4",           Db,  -60, 6, 0, "dB"},
             {"after_rec",       "After Rec",          Enum, 0, 1, 0, ""},
-            {"dry_thru",        "Dry Thru",           Bool, 0, 1, 0, ""},
+            {"dry",             "Dry",                Db,  -60, 6, -60, "dB"},
             {"tail",            "Tail",               Ms,   0, 500, 50, "ms"},
             {"hold_time",       "Hold Time",          Ms, 200, 2000, 500, "ms"},
             {"budget",          "Undo Budget",        Ms,  16, 400, 200, "MB"},
@@ -386,7 +386,7 @@ protected:
         // A load, from its start to its result: nothing reaches the engine. Presses, and the ports the load sets from the
         // piece, are dropped (fPrev takes fVal, C's gesture ends); any other setting waits for the result (its fPrev
         // stays). The worker checks the slot, then asks for the engine, lent once it has stopped; from then to the
-        // result run() makes no engine call: the output is the dry input (Dry Thru on) or silence.
+        // result run() makes no engine call: the output is the dry input at Dry's level.
         if (fLoading)
         {
             const Result r = fWorker.poll();
@@ -401,8 +401,7 @@ protected:
                 fTapPending = false; fHeld = on(kParamUndoRedo); fDone = true;
                 fClickAt = -1.0;                // no new tick (a running one ends)
                 if (!fLent) fEngine.process(inputs[0], outputs[0], frames);   // the Instant stop ramps out
-                else if (on(kParamDryThru)) std::memmove(outputs[0], inputs[0], frames * sizeof(float));
-                else std::fill(outputs[0], outputs[0] + frames, 0.0f);
+                else for (uint32_t i = 0; i < frames; ++i) outputs[0][i] = fDryGain * inputs[0][i];
                 renderClick(outputs[1], frames);
                 fDrawAcc += frames;
                 if (fDrawAcc >= 960) { fDrawAcc %= 960; drawWidgets(); }
@@ -460,7 +459,7 @@ protected:
             }
         }
         if (changed(kParamAfterRec))      fEngine.setRecToDub(on(kParamAfterRec));
-        if (changed(kParamDryThru))       fEngine.setDryThru(on(kParamDryThru));
+        if (changed(kParamDry))           { fDryGain = ouro::dryGain(fVal[kParamDry]); fEngine.setDryGain(fDryGain); }
         if (changed(kParamTail))          fEngine.setTailMs(fVal[kParamTail]);
         if (changed(kParamBudget))        fEngine.setBudgetMb(fVal[kParamBudget]);
         if (changed(kParamOffset))        fEngine.setAdvanceMs(fVal[kParamOffset]);
@@ -677,7 +676,7 @@ private:
         fSave = kNoSave; fLoading = fLent = false; fStatusLeft = 0;
     }
     // Dropped during a load (R9): the presses, and the ports the load sets from the piece (On, Volume, Part, Song, the
-    // steps, and their proxies). Any other setting (Track, Step, Slot, Dry Thru, Sync, ...) waits for the result.
+    // steps, and their proxies). Any other setting (Track, Step, Slot, Dry, Sync, ...) waits for the result.
     static bool droppedDuringLoad(uint32_t i)
     {
         return (i <= kParamVolume4 && i != kParamTrack) || i == kParamStopPlay
@@ -858,6 +857,7 @@ private:
     double fClickAt = -1.0, fClickSpBeat = 0.0;   // this block's next beat line (< 0: none) and the beat's samples
     int fClickBeat = 1, fClickBpb = 4;      // the next beat line's beat (1 = accented) and the beats in a bar
     float fClickGain = 1.0f;
+    float fDryGain = 0.0f;                  // the level last given to the engine; a load's lent blocks use it
 
     // Saved pieces (run()).
     using Result = ouro::pieces::PieceWorker::Result;

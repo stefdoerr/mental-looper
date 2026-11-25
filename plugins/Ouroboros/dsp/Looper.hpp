@@ -25,6 +25,9 @@ enum class NextAction : uint8_t { Rec, Play, Dub };
 enum class Transport : uint8_t { Running, Stopping, Stopped };
 enum class StopMode : uint8_t { Instant, EndOfLoop, Fade };
 
+// Dry's level: its bottom (-60 dB) and NaN are off, not -60 dB.
+inline float dryGain(float db) { return db > -60.0f ? std::pow(10.0f, std::min(db, 6.0f) / 20.0f) : 0.0f; }
+
 // A gain that moves linearly to a new target over n samples, from wherever it is.
 struct Ramp {
     float v = 0.0f, to = 0.0f, step = 0.0f;
@@ -140,7 +143,7 @@ public:
     }
 
     void process(const float* in, float* out, uint32_t n) {
-        const float dryTo = dryThru_ ? 1.0f : 0.0f;
+        const float dryTo = dryGain_;
         if (!enabled_) { for (uint32_t i = 0; i < n; ++i) out[i] = dry_.next(dryTo, ramp_) * in[i]; return; }
         for (uint32_t i = 0; i < n; ++i) {
             const float x = in[i];                       // read first: in and out may alias
@@ -492,11 +495,11 @@ public:
         ++changes_;
     }
     float volumeDb(int t) const { return inRange(t) ? cur()[t].volDb : 0.0f; }
-    void setDryThru(bool on) { dryThru_ = on; }
+    void setDryGain(float g) { dryGain_ = g; }          // dryGain(Dry's dB)
     void setBypass(bool on) { bypass_ = on; }            // mutes the loops (they keep running); dry is unchanged
     void snapGains() {                                   // jump every gain to its target (first run after load)
         for (Track& tr : cur()) tr.gain.snap(target(tr));
-        dry_.snap(dryThru_ ? 1.0f : 0.0f);
+        dry_.snap(dryGain_);
     }
 
     void setTailMs(float ms) { tailMs_ = std::max(0.0f, std::min(ms, kMaxLoopSeconds * 1000.0f)); }
@@ -1492,7 +1495,7 @@ private:
     uint32_t rec_ = 0, recD_ = 0;    // first recording: write index and its back-date D
     uint32_t seq_ = 0;               // global layer sequence number (oldest first, across tracks)
     int recTrack_ = -1;              // the track making the first recording (L unset), else -1
-    float tailMs_ = 50.0f, trigMs_ = 3.0f, advMs_ = 0.0f;
+    float tailMs_ = 50.0f, trigMs_ = 3.0f, advMs_ = 0.0f, dryGain_ = 0.0f;
     Ramp dry_;
     LoopGain lg_;                    // multiplies the tracks' output only: the stop's fade-out, the restart's fade-in
     Transport tp_ = Transport::Running;
@@ -1517,7 +1520,7 @@ private:
     uint32_t at_ = 0;                // the sample process() is at in its block, while it asks gridPhase (else 0)
     float thr_ = 0.01f;              // auto-record threshold, linear (-40 dB)
     bool autoRec_ = false;
-    bool recToDub_ = false, enabled_ = false, dryThru_ = false, bypass_ = false;
+    bool recToDub_ = false, enabled_ = false, bypass_ = false;
     // Saved pieces, last: the members process() uses keep their places.
     Part snap_[kParts];              // the snapshot a save reads (see takeSnapshot()): reset(), clearAll(), switches leave it
     bool snapHeld_ = false;

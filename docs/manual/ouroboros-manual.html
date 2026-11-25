@@ -359,8 +359,8 @@ Recording or overdubbing again forgets what you could still redo.</p>
 
 <h2>Sound, dry signal and bypass</h2>
 <p>Ouroboros outputs <b>only the loops</b>. Your live sound is not passed through, so run the dry signal around the pedal on the pedalboard (a parallel path) and mix the two.
-If you run the pedal in series instead, switch <b>Dry thru</b> on and it adds your input to the output with no delay.
-<b>Bypass</b> mutes the loops, but they keep running in time and pick up where they are when you switch back on. While bypassed you get the dry signal only if Dry thru is on.</p>
+If you run the pedal in series instead, turn <b>Dry</b> up: it adds your input to the output at that level, with no delay (0&nbsp;dB is your input as it comes in).
+<b>Bypass</b> mutes the loops, but they keep running in time and pick up where they are when you switch back on. While bypassed you get the dry signal at the Dry level (none when Dry is at the bottom, off).</p>
 <p>The loop point is click-free, and a note still ringing when you close the loop carries into the next pass. The first loop can be up to 5 minutes. The pedalboard does not hold the loops; save them as a piece (see Saved pieces). Each track&rsquo;s on/off and volume are also in the web interface (On 1&ndash;4, Volume 1&ndash;4).</p>
 
 <h2>On the Dwarf screen (Starless 19 and later)</h2>
@@ -417,7 +417,7 @@ Without the widget everything still works, just without the screen. On stock MOD
 <h3>Load</h3>
 <p>Load is for between songs. It stops the loops, reads the piece and leaves it stopped at the start. B or Stop/Play starts it; with Song on, it plays the arrangement from step 1. Every track has one layer and no undo history. Load of an empty slot does nothing.</p>
 <p>If you have changed the piece since the last save or load, or a recording or overdub is still running, Load asks first, unless nothing is recorded: <code>LOAD 3?</code>, and a second Load within about 2 seconds confirms.</p>
-<p>While a piece loads, presses (B, C, Stop/Play and so on) and the controls the piece sets (Part, Song, the steps, On 1&ndash;4, Volume 1&ndash;4) are ignored. Any other setting you turn during a load (Dry thru, Track, Length, Sync, Click, Slot) takes effect when it finishes. After the load, the controls show the piece&rsquo;s values. Length stays as it is.</p>
+<p>While a piece loads, presses (B, C, Stop/Play and so on) and the controls the piece sets (Part, Song, the steps, On 1&ndash;4, Volume 1&ndash;4) are ignored. Any other setting you turn during a load (Dry, Track, Length, Sync, Click, Slot) takes effect when it finishes. After the load, the controls show the piece&rsquo;s values. Length stays as it is.</p>
 <p>A piece that cannot be loaded (a missing or unreadable file, another sample rate, a track longer than 5 minutes, too big for memory) leaves the current piece in place where that can be checked first. A read error later leaves every track empty.</p>
 <h3>The remembered piece</h3>
 <p>The pedalboard remembers the slot you saved or loaded last, when you save the pedalboard. Loading the pedalboard loads that piece, and sets Slot to it. If it cannot load, the pedalboard comes up with no piece and the screen shows why.</p>
@@ -444,7 +444,7 @@ Without the widget everything still works, just without the screen. On stock MOD
 <table>
 <tr><th style="width:19%">Setting</th><th style="width:14%">Range</th><th style="width:10%">Default</th><th>What it does</th></tr>
 <tr><td class="ctl">After Rec</td><td>Play / Dub</td><td>Rec&gt;Play</td><td>What closing a first recording leads to.</td></tr>
-<tr><td class="ctl">Dry Thru</td><td>off / on</td><td>off</td><td>Adds your dry input to the output, for series use.</td></tr>
+<tr><td class="ctl">Dry</td><td>off, &minus;60&hellip;+6&nbsp;dB</td><td>off</td><td>Adds your dry input to the output at this level, for series use. The bottom of the range is off.</td></tr>
 <tr><td class="ctl">Tail</td><td>0&ndash;500&nbsp;ms</td><td>50&nbsp;ms</td><td>Ring-out after closing the first loop, blended into its start. Even at 0 it is a short 3&nbsp;ms crossfade, so the loop point never clicks. Too long can double the first note.</td></tr>
 <tr><td class="ctl">Hold Time</td><td>200&ndash;2000&nbsp;ms</td><td>500&nbsp;ms</td><td>How long to hold C before it counts as redo instead of undo. Twice this, held while stopped, clears everything.</td></tr>
 <tr><td class="ctl">Undo Budget</td><td>16&ndash;400&nbsp;MB</td><td>200&nbsp;MB</td><td>Memory for undo history. When it runs out the oldest layers stay in the loop but can no longer be undone.</td></tr>

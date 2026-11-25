@@ -67,7 +67,7 @@ static void layout()
     fresh();
     static const char* kSym[] = { "rec","undo_redo","track","onoff","volume","undo","redo","clear_track",
         "clear_all","on_1","on_2","on_3","on_4","volume_1","volume_2","volume_3","volume_4","after_rec",
-        "dry_thru","tail","hold_time","budget","offset","trigger_latency",
+        "dry","tail","hold_time","budget","offset","trigger_latency",
         "stop_play","stop_mode","fade_time","auto_rec","threshold","double_tap","sync","click","click_level","length",
         "part","song","step","step_part","step_repeats" };
     for (uint32_t i = 0; i < 39; ++i) CHECK(std::strcmp(P().getParameterSymbol(i), kSym[i]) == 0);
@@ -121,6 +121,8 @@ static void layout()
     CHECK(P().getParameterEnumValues(kParamLength).count == 17 && P().getParameterRanges(kParamLength).def == 0.0f);
     CHECK(std::strcmp(P().getParameterEnumValues(kParamLength).values[0].label, "Free") == 0);
     CHECK(std::strcmp(P().getParameterEnumValues(kParamLength).values[16].label, "16 bars") == 0);
+    CHECK(P().getParameterRanges(kParamDry).min == -60.0f && P().getParameterRanges(kParamDry).max == 6.0f);
+    CHECK(P().getParameterRanges(kParamDry).def == -60.0f && !P().isParameterInteger(kParamDry));
     for (const uint32_t i : {uint32_t(kParamStep), uint32_t(kParamSlot)})   // lists on MOD, not bars
     {
         const ParameterEnumerationValues& e = P().getParameterEnumValues(i);
@@ -137,7 +139,7 @@ static void silentAndMono()
     CHECK(std::strcmp(P().getAudioPort(false, 1).symbol, "click_out") == 0 && P().getAudioPort(false, 1).groupId == kPortGroupNone);
     CHECK(std::strcmp(P().getAudioPort(false, 0).symbol, "audio_out_1") == 0 && P().getAudioPort(false, 0).groupId == kPortGroupMono);
     P().activate();
-    run(P(), sine(220, 0.1f, 4800));        // nothing recorded, dry_thru off -> silence
+    run(P(), sine(220, 0.1f, 4800));        // nothing recorded, Dry off -> silence
     CHECK(peak(gOut) == 0.0f && peak(gClick) == 0.0f);
 }
 
@@ -333,10 +335,11 @@ static void bypassSemantics()      // replaces the template's test_bypass
     // 240 Hz at 48 kHz is exactly 200 samples per period, so a 24000-sample loop wraps smoothly.
     const auto s = sine(240, 0.1f, 48000);
     const float limit = 2.5f * sineStep(240, 0.1f);
-    for (int dryThru = 0; dryThru < 2; ++dryThru)
+    for (int dry = 0; dry < 2; ++dry)                           // Dry off, then at -6 dB: bypass passes it at that level
     {
         fresh();
-        set(kParamDryThru, static_cast<float>(dryThru));
+        set(kParamDry, dry ? -6.0f : -60.0f);
+        const float g = dry ? ouro::dryGain(-6.0f) : 0.0f;
         size_t pos = 0;
         std::vector<float> out;
         auto feed = [&](size_t n) {
@@ -353,7 +356,7 @@ static void bypassSemantics()      // replaces the template's test_bypass
         const size_t settled = out.size() - 720;                 // 15 ms after the toggle
         for (size_t i = settled; i < out.size(); ++i)
         {
-            const float want = dryThru ? s[pos - (out.size() - i)] : 0.0f;
+            const float want = g * s[pos - (out.size() - i)];
             CHECK(std::fabs(out[i] - want) < 1e-6f);
         }
         set(kParamBypass, 0); feed(4800);
@@ -364,7 +367,7 @@ static void bypassSemantics()      // replaces the template's test_bypass
 
 static void savedValuesSnapOnLoad()                               // Review Focus 2
 {
-    fresh(); set(kParamDryThru, 1); P().activate();
+    fresh(); set(kParamDry, 0.0f); P().activate();
     auto s = sine(220, 0.1f, 128); run(P(), s); CHECK(maxAbsDiff(gOut, s) < 1e-7f);   // no ramp from 0
 }
 
@@ -383,11 +386,11 @@ static void disabledEngineStillPassesDry()                        // Review Focu
     fresh();
     d_nextSampleRate = 48000.0;
     CHECK(!eng().enabled());
-    set(kParamDryThru, 1); P().activate();
+    set(kParamDry, 0.0f); P().activate();
     auto s = sine(220, 0.1f, 512); run(P(), s);
     CHECK(maxAbsDiff(gOut, s) < 1e-7f);
     set(kParamRec, 1); runN(1); CHECK(eng().state(0) == ouro::TrackState::Empty);
-    set(kParamDryThru, 0); P().deactivate(); P().activate(); run(P(), s); CHECK(peak(gOut) == 0.0f);
+    set(kParamDry, -60.0f); P().deactivate(); P().activate(); run(P(), s); CHECK(peak(gOut) == 0.0f);
 }
 
 // The loop widget shows each track's layer count from the engine: a count change alone changes the bitmap, so it redraws.
@@ -734,10 +737,20 @@ static void pressesDuringALoadAreIgnored() {
     tapC(); press(kParamLoad); CHECK(waitPieces()); runN(200);       // a tap's undo, pending at the load: dropped
     CHECK(eng().state(0) == ouro::TrackState::Playing);
 }
+static void dryLevelHoldsThroughALoad() {                         // the lent blocks pass the input at Dry's level
+    freshPieces(); set(kParamDry, -6.0f); recordLoop(); saveTo(2);
+    press(kParamStopPlay); CHECK(runUntil(stopped));
+    std::vector<float> want = sine(220, 0.1f, 128);                  // what runN(1) feeds
+    for (float& v : want) v *= ouro::dryGain(-6.0f);
+    set(kParamLoad, 1); runN(1); set(kParamLoad, 0); CHECK(plug().pieceLoading());
+    bool level = true;
+    CHECK(waitFor([&] { level = level && maxAbsDiff(gOut, want) < 1e-6f; return !plug().pieceLoading(); }));
+    CHECK(level); CHECK(stopped()); CHECK(plug().loadedPiece() == 2);
+}
 static void settingsDuringALoadApplyAfter() {                      // R9: a setting waits for the engine, not dropped
     freshPieces(); recordLoop(); saveTo(2);
     set(kParamLoad, 1); runN(1); set(kParamLoad, 0); CHECK(plug().pieceLoading());
-    set(kParamDryThru, 1); set(kParamPart, 2); runN(1);              // during the load
+    set(kParamDry, 0.0f); set(kParamPart, 2); runN(1);               // during the load
     CHECK(waitPieces() && stopped());
     const std::vector<float> s = sine(220, 0.1f, 4800); run(P(), s);
     CHECK(maxAbsDiff(slice(gOut, 2400, 4800), slice(s, 2400, 4800)) < 1e-6f);   // stopped: the dry input alone
@@ -875,6 +888,7 @@ int main()
     loadWithChangesAsksFirst();
     pressesDuringALoadAreIgnored();
     settingsDuringALoadApplyAfter();
+    dryLevelHoldsThroughALoad();
     controlsFollowTheLoadedPiece();
     autoLoadOnFirstRun();
     autoLoadOfABrokenSlotShowsWhy();

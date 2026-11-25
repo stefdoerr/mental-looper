@@ -110,11 +110,16 @@ static void softClipOnlyAboveKnee() {
         CHECK(peak(out) <= 1.0f && err < 1e-5f && below > 1000 && above > 1000);
     }
 }
-static void dryThruAndBypass() {
+static void dryAndBypass() {
+    CHECK(ouro::dryGain(-60.0f) == 0.0f && ouro::dryGain(std::nanf("")) == 0.0f && ouro::dryGain(0.0f) == 1.0f);
+    CHECK(std::fabs(ouro::dryGain(-6.0f) - 0.5012f) < 1e-4f && ouro::dryGain(20.0f) == ouro::dryGain(6.0f));
     Rig r; auto s = sine(220, 0.1f, 4800);
     r.feed(s); CHECK(peak(slice(r.out, 0, 4800)) == 0.0f);
-    r.lp.setDryThru(true); r.lp.snapGains(); r.feed(s);
+    r.lp.setDryGain(1.0f); r.lp.snapGains(); r.feed(s);
     CHECK(maxAbsDiff(slice(r.out, 4800, 9600), s) < 1e-7f);
+    r.lp.setDryGain(0.5f); r.feed(s);                                    // a level: ramps there, then holds it
+    for (size_t i = 9600 + 2400; i < 14400; ++i) CHECK(std::fabs(r.out[i] - 0.5f * s[i - 9600]) < 1e-7f);
+    r.lp.setDryGain(1.0f); r.lp.snapGains();
     // bypass with a loop playing: loops ramp out, dry stays; un-bypass resumes at position() (as in onOff test)
     r.lp.setTailMs(0); auto base = recordBase(r, 24064, 0.1f);
     r.lp.setBypass(true); auto o = r.capture(2400);
@@ -164,7 +169,7 @@ static void disabledEngineOutputsDryOnly() {                        // init fail
     ouro::Looper lp; CHECK(!lp.init(1.0e12, 128));
     float in[128], out[128]; std::fill(in, in + 128, 0.3f);
     lp.process(in, out, 128); CHECK(peak(std::vector<float>(out, out + 128)) == 0.0f);
-    lp.setDryThru(true); lp.snapGains(); lp.pressRec(0); lp.process(in, out, 128);
+    lp.setDryGain(1.0f); lp.snapGains(); lp.pressRec(0); lp.process(in, out, 128);
     CHECK(maxAbsDiff(std::vector<float>(out, out + 128), std::vector<float>(in, in + 128)) == 0.0f);
     CHECK(lp.state(0) == ouro::TrackState::Empty);
 }
@@ -215,7 +220,7 @@ int main() {
     secondTrackLockedToLoop(); handoverClosesAndStarts(); handoverSplitKeepsUnity(0.0f); handoverSplitKeepsUnity(5.0f);
     handoverFromRecToDubKeepsUnity(); latencyRaisedMidRecordingKeepsUnity(); handoverTailZeroKeepsBaseSmooth(); handoverAtPunchOutKeepsUnity(0.0f);
     handoverAtPunchOutKeepsUnity(5.0f);
-    onOffRampsAndResumesInPlace(); volumeIsPlaybackOnly(); softClipOnlyAboveKnee(); dryThruAndBypass();
+    onOffRampsAndResumesInPlace(); volumeIsPlaybackOnly(); softClipOnlyAboveKnee(); dryAndBypass();
     clearAllResetsAndOverwrites(); recordOnEmptyTrackZeroesReusedBuffer(); baseUndoRedoAndLengthReset();
     offTrackStillRecords(); disabledEngineOutputsDryOnly();
     stressRandomPresses(0.0f, false); stressRandomPresses(3.0f, true);   // 3 ms: back-dated starts hit a full pool
