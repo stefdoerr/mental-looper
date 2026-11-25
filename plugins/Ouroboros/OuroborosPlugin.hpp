@@ -13,6 +13,7 @@
 #include "hmi/LoopWidget.hpp"
 #include "hmi/SongWidget.hpp"
 #include "hmi/PiecesWidget.hpp"
+#include "hmi/FaceView.hpp"
 #include "hmi/lv2-hmi.h"
 
 #include <algorithm>
@@ -77,6 +78,8 @@ enum ParamIndex {
     kParamStep16Part, kParamStep16Repeats,
     // Saved pieces; Piece (hidden) is the piece last saved or loaded, which the pedalboard's first run loads.
     kParamSlot, kParamSave, kParamLoad, kParamPiece,
+    // The MOD face's outputs (hidden; modgui.ttl monitors them): hmi/FaceView.hpp.
+    kParamProgress, kParamProgressLoops, kParamLooper, kParamTakeSecs, kParamSongStep,
     kParamBypass,
     kNumParams
 };
@@ -244,6 +247,18 @@ protected:
             p.initDesignation(kParameterDesignationBypass);
             return;
         }
+        if (index >= kParamProgress && index <= kParamSongStep)
+        {
+            static const char* const syms[] = {"progress", "progress_loops", "looper", "take_secs", "song_step"};
+            static const char* const names[] = {"Progress", "Progress Loops", "Looper", "Take Seconds", "Song Step"};
+            static const float mins[] = {0, 1, 0, 0, 0}, maxs[] = {1, 4096, 5, 599, 16};
+            const uint32_t k = index - kParamProgress;
+            p.symbol = syms[k];
+            p.name = names[k];
+            p.ranges.min = p.ranges.def = mins[k]; p.ranges.max = maxs[k];
+            p.hints = kParameterIsOutput | kParameterIsHidden | (k ? kParameterIsInteger : 0);
+            return;
+        }
         if (index >= kParamStep1Part && index <= kParamStep16Repeats)   // step1_part, step1_repeats, ...: A x1, then Loop
         {
             const unsigned s = (index - kParamStep1Part) / 2 + 1;
@@ -366,6 +381,7 @@ protected:
         fHold = 0; fBHold = 0; fBHeld = fBDone = false;
         fHeld = fDone = fTapPending = fCRestart = false;
         fSinceTap = 0;
+        fFaceAcc = 0;
     }
 
     void sampleRateChanged(double sr) override
@@ -750,9 +766,23 @@ protected:
 
         fHmi.update({fEngine.state(sel), fEngine.nextAction(sel), fEngine.canRedo(sel), sel, fEngine.isOn(sel),
                      fEngine.transport(), fEngine.armedTrack() == sel, fEngine.userWaiting(sel)});
+        updateFace(frames);
     }
 
 private:
+    // The face's outputs: progress at most 30 times a second, the rest every block (the host sends only changes). A
+    // load's lent blocks write nothing: the last values stand.
+    void updateFace(uint32_t frames)
+    {
+        const ouro::FaceView f = ouro::faceView(fEngine, fSel);
+        fFaceAcc += frames;
+        if (fFaceAcc >= uint32_t(getSampleRate() / 30.0)) { fFaceAcc = 0; fVal[kParamProgress] = f.progress; }
+        fVal[kParamProgressLoops] = float(std::min(4096, f.loops));
+        fVal[kParamLooper] = float(f.looper);
+        fVal[kParamTakeSecs] = float(std::min(599, f.takeSecs));
+        fVal[kParamSongStep] = float(f.songStep);
+    }
+
     // Non-RT, run() not running (activate, sampleRateChanged, the destructor): the worker's job stops, its result is
     // dropped (a load stopped while lent leaves the engine empty), and a save's snapshot goes.
     void haltPieces()
@@ -981,6 +1011,7 @@ private:
         uint8_t last[kMaxBytes] = {};       // run() only: the last bitmap drawn
     } fSlots[4];
     uint32_t fDrawAcc = 0, fBlinkAcc = 0;   // samples since the last widget redraw / blink toggle
+    uint32_t fFaceAcc = 0;                  // samples since the progress output last moved
     bool fBlinkOn = false;
 
     DISTRHO_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OuroborosPlugin)

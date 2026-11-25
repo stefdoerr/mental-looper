@@ -88,7 +88,15 @@ static void layout()
     CHECK(P().getParameterRanges(kParamStep).min == 1.0f && P().getParameterRanges(kParamStep).max == 16.0f);
     CHECK(P().getParameterRanges(kParamStepRepeats).max == 16.0f && P().getParameterRanges(kParamSong).def == 0.0f);
     CHECK(P().getParameterDesignation(kParamBypass) == kParameterDesignationBypass);
-    CHECK(kParamBypass == 75 && P().getParameterCount() == 76);
+    static const char* kOut[] = { "progress", "progress_loops", "looper", "take_secs", "song_step" };   // the face's outputs
+    for (uint32_t k = 0; k < 5; ++k)
+    {
+        const uint32_t i = kParamProgress + k, h = P().getParameterHints(i);
+        CHECK(std::strcmp(P().getParameterSymbol(i), kOut[k]) == 0);
+        CHECK((h & kParameterIsOutput) != 0 && (h & kParameterIsHidden) != 0 && (k == 0) == ((h & kParameterIsInteger) == 0));
+    }
+    CHECK(P().getParameterRanges(kParamProgressLoops).def == 1.0f && P().getParameterRanges(kParamLooper).max == 5.0f);
+    CHECK(kParamProgress == 75 && kParamBypass == 80 && P().getParameterCount() == 81);
     static const char* kPieceSym[] = { "slot", "save", "load", "piece" };   // before Bypass, in g5_pieces
     for (uint32_t i = 0; i < 4; ++i)
         CHECK(std::strcmp(P().getParameterSymbol(kParamSlot + i), kPieceSym[i]) == 0 && P().getParameterGroupId(kParamSlot + i) == 4);
@@ -1006,6 +1014,52 @@ static void cAfterTheSongEndsActsInStepOnesPart() {
     CHECK(eng().transport() == ouro::Transport::Running && eng().part() == 0 && eng().isOn(0) && eng().isOn(1));
 }
 
+// The face's outputs (hmi/FaceView.hpp through the ports).
+static float out(uint32_t i) { return P().getParameterValue(i); }
+static void pressB() { set(kParamRec, 1); runN(1); set(kParamRec, 0); }
+static void faceLooperFollowsTheEngine() {
+    fresh(); runN(2); CHECK(out(kParamLooper) == 0);
+    pressB(); runN(20); CHECK(out(kParamLooper) == 4 && out(kParamTakeSecs) == 0);    // the first take
+    runN(400); CHECK(out(kParamTakeSecs) == 1);
+    pressB(); runN(40); CHECK(out(kParamLooper) == 2 && out(kParamTakeSecs) == 0);
+    set(kParamTrack, 2); pressB(); runN(5); CHECK(out(kParamLooper) == 3);          // track 2 records onto the loop
+    set(kParamTrack, 1); runN(2); CHECK(out(kParamLooper) == 3);                    // writing on a track not selected
+    set(kParamTrack, 2); pressB(); runN(40);
+    set(kParamStopPlay, 1); runN(1); set(kParamStopPlay, 0); runN(10);
+    CHECK(stopped() && out(kParamLooper) == 1);
+}
+static void faceShowsAnAutoRecArm() {                                // runN's 0.1 sine stays under -10 dB
+    fresh(); set(kParamAutoRec, 1); set(kParamThreshold, -10); runN(1);
+    pressB(); runN(2); CHECK(eng().armedTrack() == 0 && out(kParamLooper) == 5);
+}
+static void faceShowsASyncHeldPress() {
+    fresh(); gT = 50000; set(kParamSync, 1); runMod(true, 1);
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);
+    CHECK(eng().waiting() && out(kParamLooper) == 5);
+    runMod(true, 358); CHECK(out(kParamLooper) == 4);
+}
+static void faceFirstTakeWinsOverAWaitingClose() {
+    waitingClose(); CHECK(eng().userWaiting(0) && out(kParamLooper) == 4);
+}
+static void faceIgnoresARestartWaitingForItsLine() {                 // C's stopped tap under Sync: a restart waits
+    syncTapWaits(); CHECK(stopped() && eng().waitingTrack() == -1 && !eng().recWaiting() && out(kParamLooper) == 1);
+}
+static void faceProgressMovesAtMost30TimesASecond() {
+    fresh(); recordLoop();
+    int changes = 0; float last = out(kParamProgress);
+    for (int k = 0; k < 375; ++k) { runN(1); if (out(kParamProgress) != last) { ++changes; last = out(kParamProgress); } }
+    CHECK(changes >= 29 && changes <= 31);
+    CHECK(std::fabs(last - float(eng().trackPosition(0)) / eng().trackLength(0)) <= 1600.0f / eng().loopLength());
+    CHECK(out(kParamProgressLoops) == 1);
+}
+static void faceSongStep() {
+    fresh(); recordLoop(); CHECK(out(kParamSongStep) == 0);
+    song({{0, 2}, {1, 1}}); set(kParamSong, 1); runN(1);
+    CHECK(runUntil([] { return out(kParamSongStep) == 1; }, 400));
+    CHECK(runUntil([] { return out(kParamSongStep) == 2; }, 3 * 188 + 50));
+    set(kParamSong, 0); runN(2); CHECK(runUntil([] { return out(kParamSongStep) == 0; }, 400));
+}
+
 int main()
 {
     char dir[] = "build/tests/pluginXXXXXX";                         // pieces go to a fresh folder, never $HOME
@@ -1082,6 +1136,8 @@ int main()
     aFailedSaveStaysOnScreen();
     loadOfAnEmptySlotKeepsPlaying();
     saveStoresTheBpm();
+    faceLooperFollowsTheEngine(); faceShowsAnAutoRecArm(); faceShowsASyncHeldPress(); faceFirstTakeWinsOverAWaitingClose();
+    faceIgnoresARestartWaitingForItsLine(); faceProgressMovesAtMost30TimesASecond(); faceSongStep();
     gPlugin.reset();
     ouro::pieces::removeTree(dir);
     REPORT();

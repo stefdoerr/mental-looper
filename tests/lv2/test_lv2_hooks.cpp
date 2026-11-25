@@ -242,6 +242,30 @@ static void widgetShownWithoutDrawFeature(const LV2_Descriptor* d)
     d->cleanup(h);
 }
 
+// The face's outputs reach the host's port buffers: looper 4 during the first take, 2 after; progress moves.
+static void faceOutputsReachTheHost(const LV2_Descriptor* d, const std::string& ttlPath)
+{
+    const int rec = portIndex(ttlPath, "rec"), looper = portIndex(ttlPath, "looper"), progress = portIndex(ttlPath, "progress");
+    CHECK(looper > 0 && progress > 0);
+    LV2_Handle h = d->instantiate(d, 48000, bundleDir.c_str(), fullFeatures);
+    connectAll(d, h);
+    d->activate(h);
+    float& recPort = gPorts[rec];
+    auto press = [&] { recPort = 1; d->run(h, 128); recPort = 0; d->run(h, 128); };
+    d->run(h, 128);                                // the first run applies the ports: a press there is no edge
+    press();
+    for (int i = 0; i < 187; ++i) d->run(h, 128);
+    CHECK(gPorts[looper] == 4.0f);
+    press();
+    for (int i = 0; i < 40; ++i) d->run(h, 128);
+    CHECK(gPorts[looper] == 2.0f);
+    const float p0 = gPorts[progress];
+    for (int i = 0; i < 16; ++i) d->run(h, 128);   // 2048 samples: past one 1600-sample update
+    CHECK(gPorts[progress] != p0);
+    d->cleanup(h);
+    recPort = 0;
+}
+
 // Records a 0.5 s loop through the rec port, shows the widget, runs 2 s: the progress bar keeps being redrawn.
 static void widgetRedrawsWhenProgressMoves(const LV2_Descriptor* d, const std::string& ttlPath)
 {
@@ -298,16 +322,17 @@ static void onlyVolumePortsHaveRangeSteps(const std::string& ttlPath)
     CHECK(withSteps == "\"volume\"=133 \"volume_1\"=133 \"volume_2\"=133 \"volume_3\"=133 \"volume_4\"=133 ");
 }
 
-// The pieces ports go before Bypass: slot at kLv2FirstParam (4) + kParamSlot (71), piece at + kParamPiece (74); 76
-// parameters in all.
+// The pieces ports go before Bypass: slot at kLv2FirstParam (4) + kParamSlot (71), piece at + kParamPiece (74); then
+// the face's five outputs (progress at + 75, song_step at + 79); 81 parameters in all.
 static void piecePortsBeforeBypass(const std::string& ttlPath)
 {
     CHECK(portIndex(ttlPath, "slot") == 4 + 71 && portIndex(ttlPath, "piece") == 4 + 74);
+    CHECK(portIndex(ttlPath, "progress") == 4 + 75 && portIndex(ttlPath, "song_step") == 4 + 79);
     std::ifstream ttl(ttlPath);
     std::string tok;
     int controls = 0;
     while (ttl >> tok) controls += tok == "lv2:ControlPort";
-    CHECK(controls == 76);
+    CHECK(controls == 81);
 }
 
 // rec and stop_clear are the momentary footswitches: their port blocks carry mod:preferMomentaryOnByDefault.
@@ -375,6 +400,7 @@ int main(int argc, char** argv)
     widgetShownWithoutDrawFeature(d);
     addressedRecGetsLabel(d, so.substr(0, so.size() - 3) + ".ttl");
     widgetRedrawsWhenProgressMoves(d, so.substr(0, so.size() - 3) + ".ttl");
+    faceOutputsReachTheHost(d, so.substr(0, so.size() - 3) + ".ttl");
     onlyVolumePortsHaveRangeSteps(so.substr(0, so.size() - 3) + ".ttl");
     piecePortsBeforeBypass(so.substr(0, so.size() - 3) + ".ttl");
     footswitchPortsAreMomentary(so.substr(0, so.size() - 3) + ".ttl");
