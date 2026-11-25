@@ -319,6 +319,33 @@ public:
         }
     }
 
+    // B's hold: t's press wait and running overdub are dropped, then its newest layer above the base is undone as
+    // undo() does (duplicated from it, which stays untouched). Never aborts a recording, never undoes the base.
+    void peel(int t) {
+        if (!valid(t)) return;
+        if (pend_.kind == Pending::Press && pend_.t == t) cancelWaiting();
+        Track& tr = cur()[t];
+        if (tr.state == TrackState::Overdubbing) endDub(tr, true);
+        if (tr.state != TrackState::Playing || tr.undoTop == 0 || tr.nOps >= kMaxPendingOps) return;
+        const uint32_t i = --tr.undoTop;
+        if (tr.fade.left && tr.fade.layer == int32_t(i)) tr.fade.left = 0;   // stop writing into it
+        addOp(tr, tr.layers[i].d, -1.0f, true, int32_t(i));
+        ++changes_;
+    }
+    // Cancels t's arm, its press wait or a pending restart (every track's); true if one was.
+    bool cancelWait(int t) {
+        if (!valid(t)) return false;
+        const bool arm = armed_ == t, wait = userWaiting(t);
+        if (arm) armed_ = -1;
+        if (wait) cancelWaiting();
+        return arm || wait;
+    }
+    // t recording onto the loop or overdubbing closes as its B press would, ending in Playing; else nothing.
+    void closeTake(int t) {
+        if (!valid(t) || recTrack_ == t || !writing(cur()[t])) return;
+        close(t, false);
+    }
+
     // Drops the track's layers and redo; it goes Empty and ramps out. The buffer and the pending ops stay.
     void clearTrack(int t) {
         if (!valid(t)) return;
