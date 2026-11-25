@@ -871,10 +871,13 @@ static void holdBFromStoppedStartsThenUndoes() {
     runN(188); CHECK(eng().undoDepth(0) == 0 && eng().transport() == ouro::Transport::Running); bUp();
 }
 static void holdBDroppedOnPartChange() {
-    fresh(); recordBaseAndDub(); set(kParamHoldTime, 2000);
-    set(kParamPart, 1); bDown(); runN(760);                             // the press starts an overdub; the switch comes at the loop end, before the hold
-    CHECK(eng().part() == 1); bUp();
-    set(kParamPart, 0); runN(300); CHECK(eng().part() == 0 && eng().undoDepth(0) == 2);   // the press's overdub, not peeled
+    fresh(); recordBaseAndDub();
+    set(kParamPart, 1); runN(200); dubB(40);                            // part 1 gets a layer a wrong peel could take
+    const int d1 = eng().undoDepth(0); CHECK(eng().part() == 1 && d1 >= 1);
+    set(kParamPart, 0); runN(200); CHECK(eng().part() == 0);
+    set(kParamHoldTime, 2000);
+    set(kParamPart, 1); bDown(); runN(760);                             // switch at the loop end, before the hold time
+    CHECK(eng().part() == 1 && eng().undoDepth(0) == d1); bUp();
 }
 
 int main()
