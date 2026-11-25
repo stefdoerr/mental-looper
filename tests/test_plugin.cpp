@@ -152,21 +152,6 @@ static void recActsOnRisingEdgeOnly()
     set(kParamRec, 1); runN(1);   CHECK(eng().state(0) == ouro::TrackState::Playing);
 }
 
-static void tapUndoHoldRedo()
-{
-    fresh();
-    recordBaseAndDub();
-    CHECK(eng().undoDepth(0) == 1);
-    set(kParamStopClear, 1); runN(37); set(kParamStopClear, 0); runN(152);    // ~99 ms tap, then the double-tap window
-    CHECK(eng().undoDepth(0) == 0 && eng().canRedo(0));
-    set(kParamStopClear, 1); runN(190);                                     // ~507 ms held
-    CHECK(eng().undoDepth(0) == 1);                                        // redo fired while held
-    set(kParamStopClear, 0); runN(1); CHECK(eng().undoDepth(0) == 1);       // no undo on release
-    // a hold_time of 2000 ms turns the same 507 ms hold into a plain undo on release
-    set(kParamHoldTime, 2000); set(kParamStopClear, 1); runN(190); CHECK(eng().undoDepth(0) == 1);
-    set(kParamStopClear, 0); runN(152); CHECK(eng().undoDepth(0) == 0);
-}
-
 static void bDown() { set(kParamRec, 1); runN(1); }
 static void bUp()   { set(kParamRec, 0); runN(1); }
 static void cDown() { set(kParamStopClear, 1); runN(1); }
@@ -174,78 +159,79 @@ static void cUp()   { set(kParamStopClear, 0); runN(1); }
 static void tapC() { cDown(); runN(19); cUp(); }
 static void doubleTap() { tapC(); runN(29); set(kParamStopClear, 1); runN(1); set(kParamStopClear, 0); runN(1); }
 
-static void tapUndoWaitsForTheWindow() {
-    fresh(); recordBaseAndDub(); tapC();
-    CHECK(eng().undoDepth(0) == 1); runN(148); CHECK(eng().undoDepth(0) == 1);
-    runN(2); CHECK(eng().undoDepth(0) == 0);                          // 400 ms after the release
+static void cPressMutesAndReleaseUnmutes() {
+    fresh(); recordBaseAndDub();
+    cDown(); CHECK(!eng().isOn(0) && hasReq(kParamOn1, 0.0f)); runN(19); cUp(); runN(160);
+    CHECK(!eng().isOn(0));                                              // stays off
+    cDown(); CHECK(!eng().isOn(0)); runN(19); cUp(); CHECK(eng().isOn(0)); // on at the release
+}
+static void cHoldClearsTheTrackAndSetsItOn() {
+    fresh(); recordBaseAndDub();
+    cDown(); runN(186); CHECK(!eng().isOn(0) && eng().state(0) == ouro::TrackState::Playing);
+    runN(2); CHECK(eng().state(0) == ouro::TrackState::Empty && eng().isOn(0)); cUp();
+}
+static void cHoldOnAnOffTrackNeverSounds() {
+    fresh(); recordBaseAndDub(); tapC(); runN(160); CHECK(!eng().isOn(0));
+    cDown(); for (int i = 0; i < 186; ++i) { runN(1); CHECK(!eng().isOn(0)); }
+    runN(2); CHECK(eng().state(0) == ouro::TrackState::Empty && eng().isOn(0)); cUp();
+}
+static void cDoubleTapRestoresThenStops() {
+    fresh(); recordBaseAndDub(); tapC(); runN(29); cDown();
+    CHECK(eng().isOn(0) && eng().transport() != ouro::Transport::Running); cUp();
+}
+static void cDoubleTapRestoresBeforeAFadeStop() {                       // Review Focus 3
+    fresh(); set(kParamStopMode, 2); recordBaseAndDub(); tapC(); runN(29); cDown();
+    CHECK(eng().isOn(0) && eng().transport() == ouro::Transport::Stopping); cUp();
+}
+static void cTapOnAnEmptyTrackDoesNothing() {
+    fresh(); recordBaseAndDub(); set(kParamTrack, 2); runN(1);
+    tapC(); runN(160); CHECK(eng().isOn(1));
+    tapC(); runN(29); cDown(); CHECK(eng().transport() != ouro::Transport::Running); cUp();  // a double-tap still stops
+}
+static void cDuringAnOverdubClosesItAndMutes() {
+    fresh(); recordBaseAndDub(); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(60);
+    cDown(); CHECK(eng().state(0) == ouro::TrackState::Playing && eng().undoDepth(0) == 2 && !eng().isOn(0)); cUp();
+}
+static void cCancelsOnlyTheSelectedTracksArm() {                        // runN's 0.1 sine stays under -10 dB
+    fresh(); recordBaseAndDub(); set(kParamAutoRec, 1); set(kParamThreshold, -10); set(kParamTrack, 3); runN(1);
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(1); CHECK(eng().armedTrack() == 2);
+    set(kParamTrack, 1); runN(1); tapC(); CHECK(eng().armedTrack() == 2 && !eng().isOn(0));
+    runN(160); set(kParamTrack, 3); runN(1); tapC(); CHECK(eng().armedTrack() == -1 && eng().isOn(2));
+}
+static void cDuringTheFirstRecording() {
+    fresh(); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(100);
+    tapC(); CHECK(eng().state(0) == ouro::TrackState::Recording);       // the tap waits out the window
+    runN(160); CHECK(eng().state(0) == ouro::TrackState::Empty);
+    fresh(); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(100);
+    cDown(); runN(188); CHECK(eng().state(0) == ouro::TrackState::Empty); cUp();   // a hold aborts it
+    fresh(); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(100);
+    tapC(); runN(10); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(1);    // B while the abort is pending
+    CHECK(eng().state(0) == ouro::TrackState::Recording && eng().loopLength() == 0);
 }
 static void doubleTapStops() {
     fresh(); recordBaseAndDub(); tapC(); runN(29);
     set(kParamStopClear, 1); runN(1); CHECK(eng().transport() == ouro::Transport::Stopping);   // on the press
     runN(20); set(kParamStopClear, 0); runN(200);
-    CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 1 && peak(gOut) == 0.0f);
+    CHECK(eng().transport() == ouro::Transport::Stopped && eng().isOn(0) && peak(gOut) == 0.0f);
 }
 static void bRestartsAfterStop() {
     fresh(); recordBaseAndDub(); doubleTap(); runN(20);
     set(kParamRec, 1); runN(1); set(kParamRec, 0);
     CHECK(eng().transport() == ouro::Transport::Running && eng().state(0) == ouro::TrackState::Playing);
 }
-static void holdWhileStoppedClearsAll() {
-    fresh(); recordBaseAndDub(); tapC(); runN(152); CHECK(eng().canRedo(0));
-    doubleTap(); runN(20);
-    set(kParamStopClear, 1); runN(300); set(kParamStopClear, 0); runN(120);   // 800 ms: no redo, no undo
-    CHECK(eng().undoDepth(0) == 0 && eng().loopLength() > 0 && eng().transport() == ouro::Transport::Stopped);
-    set(kParamStopClear, 1); runN(376);                                        // past 1000 ms
-    CHECK(eng().loopLength() == 0 && eng().transport() == ouro::Transport::Running);
-    set(kParamStopClear, 0); runN(120); CHECK(eng().state(0) == ouro::TrackState::Empty);
-}
-static void doubleTapThenHoldDoesNotClear() {
+static void doubleTapThenHoldDoesNotClear() {                          // a second press is never a first press
     fresh(); recordBaseAndDub(); tapC(); runN(29); set(kParamStopClear, 1); runN(450);
     CHECK(eng().transport() == ouro::Transport::Stopped && eng().loopLength() > 0);
-}
-static void tapWhileStoppedUndoes() {
-    fresh(); recordBaseAndDub(); doubleTap(); runN(20); tapC(); runN(152);
-    CHECK(eng().undoDepth(0) == 0 && eng().transport() == ouro::Transport::Stopped);
-}
-static void bAfterATapUndoesFirst() {                                 // Ruling R8
-    fresh(); recordBaseAndDub(); tapC(); runN(74);                    // ~200 ms after the release
-    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(120);         // re-dub: the bad layer goes first
-    CHECK(eng().undoDepth(0) == 0 && eng().state(0) == ouro::TrackState::Overdubbing);
-    fresh(); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(37); // ~100 ms of a first recording
-    tapC(); runN(55);                                                 // abort it, then ~150 ms later...
-    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(120);         // ...record again
-    CHECK(eng().state(0) == ouro::TrackState::Recording && eng().loopLength() == 0);
-}
-static void doubleTapWhileStoppedResumes() {
-    fresh(); recordBaseAndDub();
-    set(kParamRec, 1); runN(1); set(kParamRec, 0); run(P(), sine(220, 0.1f, 4800 - 128));
-    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40);           // a second layer
-    doubleTap(); runN(20);
-    CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 2);
-    set(kParamStopClear, 1); runN(2); set(kParamStopClear, 0); runN(2);  // two quick taps: resume from the top
-    set(kParamStopClear, 1); runN(1);
-    CHECK(eng().transport() == ouro::Transport::Running);              // on the second press
-    runN(600); set(kParamStopClear, 0); runN(120);                       // held past 2x hold time: no clear
-    CHECK(eng().undoDepth(0) == 2 && eng().loopLength() > 0 && eng().transport() == ouro::Transport::Running);
-    doubleTap(); runN(20);                                              // slow taps while stopped each undo
-    tapC(); runN(152); tapC(); runN(152);
-    CHECK(eng().undoDepth(0) == 0 && eng().transport() == ouro::Transport::Stopped);
+    CHECK(eng().state(0) == ouro::TrackState::Playing && eng().isOn(0)); cUp();
 }
 static void doubleTapBegunWhileStoppingOnlyStops() {                   // first tap during a fade, second after the park
     fresh(); recordBaseAndDub(); set(kParamStopMode, 2); set(kParamFadeTime, 0.5f);
     set(kParamStopPlay, 1); runN(1); set(kParamStopPlay, 0); runN(170);   // 171 blocks into a 188-block fade
     set(kParamStopClear, 1); runN(2); set(kParamStopClear, 0); runN(1);    // released while still stopping
-    CHECK(eng().transport() == ouro::Transport::Stopping);
+    CHECK(eng().transport() == ouro::Transport::Stopping && !eng().isOn(0));   // as while running: off
     runN(20); CHECK(eng().transport() == ouro::Transport::Stopped);
     set(kParamStopClear, 1); runN(1); set(kParamStopClear, 0); runN(120);
-    CHECK(eng().transport() == ouro::Transport::Stopped && eng().undoDepth(0) == 1);
-}
-static void tapUndoesTheTrackItWasTappedOn() {                        // Review Focus 5
-    fresh(); recordBaseAndDub();
-    set(kParamTrack, 2); runN(1); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(20);
-    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40);           // track 2 recorded onto the loop
-    set(kParamTrack, 1); runN(1); tapC(); set(kParamTrack, 2); runN(152);
-    CHECK(eng().undoDepth(0) == 0 && eng().state(1) == ouro::TrackState::Playing);
+    CHECK(eng().transport() == ouro::Transport::Stopped && eng().isOn(0));   // put back, still stopped
 }
 static void doubleTapDuringAShortFirstRecording() {                   // Review Focus 4
     fresh(); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(5);
@@ -463,9 +449,9 @@ static void pressSeesThisBlocksGrid() {                             // setGrid c
     gT = 97000; set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);   // MOD jumped to 1000 past a line: in grace
     CHECK(eng().state(0) == ouro::TrackState::Recording);
 }
-// A tap on C cancels a waiting action on its press, not when the double-tap window ends: a late undo would act on
-// what the line did (here undo the first loop it closed, and the take is lost). A second tap still stops, and B
-// after the tap acts without an undo first.
+// A C press with the selected track's wait pending cancels it and does nothing else: the first recording the line
+// would have closed goes on, not aborted once the window passes. A second press still stops, and B after the tap
+// closes again (no abort first).
 static void runTo(double t) { while (gT < t) runMod(true, 1); }
 static void waitingClose() {                                        // a first recording from the line; B early for bar 3
     fresh(); gT = 0; set(kParamSync, 1); runMod(true, 1);
@@ -473,7 +459,7 @@ static void waitingClose() {                                        // a first r
     runTo(192000 - 40000); set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);
     CHECK(eng().userWaiting(0));
 }
-static void tapCancelsAWaitingActionAtOnce() {
+static void cCancelsTheSelectedTracksWait() {
     for (double before : {14400.0, 1280.0}) {                       // 300 ms before the line; 27 ms (released after it)
         waitingClose(); runTo(192000 - before);
         set(kParamStopClear, 1); runMod(true, 1); CHECK(!eng().waiting() && eng().state(0) == ouro::TrackState::Recording);
@@ -485,15 +471,15 @@ static void tapCancelsAWaitingActionAtOnce() {
     set(kParamStopClear, 1); runMod(true, 2); set(kParamStopClear, 0); runMod(true, 2);
     set(kParamStopClear, 1); runMod(true, 1); set(kParamStopClear, 0); runMod(true, 40);
     CHECK(eng().transport() == ouro::Transport::Stopped && eng().loopLength() == 96000);
-    waitingClose(); runTo(192000 - 30000);                          // B within the window: no undo, it closes again
+    waitingClose(); runTo(192000 - 30000);                          // B within the window: no abort, it closes again
     set(kParamStopClear, 1); runMod(true, 2); set(kParamStopClear, 0); runMod(true, 20);
     set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);
     CHECK(eng().state(0) == ouro::TrackState::Recording && eng().userWaiting(0));
     runTo(192000 + 128 * 200); CHECK(eng().loopLength() == 192000 && eng().state(0) == ouro::TrackState::Playing);
 }
-// The tap cancels a wait on any track at once: B waits on track 1, the knob turns to track 2 (its loop), C just before
-// the line. Track 1 does not start and track 2 is not undone.
-static void tapCancelsAWaitOnAnotherTrack() {
+// C leaves another track's wait alone and acts on the selected track: B waits on track 1, the knob turns to track 2
+// (its loop), C just before the line. Track 1 starts on the line; track 2 goes off and stays.
+static void cLeavesAWaitOnAnotherTrack() {
     fresh(); gT = 0; set(kParamSync, 1); set(kParamTrack, 2); runMod(true, 1);
     set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);           // track 2's first loop: one bar
     runTo(96000 - 1280); set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runTo(96000 + 128 * 20);
@@ -502,10 +488,10 @@ static void tapCancelsAWaitOnAnotherTrack() {
     runTo(2 * 96000 + 30000); set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);   // track 1 waits for the line
     CHECK(eng().userWaiting(0) && eng().waitingTrack() == 0);
     set(kParamTrack, 2); runMod(true, 1); runTo(3 * 96000 - 1280);
-    set(kParamStopClear, 1); runMod(true, 1); CHECK(!eng().waiting());
+    set(kParamStopClear, 1); runMod(true, 1); CHECK(eng().userWaiting(0) && !eng().isOn(1));
     runMod(true, 19); set(kParamStopClear, 0); runMod(true, 200);
-    CHECK(eng().state(0) == ouro::TrackState::Empty && !eng().waiting());
-    CHECK(eng().state(1) == ouro::TrackState::Playing && !eng().canRedo(1));
+    CHECK(eng().state(0) == ouro::TrackState::Recording && !eng().waiting());
+    CHECK(eng().state(1) == ouro::TrackState::Playing && !eng().isOn(1));
 }
 
 // k blocks of MOD's transport; the Click output of each block appended to `click`.
@@ -738,7 +724,7 @@ static void pressesDuringALoadAreIgnored() {
     CHECK(waitPieces()); runN(1); set(kParamRec, 0); runN(1);
     for (int t = 0; t < 4; ++t) CHECK(eng().state(t) != ouro::TrackState::Recording);
     CHECK(stopped());
-    tapC(); press(kParamLoad); CHECK(waitPieces()); runN(200);       // a tap's undo, pending at the load: dropped
+    tapC(); press(kParamLoad); CHECK(waitPieces()); runN(200);       // a tap pending at the load: dropped
     CHECK(eng().state(0) == ouro::TrackState::Playing);
 }
 static void dryLevelHoldsThroughALoad() {                         // the lent blocks pass the input at Dry's level
@@ -879,6 +865,17 @@ static void holdBDroppedOnPartChange() {
     set(kParamPart, 1); bDown(); runN(760);                             // switch at the loop end, before the hold time
     CHECK(eng().part() == 1 && eng().undoDepth(0) == d1); bUp();
 }
+static void cGestureKeepsTheTrackItWasPressedOn() {                    // Review Focus 2
+    fresh(); recordLoop(); set(kParamTrack, 2); recordLoop();           // track 2 recorded onto the loop
+    CHECK(eng().state(1) == ouro::TrackState::Playing);
+    set(kParamTrack, 1); runN(1); cDown(); set(kParamTrack, 2); runN(187);
+    CHECK(eng().state(0) == ouro::TrackState::Empty && eng().state(1) != ouro::TrackState::Empty); cUp();
+}
+static void cGestureDroppedOnPartChange() {                            // Review Focus 4
+    fresh(); set(kParamHoldTime, 2000); recordLoop();
+    cDown(); set(kParamPart, 1); runN(760);                             // the switch at the loop end, then past the hold
+    CHECK(eng().part() == 1 && eng().state(0) != ouro::TrackState::Empty); cUp();
+}
 
 int main()
 {
@@ -897,17 +894,14 @@ int main()
     holdBUndoesOneLayerPerHold(); holdBDuringAnOverdubUndoesIt(); holdBAfterRecDubKeepsTheRecording();
     holdBOnAnArmedEmptyTrackKeepsTheArm(); redoAfterHoldsBringsBackOnlyTheLast(); holdBFromStoppedStartsThenUndoes();
     holdBDroppedOnPartChange();
-    tapUndoHoldRedo();
-    tapUndoWaitsForTheWindow();
+    cPressMutesAndReleaseUnmutes(); cHoldClearsTheTrackAndSetsItOn(); cHoldOnAnOffTrackNeverSounds();
+    cDoubleTapRestoresThenStops(); cDoubleTapRestoresBeforeAFadeStop(); cTapOnAnEmptyTrackDoesNothing();
+    cDuringAnOverdubClosesItAndMutes(); cCancelsOnlyTheSelectedTracksArm(); cDuringTheFirstRecording();
+    cGestureKeepsTheTrackItWasPressedOn(); cGestureDroppedOnPartChange();
     doubleTapStops();
     bRestartsAfterStop();
-    holdWhileStoppedClearsAll();
     doubleTapThenHoldDoesNotClear();
-    tapWhileStoppedUndoes();
-    doubleTapWhileStoppedResumes();
     doubleTapBegunWhileStoppingOnlyStops();
-    tapUndoesTheTrackItWasTappedOn();
-    bAfterATapUndoesFirst();
     doubleTapDuringAShortFirstRecording();
     stopPlayPortToggles();
     stopAndAutoRecSettingsReachTheEngine();
@@ -925,8 +919,8 @@ int main()
     modPlayAndStopEdgesFollow();
     syncSwitchedOnWhilePlayingIsNoEdge();
     pressSeesThisBlocksGrid();
-    tapCancelsAWaitingActionAtOnce();
-    tapCancelsAWaitOnAnotherTrack();
+    cCancelsTheSelectedTracksWait();
+    cLeavesAWaitOnAnotherTrack();
     clickTicksOnModsBeats();
     clickIsSilentUnlessOnSyncedAndPlaying();
     lengthReachesTheEngine();
