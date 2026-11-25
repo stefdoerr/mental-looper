@@ -121,6 +121,13 @@ static void layout()
     CHECK(P().getParameterEnumValues(kParamLength).count == 17 && P().getParameterRanges(kParamLength).def == 0.0f);
     CHECK(std::strcmp(P().getParameterEnumValues(kParamLength).values[0].label, "Free") == 0);
     CHECK(std::strcmp(P().getParameterEnumValues(kParamLength).values[16].label, "16 bars") == 0);
+    for (const uint32_t i : {uint32_t(kParamStep), uint32_t(kParamSlot)})   // lists on MOD, not bars
+    {
+        const ParameterEnumerationValues& e = P().getParameterEnumValues(i);
+        CHECK(e.count == 16 && e.restrictedMode && P().getParameterRanges(i).def == 1.0f);
+        CHECK(e.values[0].value == 1.0f && std::strcmp(e.values[0].label, "1") == 0);
+        CHECK(e.values[15].value == 16.0f && std::strcmp(e.values[15].label, "16") == 0);
+    }
 }
 
 static void silentAndMono()

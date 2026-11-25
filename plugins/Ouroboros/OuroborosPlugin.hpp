@@ -297,12 +297,12 @@ protected:
             {"length",          "Length",             Enum, 0, 16, 0, ""},
             {"part",            "Part",               Enum, 0, 3, 0, ""},
             {"song",            "Song",               Bool, 0, 1, 0, ""},
-            {"step",            "Step",               Int,  1, 16, 1, ""},
+            {"step",            "Step",               Enum, 1, 16, 1, ""},
             {"step_part",       "Step Part",          Enum, 0, 5, 0, ""},
             {"step_repeats",    "Step Repeats",       Int,  1, 16, 1, ""},
         };
         static const Def pieces[] = {           // after the steps
-            {"slot",            "Slot",               Int,  1, 16, 1, ""},
+            {"slot",            "Slot",               Enum, 1, 16, 1, ""},
             {"save",            "Save",               Trig, 0, 1, 0, ""},
             {"load",            "Load",               Trig, 0, 1, 0, ""},
             {"piece",           "Piece",              Int,  0, 16, 0, ""},
@@ -324,7 +324,8 @@ protected:
         case Enum:
         {
             const uint8_t n = index == kParamTrack || index == kParamPart ? 4 : index == kParamStopMode ? 3
-                            : index == kParamLength ? 17 : index == kParamStepPart ? 6 : 2;
+                            : index == kParamLength ? 17 : index == kParamStepPart ? 6
+                            : index == kParamStep || index == kParamSlot ? 16 : 2;
             static const char* const trackNames[] = {"Track 1", "Track 2", "Track 3", "Track 4"};
             static const char* const afterNames[] = {"Rec > Play", "Rec > Dub"};
             static const char* const stopNames[] = {"Instant", "End of loop", "Fade"};
@@ -332,6 +333,8 @@ protected:
             static const char* const partNames[] = {"A", "B", "C", "D", "Loop", "Stop"};
             static const char* const lengthNames[] = {"Free", "1 bar", "2 bars", "3 bars", "4 bars", "5 bars", "6 bars",
                 "7 bars", "8 bars", "9 bars", "10 bars", "11 bars", "12 bars", "13 bars", "14 bars", "15 bars", "16 bars"};
+            static const char* const numNames[] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13",
+                "14", "15", "16"};
             p.hints |= kParameterIsInteger;
             p.enumValues.count = n;
             p.enumValues.restrictedMode = true;
@@ -341,7 +344,8 @@ protected:
                 p.enumValues.values[k].value = d.min + k;
                 p.enumValues.values[k].label = index == kParamTrack ? trackNames[k] : index == kParamStopMode ? stopNames[k]
                                              : index == kParamSync ? syncNames[k] : index == kParamLength ? lengthNames[k]
-                                             : index == kParamPart || index == kParamStepPart ? partNames[k] : afterNames[k];
+                                             : index == kParamPart || index == kParamStepPart ? partNames[k]
+                                             : index == kParamStep || index == kParamSlot ? numNames[k] : afterNames[k];
             }
             break;
         }
