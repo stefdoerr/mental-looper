@@ -247,6 +247,9 @@ static void doubleTapDuringAShortFirstRecording() {                   // Review 
     CHECK(eng().state(0) == ouro::TrackState::Empty && eng().loopLength() == 0
           && eng().transport() == ouro::Transport::Running);
     set(kParamStopClear, 0); runN(200); CHECK(eng().state(0) == ouro::TrackState::Empty);
+    fresh(); bDown(); bUp(); runN(100);                                 // a long enough take: kept as the loop
+    tapC(); runN(29); cDown(); cUp(); runN(200);
+    CHECK(eng().loopLength() > 0 && eng().transport() == ouro::Transport::Stopped);
 }
 static void stopPlayPortToggles() {
     fresh(); recordBaseAndDub();
@@ -732,7 +735,11 @@ static void pressesDuringALoadAreIgnored() {
     CHECK(waitPieces()); runN(1); set(kParamRec, 0); runN(1);
     for (int t = 0; t < 4; ++t) CHECK(eng().state(t) != ouro::TrackState::Recording);
     CHECK(stopped());
-    tapC(); press(kParamLoad); CHECK(waitPieces()); runN(200);       // a tap pending at the load: dropped
+    press(kParamStopPlay); tapC();                                   // a running tap: off, the window open
+    CHECK(eng().transport() == ouro::Transport::Running && !eng().isOn(0));
+    press(kParamLoad); CHECK(status() == "LOAD 2?");                 // the tap is a change: asked, then confirmed
+    press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces() && eng().isOn(0));
+    cDown(); CHECK(eng().isOn(0)); cUp();                            // the load ended the window: no double-tap
     CHECK(eng().state(0) == ouro::TrackState::Playing);
 }
 static void dryLevelHoldsThroughALoad() {                         // the lent blocks pass the input at Dry's level
