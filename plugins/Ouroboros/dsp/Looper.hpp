@@ -276,8 +276,8 @@ public:
 
     void undo(int t) {
         if (!valid(t)) return;
-        if (armed_ >= 0) { armed_ = -1; return; }       // a tap on C cancels the arm, and only that; likewise the
-        if (userWaiting()) { cancelWaiting(); return; } // user's wait, on any track (not MOD's)
+        if (armed_ >= 0) { armed_ = -1; return; }       // an undo (the web UNDO) cancels the arm, and only that;
+        if (userWaiting()) { cancelWaiting(); return; } // likewise the user's wait, on any track (not MOD's)
         Track& tr = cur()[t];
         if (tr.state == TrackState::Recording) {         // abort: the track is empty again. None of the take was heard
             tr.state = TrackState::Empty;                // (a recording onto the loop plays ahead of its writer): its
@@ -685,8 +685,9 @@ public:
     }
     // Every track at its beginning (pos, phase 0), one layer, stopped at the top: restart() plays the piece from there.
     // On and volume through their setters (the clamp: the file is the user's to edit), which act on the current part.
+    // Song on, stopped in step 1's part (see songHome()): stopped only once the steps and Song are in, so neither
+    // setter switches on the old Song or the old step 1.
     void importEnd(const PieceMeta& m) {
-        tp_ = Transport::Stopped;
         L_ = m.loop; bars_ = m.bars;
         for (int p = 0; p < kParts; ++p) {
             cp_ = &parts_[p];
@@ -698,8 +699,10 @@ public:
             }
         }
         part_ = m.part; cp_ = &parts_[part_];
-        for (int i = 0; i < kSteps; ++i) setStep(i, m.stepPart[i], m.stepReps[i]);   // L set: no switch (songHome())
+        for (int i = 0; i < kSteps; ++i) setStep(i, m.stepPart[i], m.stepReps[i]);   // L set, running: no switch
         setSong(m.song);
+        tp_ = Transport::Stopped;
+        songHome();
     }
     uint32_t capacityBlocks() const { return pool_.reserved(); }
     uint32_t maxTrackLength() const { return maxRec_; }
@@ -837,8 +840,11 @@ private:
         if (p < kParts) switchPart(p);
     }
     int songPart() const { return song_ && steps_[0].part < kParts ? steps_[0].part : -1; }   // step 1's, Song on
-    // Song on with nothing recorded: the current part is step 1's, so the first loop is recorded there (R1).
-    void songHome() { if (enabled_ && songPart() >= 0 && !L_ && recTrack_ < 0) switchPart(songPart()); }
+    // Song on with nothing recorded: the current part is step 1's, so the first loop is recorded there (R1). Song on
+    // and stopped, likewise: the part that will start is the one the controls judge (C's gestures and label).
+    void songHome() {
+        if (enabled_ && songPart() >= 0 && ((!L_ && recTrack_ < 0) || tp_ == Transport::Stopped)) switchPart(songPart());
+    }
 
     // Stopped: plays from the top, every playhead since samples on (see restart()); the loops fade in. Song on: from its
     // top, step 1's part (switched to at once).
@@ -1368,13 +1374,14 @@ private:
 
     // The stop's end: every playhead goes to the top (see toTop()). A switch's outgoing part freezes (its fades ended
     // too, see overlap()); a queued switch then happens, as stopped; a queued restart then starts. The song is back to
-    // not playing.
+    // not playing, its part step 1's (see songHome()).
     void park() {
         toTop();
         tp_ = Transport::Stopped;
         step_ = -1; pass_ = 0;
         if (out_ >= 0) freeze(out_);
         if (queued_ >= 0) switchPart(queued_);
+        songHome();
         if (restartQueued_) { restartQueued_ = false; restart(); }
     }
 

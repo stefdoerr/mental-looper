@@ -564,7 +564,8 @@ protected:
         // tracks that hold audio go off; on an empty track, nothing); a second press within the window puts them back
         // and starts everything from the top (a restart still waiting for its line is left waiting). Hold Time clears
         // the track and sets it on, twice Hold Time clears everything; the release starts nothing. A tap's restart
-        // cancelled before playback starts (B, a C press, Stop/Play, MOD's stop) puts them back too.
+        // cancelled before playback starts (B, a C press, Stop/Play, MOD's stop) puts them back too. A hold begun
+        // while stopped keeps that meaning if B starts playback mid-hold (two switches at once; accepted).
         const auto turn = [&](int t, bool v) { fEngine.setOn(t, v); request(kParamOn1 + t, v ? 1.0f : 0.0f); };
         const auto remember = [&](uint8_t tracks) {      // the tap turns these: their On as it is now, for putBack
             fCFlipped = tracks; fCWas = 0;
@@ -611,7 +612,7 @@ protected:
                         {
                             fEngine.closeTake(sel);
                             if (fEngine.isOn(sel)) { remember(uint8_t(1u << sel)); turn(sel, false); }
-                            else fCWasOff = st == ouro::TrackState::Playing;
+                            else fCWasOff = true;   // a take on it too: closed, then on at the release
                         }
                     }
                 }
@@ -926,7 +927,7 @@ private:
     bool fTapPending = false;               // a tap was released: the Double-Tap window runs
     bool fCStopped = false;                 // the first press came while stopped (and cancelled nothing)
     bool fCClears = false;                  // Hold Time clears fCTrack (not: a wait or arm cancelled, an empty track)
-    bool fCWasOff = false;                  // fCTrack was playing and off: the tap turns it on at the release
+    bool fCWasOff = false;                  // fCTrack held audio and was off: the tap turns it on at the release
     bool fCAborts = false;                  // the press came on the first recording: the tap aborts it
     uint8_t fCFlipped = 0;                  // the tracks whose On the tap turned (bit t): a double-tap puts them back
     uint8_t fCWas = 0;                      // every track's On (bit t) as it was before the tap turned them

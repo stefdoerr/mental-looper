@@ -195,9 +195,20 @@ static void changesCountsWhatASaveWrites() {
     r.lp.clearAll(); CHECK(rose()); r.settle(); CHECK(r.lp.empty());
 }
 
+// R10: loaded, stopped: Song on, in step 1's part; Song off, in the piece's part, whatever Song was before the load.
+static void importWithSongOnSitsInStepOnesPart() {
+    Rig a; recordBase(a, 24000, 0.2f);
+    a.lp.setPart(1); a.silence(24000 - a.lp.position() + 1000); CHECK(a.lp.part() == 1);   // B: a copy of A, settled
+    Rig b; b.lp.setStep(0, 2, 1); b.lp.setSong(true);                    // Song on before the load
+    importInto(a, b); CHECK(b.lp.part() == 1 && !b.lp.songOn());
+    a.lp.setSong(true);                                                  // step 1: A
+    Rig c; importInto(a, c);
+    CHECK(c.lp.part() == 0 && c.lp.songOn() && c.lp.transport() == ouro::Transport::Stopped);
+}
+
 int main() {
     snapshotReadsFromTheTrackBeginning(); snapshotResolvesPendingOps(); snapshotIgnoresLaterChanges();
     takeSnapshotWaitsForASettledEngine(); snapshotMetaHoldsTheMix(); importPlaysBackExactly();
-    importedPieceFitsCapacity(); changesCountsWhatASaveWrites();
+    importedPieceFitsCapacity(); changesCountsWhatASaveWrites(); importWithSongOnSitsInStepOnesPart();
     REPORT();
 }

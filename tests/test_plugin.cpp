@@ -196,6 +196,14 @@ static void cDuringAnOverdubClosesItAndMutes() {
     fresh(); recordBaseAndDub(); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(60);
     cDown(); CHECK(eng().state(0) == ouro::TrackState::Playing && eng().undoDepth(0) == 2 && !eng().isOn(0)); cUp();
 }
+static void cTapDuringATakeOnAnOffTrackTurnsItOn() {                    // the label read OFF n
+    fresh(); recordBaseAndDub(); set(kParamOn1, 0); runN(1); bDown(); bUp(); runN(20);   // an overdub, track 1 off
+    CHECK(eng().state(0) == ouro::TrackState::Overdubbing && !eng().isOn(0));
+    gReqs.clear(); tapC(); CHECK(eng().state(0) == ouro::TrackState::Playing && eng().isOn(0) && hasReq(kParamOn1, 1.0f));
+    runN(160); set(kParamTrack, 2); set(kParamOn2, 0); runN(1); bDown(); bUp(); runN(20);   // a recording onto the loop
+    CHECK(eng().state(1) == ouro::TrackState::Recording && !eng().isOn(1));
+    tapC(); CHECK(eng().state(1) == ouro::TrackState::Playing && eng().isOn(1));
+}
 static void cCancelsOnlyTheSelectedTracksArm() {                        // runN's 0.1 sine stays under -10 dB
     fresh(); recordBaseAndDub(); set(kParamAutoRec, 1); set(kParamThreshold, -10); set(kParamTrack, 3); runN(1);
     set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(1); CHECK(eng().armedTrack() == 2);
@@ -769,8 +777,8 @@ static void controlsFollowTheLoadedPiece() {
     freshPieces(); recordLoop();
     set(kParamPart, 1); CHECK(runUntil([] { return eng().part() == 1; }));   // B, filled from A on entry
     set(kParamVolume1, -6); press(kParamStopPlay); CHECK(runUntil(stopped));
-    set(kParamStep2Part, 2); set(kParamStep2Repeats, 3); set(kParamSong, 1); runN(1);
-    CHECK(eng().part() == 1 && eng().songOn() && eng().volumeDb(0) == -6.0f);
+    set(kParamStep1Part, 1); set(kParamStep2Part, 2); set(kParamStep2Repeats, 3); set(kParamSong, 1); runN(1);
+    CHECK(eng().part() == 1 && eng().songOn() && eng().volumeDb(0) == -6.0f);   // stopped: step 1's part (B)
     saveTo(2);
     fresh(); set(kParamSlot, 2); set(kParamStep, 2); CHECK(waitFor([] { return status() == "2 FULL"; }));   // the first scan
     gReqs.clear(); press(kParamLoad); CHECK(waitPieces());
@@ -959,6 +967,33 @@ static void cTapKeepsARestartQueuedWhileHeld() {
     CHECK(eng().userWaiting() && stopped() && !eng().isOn(0) && eng().isOn(1));
     runTo(96000 + 128 * 5); CHECK(eng().transport() == ouro::Transport::Running && !eng().isOn(0) && eng().isOn(1));
 }
+// T4: a load during a solo WAIT keeps the loaded piece's On (the tap's put-back is dropped with the load).
+static void loadDuringASoloWaitKeepsThePiecesOn() {
+    freshPieces(); twoTracksStoppedNoFresh(); set(kParamOn1, 0); runN(1); saveTo(2);   // the piece: track 1 off
+    set(kParamOn1, 1); runN(1);
+    gT = 50000; set(kParamSync, 1); set(kParamTrack, 2); runMod(true, 1);
+    set(kParamStopClear, 1); runMod(true, 20); set(kParamStopClear, 0); runMod(true, 1);
+    CHECK(eng().userWaiting() && !eng().isOn(0) && eng().isOn(1));
+    press(kParamLoad); CHECK(status() == "LOAD 2?");
+    press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces()); runN(1);
+    CHECK(stopped() && !eng().isOn(0) && eng().isOn(1) && P().getParameterValue(kParamOn1) == 0.0f);
+}
+// R10: Song on (A x1, B x1, Stop), tracks 1 and 2 in A and B (B filled from A), stopped by the song's end in B: the
+// engine sits in step 1's part (the Part port with it), so C acts there.
+static void songEndedInB() {
+    fresh(); song({{0, 1}, {1, 1}, {5, 1}});
+    recordLoop(); set(kParamTrack, 2); runN(1); recordLoop();
+    set(kParamSong, 1); CHECK(runUntil([] { return eng().part() == 1; }) && eng().isOn(0) && eng().isOn(1));
+    CHECK(runUntil(stopped) && eng().songOn() && eng().songStep() == -1);
+    CHECK(eng().part() == 0 && P().getParameterValue(kParamPart) == 0.0f);
+}
+static void cAfterTheSongEndsActsInStepOnesPart() {
+    songEndedInB(); tapC();                                             // track 2 alone, in A
+    CHECK(eng().transport() == ouro::Transport::Running && eng().part() == 0 && !eng().isOn(0) && eng().isOn(1));
+    CHECK(runUntil([] { return eng().part() == 1; }) && eng().isOn(0) && eng().isOn(1));   // B's On untouched
+    songEndedInB(); doubleTap(); runN(10);                              // everything
+    CHECK(eng().transport() == ouro::Transport::Running && eng().part() == 0 && eng().isOn(0) && eng().isOn(1));
+}
 
 int main()
 {
@@ -979,11 +1014,12 @@ int main()
     holdBDroppedOnPartChange();
     cPressMutesAndReleaseUnmutes(); cHoldClearsTheTrackAndSetsItOn(); cHoldOnAnOffTrackNeverSounds();
     cDoubleTapRestoresThenStops(); cDoubleTapPutsBackTheOnBeforeTheTap(); cDoubleTapRestoresBeforeAFadeStop(); cTapOnAnEmptyTrackDoesNothing();
-    cDuringAnOverdubClosesItAndMutes(); cCancelsOnlyTheSelectedTracksArm(); cDuringTheFirstRecording(); cTapPendingDoesNotWipeALoopBClosed();
+    cDuringAnOverdubClosesItAndMutes(); cTapDuringATakeOnAnOffTrackTurnsItOn(); cCancelsOnlyTheSelectedTracksArm(); cDuringTheFirstRecording(); cTapPendingDoesNotWipeALoopBClosed();
     cGestureKeepsTheTrackItWasPressedOn(); cGestureDroppedOnPartChange();
     cTapWhileStoppedStartsTheSelectedTrackAlone(); cSoloStartLeavesEmptyTracksOn(); cDoubleTapWhileStoppedStartsEverything();
     cHoldWhileStoppedClearsTheTrackThenEverything(); cTapWhileStoppedOnAnEmptyTrackDoesNothing();
     cSyncWaitPutsTracksBackWhenCancelled(); cTapKeepsARestartQueuedWhileHeld();
+    cAfterTheSongEndsActsInStepOnesPart();
     doubleTapStops();
     bRestartsAfterStop();
     doubleTapThenHoldDoesNotClear();
@@ -1025,6 +1061,7 @@ int main()
     loadWithChangesAsksFirst();
     pressesDuringALoadAreIgnored();
     cSoloStartCountsAsAChange();
+    loadDuringASoloWaitKeepsThePiecesOn();
     settingsDuringALoadApplyAfter();
     dryLevelHoldsThroughALoad();
     controlsFollowTheLoadedPiece();

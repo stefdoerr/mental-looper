@@ -93,14 +93,22 @@ static void songOnCancelsAQueuedSwitch() {
     Rig r; twoParts(r); r.lp.setPart(1); r.lp.setSong(true); CHECK(r.lp.queuedPart() == -1);
     r.silence(24000 + 64); CHECK(r.lp.part() == 0 && r.lp.songStep() == 0);
 }
-// Beyond the brief: a stop rewinds the song; the restart plays step 1's part from the top (stopped: at once).
+// Beyond the brief: a stop rewinds the song, its part step 1's (R10); the restart plays it from the top.
 static void aRestartPlaysTheSongFromTheTop() {
     Rig r; twoParts(r); r.lp.setStep(1, 1, 1); r.lp.setSong(true);
     r.silence(2 * 24000 + 64); CHECK(r.lp.songStep() == 1 && r.lp.part() == 1);
     r.lp.stop(ouro::StopMode::Instant); r.silence(2000);
-    CHECK(r.lp.transport() == ouro::Transport::Stopped && r.lp.songStep() == -1 && r.lp.part() == 1);
+    CHECK(r.lp.transport() == ouro::Transport::Stopped && r.lp.songStep() == -1 && r.lp.part() == 0);
     r.lp.restart(); CHECK(r.lp.part() == 0 && r.lp.songStep() == 0 && r.lp.songPass() == 0);
     r.silence(64); CHECK(r.lp.trackPosition(0) == 64);
+}
+// R10: Song on and stopped, the engine sits in step 1's part: Song turned on while stopped elsewhere, step 1 edited.
+static void stoppedWithSongOnSitsInStepOnesPart() {
+    Rig r; twoParts(r); r.lp.setPart(1); r.silence(24000 - r.lp.position() + 1000);
+    r.lp.stop(ouro::StopMode::Instant); r.silence(2000);
+    CHECK(r.lp.transport() == ouro::Transport::Stopped && r.lp.part() == 1);
+    r.lp.setSong(true); CHECK(r.lp.part() == 0);
+    r.lp.setStep(0, 1, 1); CHECK(r.lp.part() == 1);
 }
 // Beyond the brief: MOD's start mid-song plays step 1's part from its top, crossfaded from the part playing.
 static void aModStartPlaysTheSongFromTheTop() {
@@ -155,5 +163,6 @@ int main() {
     clearAllRewindsTheSong(); theDefaultSongRepeatsA(); songOnWithNothingRecordedMovesToStepOnesPart();
     emptiedWithSongOnGoesToStepOnesPart(); aLoopBackCountsPassesAfresh(); aRestartPlaysTheSongFromTheTop();
     aModStartPlaysTheSongFromTheTop(); aStopStepUsesTheStopMode(); songOnCancelsAQueuedSwitch();
+    stoppedWithSongOnSitsInStepOnesPart();
     REPORT();
 }

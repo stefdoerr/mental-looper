@@ -41,7 +41,8 @@
         # must match the `lv2:symbol` strings in the generated <plugin>.ttl
         # (which come from initParameter()'s `parameter.symbol` field).
         # stop_clear (the momentary footswitch port) is deliberately NOT on
-        # the face: a momentary web button can stick. Use onoff / clear_track.
+        # the face: its gestures (tap, hold, double-tap) are made for a foot.
+        # The face has their clicks instead: onoff, clear_track, stop_play.
         modgui:port [ lv2:symbol "track" ; lv2:name "Track" ] ;
         modgui:port [ lv2:symbol "volume" ; lv2:name "Volume" ] ;
         modgui:port [ lv2:symbol "rec" ; lv2:name "Rec" ] ;
