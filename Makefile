@@ -149,9 +149,15 @@ modgui: ttl
 	@if ls $(PLUGIN_DIR)/modgui/*.png >/dev/null 2>&1; then \
 		cp -f $(PLUGIN_DIR)/modgui/*.png $(BUNDLE)/modgui/; \
 	fi
-	@if [ -d $(PLUGIN_DIR)/modgui/knobs ]; then \
-		cp -rf $(PLUGIN_DIR)/modgui/knobs $(BUNDLE)/modgui/; \
-	fi
+	@# Resource dirs served as /resources/<dir>/... (the clear knob strip,
+	@# bundled fonts, the baked title).
+	@for d in knobs fonts face; do \
+		if [ -d $(PLUGIN_DIR)/modgui/$$d ]; then rm -rf $(BUNDLE)/modgui/$$d; cp -rf $(PLUGIN_DIR)/modgui/$$d $(BUNDLE)/modgui/; fi; \
+	done
+	@# The beta's face says so in its fine print.
+ifeq ($(BETA),1)
+	sed -i 's|ML-4<br>|ML-4 BETA<br>|' $(BUNDLE)/modgui/icon-$(PLUGIN).html
+endif
 	@# Beginner PDF manual -> "documentation" button in the plugin info
 	@# dialog (referenced from modgui.ttl). Copied under a FIXED name so a
 	@# plugin rename can't break the TTL reference.
@@ -164,6 +170,13 @@ modgui: ttl
 		printf '\n<%s>\n    rdfs:seeAlso <modgui.ttl> .\n' \
 			"$(PLUGIN_URI)" >> $(BUNDLE)/manifest.ttl; \
 	fi
+
+# face-assets: re-bake the face's fonts and title (and head) with generate_face.py; needs uv and the network (fonts
+# come from the google/fonts repo into build/face-fonts/).
+face-assets:
+	uv run --quiet --with fonttools --with brotli python3 $(PLUGIN_DIR)/modgui/generate_face.py
+
+.PHONY: face-assets
 
 # ---------------------------------------------------------------------------
 
