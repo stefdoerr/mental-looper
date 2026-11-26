@@ -183,6 +183,144 @@ static void aSongStepOnTheCurrentPartIsNoSwitch() {
     CHECK(maxAbsDiff(run(true), run(false)) < 1e-6f);
 }
 
+// B's double-tap: newPart(t) goes to the next part; an empty one gets the tracks below t copied, t recording from the
+// switch sample, and nothing above.
+static void newPartCopiesBelowAndRecordsTheSelectedTrack() {
+    Rig r; recordBase(r, 24000, 0.1f); recordBaseOn(r, 1); recordBaseOn(r, 2, 0.1f, 660.0);
+    r.silence(6000); r.lp.newPart(2);
+    CHECK(r.lp.queuedPart() == 1 && r.lp.newPartTrack() == 2 && r.lp.part() == 0);
+    r.silence(24000 - r.lp.position() - 1); CHECK(r.lp.part() == 0);
+    r.silence(2);
+    CHECK(r.lp.part() == 1 && r.lp.state(0) == TrackState::Playing && r.lp.state(1) == TrackState::Playing);
+    CHECK(r.lp.state(2) == TrackState::Recording && r.lp.state(3) == TrackState::Empty && r.lp.newPartTrack() == -1);
+    r.silence(24000 - 1); r.lp.pressRec(2);                               // B: one loop since the switch
+    CHECK(r.lp.trackLength(2) == 24000);
+}
+// Review Focus 2: track 2 records from part B's first sample. Every recording fades in over kFadeInMs, so an impulse on
+// B's first sample would be recorded at gain 0: one on B's sample 1000 pins the start to the sample instead.
+static void newPartRecordsFromTheSwitchSample() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.newPart(2); r.silence(24000 - r.lp.position());   // up to the switch
+    CHECK(r.lp.part() == 1 && r.lp.state(2) == TrackState::Recording);
+    std::vector<float> in(24000, 0.0f); in[1000] = 1.0f;
+    r.feed(in); r.lp.pressRec(2); r.silence(4800);                       // closed at one loop, its punch-out done
+    CHECK(r.lp.trackLength(2) == 24000);
+    ouro::PieceMeta m; CHECK(r.lp.takeSnapshot(m));
+    std::vector<float> t2(24000); r.lp.readSnapshot(1, 2, 0, t2.data(), 24000);   // track 2 alone, from its beginning
+    r.lp.dropSnapshot();
+    CHECK(std::fabs(t2[1000] - 1.0f) < 1e-6f); t2[1000] = 0.0f; CHECK(peak(t2) < 1e-6f);
+}
+// Beyond the brief: an overdub running at the switch closes there, and the new recording takes exactly the rest of the
+// input under its punch-out fade (which track 0's copy keeps), as a one-press handover does: no dip, no doubling.
+static void newPartTakesTheInputOverAClosingTake() {
+    Rig r; r.lp.setTailMs(0); recordBase(r, 24000, 0.0f);               // a silent loop
+    r.silence(6000); r.lp.pressRec(0); r.lp.newPart(2);                 // overdubbing at A's end
+    r.feed(std::vector<float>(24000 - r.lp.position() + 24000, 0.5f)); r.lp.pressRec(2); r.silence(4800);
+    CHECK(r.lp.part() == 1 && r.lp.trackLength(2) == 24000);
+    ouro::PieceMeta m; CHECK(r.lp.takeSnapshot(m));
+    std::vector<float> t0(480), t2(480);                                 // from B's first sample: the fade and past it
+    r.lp.readSnapshot(1, 0, 0, t0.data(), 480); r.lp.readSnapshot(1, 2, 0, t2.data(), 480);
+    r.lp.dropSnapshot();
+    float e = 0.0f;
+    for (uint32_t i = 0; i < 480; ++i) e = std::max(e, std::fabs(t0[i] + t2[i] - 0.5f));
+    CHECK(e < 1e-6f && t0[100] > 0.1f && t2[100] > 0.1f);                // both share the fade's middle
+}
+static void newPartAboveTheSelectedTrackIsSilent() {
+    Rig r; const auto a = recordBase(r, 24000, 0.1f);                    // track 0 alone
+    recordBaseOn(r, 1, 0.4f, 471.0); recordBaseOn(r, 2, 0.2f, 660.0);   // loud: track 1, and one above it
+    r.lp.newPart(1); r.silence(24000 - r.lp.position());                 // the switch
+    r.silence(ouro::msToSamples(ouro::kFadeInMs, 48000.0));              // its fade-in
+    const uint32_t p0 = r.lp.position();
+    const auto o = r.capture(24000);
+    std::vector<float> want(24000);
+    for (uint32_t i = 0; i < 24000; ++i) want[i] = a[(p0 + i) % 24000];
+    CHECK(maxAbsDiff(o, want) < 1e-6f);
+}
+static void newPartTakesOnAndVolumeFromThePartLeft() {
+    Rig r; recordBase(r, 24000, 0.1f); recordBaseOn(r, 2);
+    r.lp.setVolumeDb(0, -6.0f); r.lp.setOn(1, false); r.lp.setVolumeDb(1, -12.0f);   // track 1 empty
+    r.lp.setOn(2, false); r.lp.setVolumeDb(2, -3.0f);
+    r.lp.newPart(2); r.silence(24000 - r.lp.position());
+    CHECK(r.lp.part() == 1 && r.lp.volumeDb(0) == -6.0f && !r.lp.isOn(1) && r.lp.volumeDb(1) == -12.0f);
+    CHECK(r.lp.isOn(2) && r.lp.volumeDb(2) == -3.0f);                    // forced on: its recording is heard
+}
+static void newPartToAPartWithAudioIsAPlainSwitch() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.setPart(1); r.silence(24000);
+    r.lp.pressRec(0); r.feed(sine(330, 0.05f, 24000)); r.lp.pressRec(0); r.silence(4800);   // B: 2 layers on track 0
+    const uint32_t layers = r.lp.layerCount(0), len = r.lp.trackLength(0);
+    r.lp.setPart(0); r.silence(24000); CHECK(r.lp.part() == 0);
+    r.lp.newPart(2); CHECK(r.lp.newPartTrack() == -1 && r.lp.queuedPart() == 1);
+    r.silence(24000);
+    CHECK(r.lp.part() == 1 && r.lp.layerCount(0) == layers && r.lp.trackLength(0) == len);
+    for (int t = 1; t < 4; ++t) CHECK(r.lp.state(t) == TrackState::Empty);
+    CHECK(r.lp.state(0) == TrackState::Playing);
+}
+static void newPartWrapsFromDToA() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.setPart(3); r.silence(24000);
+    CHECK(r.lp.part() == 3); r.lp.newPart(1); CHECK(r.lp.queuedPart() == 0);
+}
+static void aTapOnBCancelsTheNewPart() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.newPart(2); r.lp.pressRec(0);
+    CHECK(r.lp.queuedPart() == -1 && r.lp.newPartTrack() == -1 && r.lp.state(0) == TrackState::Playing);
+}
+static void cancelWaitCancelsTheNewPartOnAnyTrack() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.newPart(2);
+    CHECK(r.lp.cancelWait(0) && r.lp.newPartTrack() == -1 && r.lp.queuedPart() == -1);
+}
+static void partKnobStopAndClearAllDropTheNewPart() {
+    Rig r; recordBase(r, 24000, 0.1f);
+    r.lp.newPart(2); r.lp.setPart(3); CHECK(r.lp.queuedPart() == 3 && r.lp.newPartTrack() == -1);
+    r.lp.newPart(2); r.lp.setPart(0); CHECK(r.lp.queuedPart() == -1 && r.lp.newPartTrack() == -1);
+    r.lp.newPart(2); r.lp.stop(ouro::StopMode::Instant); CHECK(r.lp.newPartTrack() == -1);
+    r.silence(2000); CHECK(r.lp.transport() == ouro::Transport::Stopped && r.lp.part() == 0);
+    r.lp.restart(); r.silence(2000);                                     // running again
+    r.lp.newPart(2); r.lp.clearAll(); CHECK(r.lp.newPartTrack() == -1);
+}
+static void newPartTurnsTheSongOff() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.setSong(true); r.lp.newPart(1); CHECK(!r.lp.songOn());
+}
+// Beyond the brief: Song turned on drops a queued switch, and a waiting new part with it.
+static void songOnDropsTheNewPart() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.newPart(2); r.lp.setSong(true);
+    CHECK(r.lp.queuedPart() == -1 && r.lp.newPartTrack() == -1 && !r.lp.recWaiting());
+}
+static void newPartArmsWithAutoRec() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.setAutoRec(true); r.lp.newPart(1);
+    r.silence(24000 - r.lp.position());
+    CHECK(r.lp.part() == 1 && r.lp.armedTrack() == 1 && r.lp.state(1) == TrackState::Empty);
+}
+// Review Focus 3: a long copy below makes the new part's pass; the new recording, closed longer, makes it then.
+static void newPartPassFollowsALongCopy() {
+    const uint32_t L = 24000;
+    Rig r; r.lp.pressRec(2); r.feed(sine(220, 0.1f, L)); r.lp.pressRec(2);       // the first loop, on track 2
+    r.lp.pressRec(0); r.feed(sine(330, 0.1f, 2 * L)); r.lp.pressRec(0);         // track 0: two loops
+    CHECK(r.lp.trackLength(0) == 2 * L);
+    r.lp.newPart(1); r.silence(2 * L - r.lp.trackPosition(0));
+    CHECK(r.lp.part() == 1 && r.lp.partLength() == 2 * L);
+    r.feed(sine(440, 0.1f, 13 * L / 5)); r.lp.pressRec(1);                      // 2.6 loops
+    CHECK(r.lp.trackLength(1) == 3 * L && r.lp.partLength() == 3 * L);
+}
+// Review Focus 4: the pool fills during the new part's recording: it closes as at the limit, the copy still plays.
+static void newPartWithMemoryFullStillCopies() {
+    Rig r(48000.0, 128, size_t(1) << 20);                               // 64 blocks: about 5.5 s of audio
+    recordBase(r, 24000, 0.1f); r.lp.newPart(1); r.silence(24000 - r.lp.position());
+    CHECK(r.lp.part() == 1 && r.lp.state(1) == TrackState::Recording);
+    r.feed(sine(330, 0.1f, 10 * 48000));                                 // track 1 until the pool is full
+    CHECK(r.lp.memoryFull() && r.lp.state(1) == TrackState::Playing && r.lp.state(0) == TrackState::Playing);
+}
+static void recWaitingWhileANewPartWaits() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.newPart(1);
+    CHECK(r.lp.recWaiting() && !r.lp.userWaiting());
+}
+// Beyond the brief: queued during the first recording, the new part waits for the part end after its close; that
+// recording aborted, nothing is recorded and the switch happens at once, a plain one (no loop to record onto).
+static void aFirstRecordingAbortedUnderANewPartSwitchesPlainly() {
+    Rig r; r.lp.pressRec(0); r.feed(sine(220, 0.1f, 12000)); r.lp.newPart(2);
+    CHECK(r.lp.part() == 0 && r.lp.queuedPart() == 1 && r.lp.newPartTrack() == 2);
+    r.lp.undo(0);
+    CHECK(r.lp.part() == 1 && r.lp.queuedPart() == -1 && r.lp.newPartTrack() == -1);
+    CHECK(r.lp.state(2) == TrackState::Empty && !r.lp.recWaiting());
+}
+
 int main() {
     switchWaitsForThePartEnd(); copyIsIndependentAndKeepsOnAndVolume(); copyOnEntryAllocatesNothing();
     partLengthIsTheLongestTrack(); choosingTheCurrentPartCancels(); stoppedSwitchesAtOnce(); firstRecordingDefersTheSwitch();
@@ -192,5 +330,12 @@ int main() {
     aPartLeftWhileStoppedLetsLReset(); aFirstRecordingEndingWithoutALoopSwitchesAtOnce();
     clearAllInsideTheSwitchCrossfadeDoesNotClick(); theSwitchCrossfadesOverTheFadeIn();
     aSongStepOnTheCurrentPartIsNoSwitch();
+    newPartCopiesBelowAndRecordsTheSelectedTrack(); newPartRecordsFromTheSwitchSample();
+    newPartTakesTheInputOverAClosingTake(); newPartAboveTheSelectedTrackIsSilent();
+    newPartTakesOnAndVolumeFromThePartLeft();
+    newPartToAPartWithAudioIsAPlainSwitch(); newPartWrapsFromDToA(); aTapOnBCancelsTheNewPart();
+    cancelWaitCancelsTheNewPartOnAnyTrack(); partKnobStopAndClearAllDropTheNewPart(); newPartTurnsTheSongOff();
+    songOnDropsTheNewPart(); newPartArmsWithAutoRec(); newPartPassFollowsALongCopy(); newPartWithMemoryFullStillCopies();
+    recWaitingWhileANewPartWaits(); aFirstRecordingAbortedUnderANewPartSwitchesPlainly();
     REPORT();
 }
