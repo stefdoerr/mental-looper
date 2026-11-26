@@ -556,6 +556,9 @@ protected:
         }
         // B acts on the press, and what it did (fBDid) is kept. A second press within the Double-Tap window after a
         // tap, in the tap's part, is a double-tap: it undoes that, then goes to the next part from the tap's track.
+        // A first press that came while a first recording was running (it closes it, queues its close, or hands over
+        // from it) opens no window: the next press is a plain press, so closing the first loop and pressing B again
+        // overdubs.
         const bool bSecond = rising(kParamRec) && fBTapPending && fEngine.part() == fBPart;
         if (rising(kParamRec)) fBTapPending = false;
         if (bSecond)
@@ -585,6 +588,9 @@ protected:
             const ouro::Transport tp = fEngine.transport();
             const bool newPart = fEngine.newPartTrack() >= 0;    // the press cancels it, and only that
             fBWas = fEngine.state(sel);
+            fBNoWindow = false;
+            if (fEngine.loopLength() == 0)
+                for (int t = 0; t < ouro::kTracks; ++t) fBNoWindow |= fEngine.state(t) == ouro::TrackState::Recording;
             fEngine.pressRec(sel);
             fBDid = newPart || tp == ouro::Transport::Stopping ? BDid::Nothing   // Stopping: the stop is cancelled
                   : tp == ouro::Transport::Stopped ? BDid::Started : BDid::Press;
@@ -618,7 +624,7 @@ protected:
         else if (fBHeld)
         {
             fBHeld = false;
-            if (!fBDone) { fBTapPending = true; fBSinceTap = 0; }
+            if (!fBDone && !fBNoWindow) { fBTapPending = true; fBSinceTap = 0; }
         }
         else if (fBTapPending && (fBSinceTap += frames) >= window) fBTapPending = false;
         // C footswitch (stop/clear): the gesture acts on the track and in the part of its first press; a part change
@@ -1014,7 +1020,7 @@ private:
     int fPart = 0;                          // the engine's part at the last run(): a switch re-requests track ports
     bool fFirst = true;                     // first run after activate(): apply every value, then snap gains
     uint64_t fBHold = 0, fBSinceTap = 0;    // samples rec (B) has been held; since its tap's release
-    bool fBHeld = false, fBDone = false;
+    bool fBHeld = false, fBDone = false, fBNoWindow = false;   // fBNoWindow: the press closed a first recording
     bool fBTapPending = false;              // B's tap was released: the Double-Tap window runs
     enum class BDid : uint8_t { Nothing, Started, Press };   // B's tap: nothing to undo, a start from stopped, a press
     BDid fBDid = BDid::Nothing;                              // while running (its second press undoes what landed)

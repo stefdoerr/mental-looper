@@ -1110,10 +1110,19 @@ static void bDoubleTapAcrossAPartChangeIsANewFirstPress() {
     tapB(); CHECK(eng().part() == 1); runN(5); bDown();                 // the overdub closed at the switch
     CHECK(eng().newPartTrack() == -1 && eng().state(0) == ouro::TrackState::Overdubbing); bUp();
 }
+static void closingTheFirstLoopOpensNoDoubleTapWindow() {              // a quick second press overdubs as usual
+    fresh(); bDown(); bUp(); runN(187); tapB(); runN(20); bDown();
+    CHECK(eng().loopLength() > 0 && eng().newPartTrack() == -1 && eng().queuedPart() == -1 && eng().part() == 0);
+    CHECK(eng().state(0) == ouro::TrackState::Overdubbing); bUp();
+}
+static void aHandoverFromTheFirstRecordingOpensNoDoubleTapWindow() {
+    fresh(); bDown(); bUp(); runN(187); set(kParamTrack, 2); tapB(); runN(20); bDown();   // closes 1, starts 2
+    CHECK(eng().newPartTrack() == -1 && eng().queuedPart() == -1 && eng().part() == 0); bUp();
+}
 static void bDoubleTapUndoesARecToDubAndAnArm() {                      // the table's other rows
-    fresh(); set(kParamAfterRec, 1); bDown(); bUp(); runN(187);         // the first recording, past the window
-    doubleTapB();                                                       // closed into an overdub: the overdub goes
-    CHECK(eng().state(0) == ouro::TrackState::Playing && eng().loopLength() > 0 && eng().newPartTrack() == 0);
+    fresh(); set(kParamAfterRec, 1); recordLoop(); set(kParamTrack, 2);   // a recording onto the loop, Rec > Dub
+    tapB(); runN(160); doubleTapB();                                    // closed into an overdub: the overdub goes
+    CHECK(eng().state(1) == ouro::TrackState::Playing && eng().loopLength() > 0 && eng().newPartTrack() == 1);
     fresh(); recordLoop(); set(kParamAutoRec, 1); set(kParamThreshold, -10); set(kParamTrack, 2);
     doubleTapB(); CHECK(eng().armedTrack() == -1 && eng().newPartTrack() == 1);   // runN's sine stays under -10 dB
 }
@@ -1216,6 +1225,7 @@ int main()
     aTapOnBOrAPressOnCCancelsTheWaitingNewPart(); bDoubleTapTurnsTheSongOff(); aLoadDropsTheWaitingNewPart();
     bDoubleTapAcrossAPartChangeIsANewFirstPress(); bDoubleTapUndoesARecToDubAndAnArm();
     bDoubleTapAbortsAnArmThatFired(); bDoubleTapAbortsASyncStartThatLanded();
+    closingTheFirstLoopOpensNoDoubleTapWindow(); aHandoverFromTheFirstRecordingOpensNoDoubleTapWindow();
     doubleTapStops();
     bRestartsAfterStop();
     doubleTapThenHoldDoesNotClear();
