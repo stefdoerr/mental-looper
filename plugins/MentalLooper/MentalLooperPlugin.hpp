@@ -390,7 +390,7 @@ protected:
         haltPieces();
         fEngine.reset();
         fFirst = true;
-        fHold = 0; fBHold = 0; fBHeld = fBDone = false;
+        fHold = 0; fBHold = 0; fBHeld = fBDone = fBTapPending = false;
         fHeld = fDone = fTapPending = fCRestart = false;
         fSinceTap = 0;
         fFaceAcc = 0;
@@ -428,7 +428,7 @@ protected:
                 }
                 for (uint32_t i = 0; i < kParamBypass; ++i) if (droppedDuringLoad(i)) fPrev[i] = fVal[i];
                 fTapPending = fCRestart = false; fHeld = on(kParamStopClear); fDone = true;
-                fBHeld = on(kParamRec); fBDone = true;
+                fBHeld = on(kParamRec); fBDone = true; fBTapPending = false;
                 fClickAt = -1.0;                // no new tick (a running one ends)
                 if (!fLent) fEngine.process(inputs[0], outputs[0], frames);   // the Instant stop ramps out
                 else for (uint32_t i = 0; i < frames; ++i) outputs[0][i] = fDryGain * inputs[0][i];
@@ -554,7 +554,42 @@ protected:
             fTapPending = false;
             abortTap();
         }
-        if (rising(kParamRec))        fEngine.pressRec(sel);
+        // B acts on the press, and what it did (fBDid) is kept. A second press within the Double-Tap window after a
+        // tap, in the tap's part, is a double-tap: it undoes that, then goes to the next part from the tap's track.
+        using TS = ouro::TrackState;
+        const bool bSecond = rising(kParamRec) && fBTapPending && fEngine.part() == fBPart;
+        if (rising(kParamRec)) fBTapPending = false;
+        if (bSecond)
+        {
+            const int t = fBTrack;
+            switch (fBDid)
+            {
+            case BDid::Started:                       // stopped again; a restart waiting (stopped: the only wait) goes
+                if (fEngine.transport() == ouro::Transport::Running) fEngine.stop(ouro::StopMode::Instant);
+                else fEngine.cancelWait(t);
+                break;
+            case BDid::Rec:     if (fEngine.state(t) == TS::Recording) fEngine.undo(t); break;     // aborted
+            case BDid::Dub:     if (fEngine.state(t) == TS::Overdubbing) fEngine.undo(t); break;   // cancelled
+            case BDid::Wait:    fEngine.dropStart(t); break;
+            case BDid::Nothing: break;
+            }
+            fEngine.newPart(t);
+        }
+        else if (rising(kParamRec))
+        {
+            const ouro::Transport tp = fEngine.transport();
+            const bool newPart = fEngine.newPartTrack() >= 0;    // the press cancels it, and only that
+            const auto waits = [&] { return fEngine.armedTrack() == sel || fEngine.userWaiting(sel); };
+            const bool waited = waits();
+            const TS was = fEngine.state(sel);
+            fEngine.pressRec(sel);
+            const TS now = fEngine.state(sel);
+            fBDid = newPart || tp == ouro::Transport::Stopping ? BDid::Nothing   // Stopping: the stop is cancelled
+                  : tp == ouro::Transport::Stopped ? BDid::Started
+                  : now != was && now == TS::Recording ? BDid::Rec               // from Empty
+                  : now != was && now == TS::Overdubbing ? BDid::Dub             // from Playing, or Rec > Dub
+                  : !waited && waits() ? BDid::Wait : BDid::Nothing;             // else a close or a cancel
+        }
         if (rising(kParamUndo))       fEngine.undo(sel);
         if (rising(kParamRedo))       fEngine.redo(sel);
         if (rising(kParamClearTrack)) fEngine.clearTrack(sel);
@@ -574,13 +609,19 @@ protected:
         const uint64_t hold = uint64_t(fVal[kParamHoldTime] * 0.001 * getSampleRate());
         const uint64_t window = uint64_t(fVal[kParamDoubleTap] * 0.001 * getSampleRate());
         // B hold: one peel (the newest layer of the pressed track) once Hold Time has passed, unless the part changed.
+        // Released before, the press is a tap: the Double-Tap window opens. A double-tap's second press is spent.
         if (on(kParamRec))
         {
-            if (!fBHeld) { fBHeld = true; fBHold = 0; fBDone = false; fBTrack = sel; fBPart = fEngine.part(); }
+            if (!fBHeld) { fBHeld = true; fBHold = 0; fBDone = bSecond; fBTrack = sel; fBPart = fEngine.part(); }
             fBHold += frames;
             if (!fBDone && fBHold >= hold) { fBDone = true; if (fEngine.part() == fBPart) fEngine.peel(fBTrack); }
         }
-        else fBHeld = false;
+        else if (fBHeld)
+        {
+            fBHeld = false;
+            if (!fBDone) { fBTapPending = true; fBSinceTap = 0; }
+        }
+        else if (fBTapPending && (fBSinceTap += frames) >= window) fBTapPending = false;
         // C footswitch (stop/clear): the gesture acts on the track and in the part of its first press; a part change
         // drops it (a second press is then a first press). A press that cancels the track's wait or arm (or a pending
         // restart) does nothing else, stopped or not; a second press within the window then stops (stopped: nothing).
@@ -624,6 +665,7 @@ protected:
             if (!fHeld)
             {
                 fHeld = true; fHold = 0;
+                fBTapPending = false;                    // C between B's presses: B's next press is a first press
                 if (fTapPending)                         // a double-tap: a second press is never a first press
                 {
                     fTapPending = fCRestart = false; fDone = true;
@@ -972,8 +1014,11 @@ private:
     int fSel = 0;                           // selected track, 0-3
     int fPart = 0;                          // the engine's part at the last run(): a switch re-requests track ports
     bool fFirst = true;                     // first run after activate(): apply every value, then snap gains
-    uint64_t fBHold = 0;                    // samples rec (B) has been held
+    uint64_t fBHold = 0, fBSinceTap = 0;    // samples rec (B) has been held; since its tap's release
     bool fBHeld = false, fBDone = false;
+    bool fBTapPending = false;              // B's tap was released: the Double-Tap window runs
+    enum class BDid : uint8_t { Nothing, Started, Rec, Dub, Wait };   // what B's tap did: its second press undoes it
+    BDid fBDid = BDid::Nothing;
     int fBTrack = 0, fBPart = 0;
     uint64_t fHold = 0, fSinceTap = 0;      // samples stop_clear (C) has been held; since the tap's release
     bool fHeld = false;                     // C is down

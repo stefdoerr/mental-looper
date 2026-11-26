@@ -50,16 +50,16 @@ static void run(PluginExporter& plugin, const std::vector<float>& vec)
 }
 static void runN(int k) { run(P(), sine(220, 0.1f, 128u * k)); }
 
-// Base of 24064 samples on track 0, then a 4800-sample overdub, via kParamRec presses.
+// Base of 24064 samples on track 0, then a 161-block overdub, via kParamRec presses. They are 160 blocks apart, past
+// B's Double-Tap window (150 blocks), so none is a double-tap, and the last one's window has passed at the end.
 static void recordBaseAndDub()
 {
     set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(187);
     set(kParamRec, 1); runN(1); set(kParamRec, 0);                  // base closed: 188 blocks
-    runN(40);                                                       // let the 50 ms tail finish
-    set(kParamRec, 1); runN(1); set(kParamRec, 0);                  // overdub starts
-    run(P(), sine(220, 0.1f, 4800 - 128));                          // 4800 samples in all
+    runN(160);                                                      // the 50 ms tail finishes
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(160);       // overdub
     set(kParamRec, 1); runN(1); set(kParamRec, 0);                  // overdub closed
-    runN(40);                                                       // let the tail and fade finish
+    runN(160);                                                      // the tail and fade finish
 }
 
 static void layout()
@@ -170,6 +170,9 @@ static void cDown() { set(kParamStopClear, 1); runN(1); }
 static void cUp()   { set(kParamStopClear, 0); runN(1); }
 static void tapC() { cDown(); runN(19); cUp(); }
 static void doubleTap() { tapC(); runN(29); set(kParamStopClear, 1); runN(1); set(kParamStopClear, 0); runN(1); }
+// B's taps. B's Double-Tap window is 400 ms (150 blocks) from a tap's release: presses meant apart wait 160 blocks.
+static void tapB() { bDown(); runN(4); bUp(); }
+static void doubleTapB() { tapB(); runN(20); bDown(); bUp(); }
 
 static void cPressMutesAndReleaseUnmutes() {
     fresh(); recordBaseAndDub();
@@ -236,8 +239,8 @@ static void cTapPendingDoesNotWipeALoopBClosed() {                     // Ruling
     fresh(); bDown(); bUp(); runN(100);                                 // the first recording
     cDown(); runN(5); bDown(); bUp(); runN(5); cUp();                   // B closes it while C is held, then a tap
     runN(160); CHECK(eng().loopLength() > 0 && eng().state(0) == ouro::TrackState::Playing);
-    fresh(); bDown(); bUp(); runN(100);
-    cDown(); runN(5); bDown(); bUp(); runN(5); cUp(); runN(10);         // the same, then B within the window
+    fresh(); bDown(); bUp(); runN(100);                                 // C held past B's own window, then B
+    cDown(); runN(5); bDown(); bUp(); runN(160); cUp(); runN(10);       // within C's: the same
     bDown(); bUp(); CHECK(eng().loopLength() > 0 && eng().state(0) == ouro::TrackState::Overdubbing);
 }
 static void doubleTapStops() {
@@ -304,7 +307,7 @@ static void undoRedoClearTriggers()
     set(kParamClearTrack, 1); runN(1); set(kParamClearTrack, 0); runN(1);
     CHECK(eng().state(0) == ouro::TrackState::Empty);
     set(kParamTrack, 2); runN(1);
-    set(kParamRec, 1); runN(1); set(kParamRec, 0);
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(160);           // past B's Double-Tap window
     set(kParamTrack, 1); runN(1);
     set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(10);
     set(kParamClearAll, 1); runN(1); set(kParamClearAll, 0); runN(1);
@@ -474,7 +477,7 @@ static void modPlayAndStopEdgesFollow() {
 }
 static void syncSwitchedOnWhilePlayingIsNoEdge() {
     fresh(); gT = 30000; runMod(true, 1);                           // Sync Off: a free loop
-    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runMod(true, 100);
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runMod(true, 160);
     set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runMod(true, 5);
     const uint32_t p = eng().position();
     set(kParamSync, 1); runMod(true, 1);
@@ -589,17 +592,19 @@ static void lengthReachesTheEngine() {
     CHECK(eng().state(0) == ouro::TrackState::Playing && eng().loopLength() == 96000);
 }
 
-// A 188-block loop on track 1 (as recordBaseAndDub's base), its tail done.
-static void recordLoop()
-{
-    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(187);
-    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40);
-}
 // Runs block by block until f() holds, at most max blocks; false if it never did.
 template <class F> static bool runUntil(F f, int max = 2000)
 {
     for (int k = 0; k < max && !f(); ++k) runN(1);
     return f();
+}
+// A loop of blocks + 1 blocks on track 1 (188: as recordBaseAndDub's base), its tail done, then on to its top: B's
+// Double-Tap window from the close has passed, and a whole pass lies ahead.
+static void recordLoop(int blocks = 187)
+{
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(blocks);
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40);
+    CHECK(runUntil([] { return eng().position() < 128; }, blocks));
 }
 static void song(std::initializer_list<std::pair<int, int>> steps)   // the hidden ports: part x repeats from step 1
 {
@@ -726,7 +731,7 @@ static void saveAndLoadRoundTrip() {
 static void saveWaitsForTheTake() {
     freshPieces(); recordLoop();
     press(kParamRec); runN(10);                                      // an overdub runs
-    set(kParamSlot, 2); press(kParamSave); runN(100);
+    set(kParamSlot, 2); press(kParamSave); runN(160);               // past B's Double-Tap window
     CHECK(status() == "SAVING" && stamp(gRoot + "/02/piece.txt").empty());
     press(kParamRec); CHECK(waitPieces() && status() == "SAVED 2");  // closed: now the snapshot
 }
@@ -742,13 +747,13 @@ static void saveOnAFullSlotAsksFirst() {
 }
 static void loadWithChangesAsksFirst() {
     freshPieces(); recordLoop(); saveTo(2);
-    press(kParamRec); runN(40); press(kParamRec); runN(40);         // an overdub since the save
+    press(kParamRec); runN(160); press(kParamRec); runN(40);        // an overdub since the save
     press(kParamLoad); CHECK(status() == "LOAD 2?" && !plug().pieceLoading());
     runN(750); CHECK(status() == "2 FULL");                          // 2 s later the question has lapsed
     press(kParamLoad); CHECK(status() == "LOAD 2?" && !plug().pieceLoading());
     press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces() && eng().undoDepth(0) == 0 && stopped());
     press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces());   // as loaded: nothing to lose, no question
-    press(kParamRec); runN(10); press(kParamRec); runN(10);         // R10: B plays, B dubs; the take still runs
+    press(kParamRec); runN(160); press(kParamRec); runN(10);        // R10: B plays, B dubs; the take still runs
     CHECK(eng().state(0) == ouro::TrackState::Overdubbing);
     press(kParamLoad); CHECK(status() == "LOAD 2?" && !plug().pieceLoading() && eng().state(0) == ouro::TrackState::Overdubbing);
     press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces() && eng().undoDepth(0) == 0 && stopped());
@@ -767,6 +772,8 @@ static void pressesDuringALoadAreIgnored() {
     press(kParamLoad); CHECK(plug().pieceLoading() && waitPieces() && eng().isOn(0));
     cDown(); CHECK(eng().isOn(0)); cUp();                            // the load ended the window: no double-tap
     CHECK(eng().state(0) == ouro::TrackState::Playing);
+    tapB(); press(kParamLoad); press(kParamLoad); CHECK(waitPieces());   // B's window too: a first press after it
+    bDown(); CHECK(eng().part() == 0 && eng().transport() == ouro::Transport::Running); bUp();
 }
 static void dryLevelHoldsThroughALoad() {                         // the lent blocks pass the input at Dry's level
     freshPieces(); set(kParamDry, -6.0f); recordLoop(); saveTo(2);
@@ -857,10 +864,11 @@ static void saveStoresTheBpm() {
     press(kParamLoad); CHECK(waitPieces() && status() == "1 BAR");
 }
 
-static void dubB(int blocks) { set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(blocks); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(40); }
+// An overdub of blocks (past B's Double-Tap window: 150), then 160 blocks: the close's window passes too.
+static void dubB(int blocks) { set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(blocks); set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(160); }
 
 static void holdBUndoesOneLayerPerHold() {
-    fresh(); recordBaseAndDub(); dubB(40);                              // depth 2
+    fresh(); recordBaseAndDub(); dubB(160);                             // depth 2
     bDown(); runN(188); CHECK(eng().undoDepth(0) == 1 && eng().state(0) == ouro::TrackState::Playing);
     bUp(); runN(10);
     bDown(); runN(188); CHECK(eng().undoDepth(0) == 0); bUp(); runN(10);
@@ -869,7 +877,7 @@ static void holdBUndoesOneLayerPerHold() {
 }
 static void holdBDuringAnOverdubUndoesIt() {
     fresh(); recordBaseAndDub();                                        // depth 1
-    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(60);           // an overdub running
+    set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(160);          // an overdub running
     bDown(); CHECK(eng().undoDepth(0) == 2);                            // the press closed it
     runN(188); CHECK(eng().undoDepth(0) == 1); bUp();
 }
@@ -884,7 +892,7 @@ static void holdBOnAnArmedEmptyTrackKeepsTheArm() {
     fresh(); set(kParamAutoRec, 1); set(kParamThreshold, -10); bDown(); runN(188); CHECK(eng().armedTrack() == 0); bUp();
 }
 static void redoAfterHoldsBringsBackOnlyTheLast() {
-    fresh(); recordBaseAndDub(); dubB(40);                              // depth 2
+    fresh(); recordBaseAndDub(); dubB(160);                             // depth 2
     bDown(); runN(188); bUp(); runN(10); bDown(); runN(188); bUp(); runN(10);
     CHECK(eng().undoDepth(0) == 0);
     set(kParamRedo, 1); runN(1); set(kParamRedo, 0); runN(10); CHECK(eng().undoDepth(0) == 1);
@@ -899,7 +907,7 @@ static void holdBFromStoppedStartsThenUndoes() {
 }
 static void holdBDroppedOnPartChange() {
     fresh(); recordBaseAndDub();
-    set(kParamPart, 1); runN(200); dubB(40);                            // part 1 gets a layer a wrong peel could take
+    set(kParamPart, 1); runN(200); dubB(160);                           // part 1 gets a layer a wrong peel could take
     const int d1 = eng().undoDepth(0); CHECK(eng().part() == 1 && d1 >= 1);
     set(kParamPart, 0); runN(200); CHECK(eng().part() == 0);
     set(kParamHoldTime, 2000);
@@ -1020,6 +1028,86 @@ static void cAfterTheSongEndsActsInStepOnesPart() {
     CHECK(eng().transport() == ouro::Transport::Running && eng().part() == 0 && eng().isOn(0) && eng().isOn(1));
 }
 
+// B's double-tap: the second press undoes what the first did, then goes to the next part from the first press's track.
+static void bDoubleTapOnAnEmptyTrackQueuesANewPartRecordingIt() {
+    fresh(); recordLoop(); set(kParamTrack, 2); doubleTapB();
+    CHECK(eng().newPartTrack() == 1 && eng().queuedPart() == 1 && eng().state(1) == ouro::TrackState::Empty);
+    CHECK(runUntil([] { return eng().part() == 1; }, 200));
+    CHECK(eng().state(0) == ouro::TrackState::Playing && eng().state(1) == ouro::TrackState::Recording);
+}
+static void bDoubleTapOnAPlayingTrackCancelsTheOverdub() {
+    fresh(); recordLoop(); doubleTapB();
+    CHECK(eng().state(0) == ouro::TrackState::Playing && eng().undoDepth(0) == 0 && eng().newPartTrack() == 0);
+}
+static void bDoubleTapClosingATakeKeepsIt() {
+    fresh(); recordLoop(); tapB(); runN(160);                           // an overdub, past the tap's window
+    doubleTapB(); CHECK(eng().undoDepth(0) == 1 && eng().newPartTrack() == 0);
+}
+static void bDoubleTapAfterAHandoverKeepsTheClosedTake() {              // Review Focus 1
+    fresh(); recordLoop(); set(kParamTrack, 2); tapB(); runN(300);      // track 2 records past the loop
+    set(kParamTrack, 3); doubleTapB();                                  // the first press closes it, starts track 3
+    CHECK(eng().state(1) == ouro::TrackState::Playing && eng().trackLength(1) == 2 * eng().loopLength());
+    CHECK(eng().state(2) == ouro::TrackState::Empty && eng().newPartTrack() == 2);
+}
+static void bSecondPressHeldDoesNotUndo() {
+    fresh(); recordLoop(700);                                           // a long pass: the switch comes after the hold
+    tapB(); runN(160); tapB(); runN(160); CHECK(eng().undoDepth(0) == 1);   // one overdub
+    tapB(); runN(20); bDown(); runN(250); bUp();                        // a double-tap, its second press held
+    CHECK(eng().part() == 0 && eng().undoDepth(0) == 1 && eng().state(0) == ouro::TrackState::Playing);
+}
+static void aFirstPressHeldIntoAnUndoStartsNoDoubleTap() {
+    fresh(); recordBaseAndDub();                                        // depth 1
+    bDown(); runN(250); bUp(); CHECK(eng().undoDepth(0) == 0);          // the hold peeled
+    runN(10); bDown();
+    CHECK(eng().newPartTrack() == -1 && eng().state(0) == ouro::TrackState::Overdubbing); bUp();
+}
+static void cBetweenBPressesMakesANewFirstPress() {
+    fresh(); recordLoop(); tapB(); cDown(); cUp(); bDown();             // C closed the overdub; B starts another
+    CHECK(eng().newPartTrack() == -1 && eng().state(0) == ouro::TrackState::Overdubbing); bUp();
+}
+static void bDoubleTapWithTrackTurnedRecordsTheFirstPressTrack() {
+    fresh(); recordLoop(); set(kParamTrack, 2); tapB(); set(kParamTrack, 3); runN(20); bDown();
+    CHECK(eng().newPartTrack() == 1 && eng().state(1) == ouro::TrackState::Empty); bUp();
+}
+static void bDoubleTapWhileStoppedStartsTheNextPartRecording() {
+    fresh(); recordLoop(); press(kParamStopPlay); CHECK(runUntil(stopped));
+    set(kParamTrack, 2); doubleTapB();                                  // the first press started everything
+    CHECK(runUntil([] { return eng().part() == 1 && eng().transport() == ouro::Transport::Running; }, 20));
+    CHECK(eng().state(1) == ouro::TrackState::Recording && eng().state(0) == ouro::TrackState::Playing);
+}
+static void aTapOnBOrAPressOnCCancelsTheWaitingNewPart() {
+    fresh(); recordLoop(500);                                           // a long pass: no switch meanwhile
+    doubleTapB(); CHECK(eng().newPartTrack() == 0);
+    runN(160); tapB();
+    CHECK(eng().newPartTrack() == -1 && eng().queuedPart() == -1 && eng().state(0) == ouro::TrackState::Playing);
+    runN(160); doubleTapB(); CHECK(eng().newPartTrack() == 0);          // past the tap's window: queued again
+    cDown(); CHECK(eng().newPartTrack() == -1 && eng().isOn(0)); cUp(); runN(20);
+    cDown(); CHECK(runUntil(stopped) && eng().part() == 0); cUp();      // C's double-tap stops, in this part
+}
+static void bDoubleTapTurnsTheSongOff() {
+    fresh(); song({{0, 1}, {1, 1}}); recordLoop(); set(kParamSong, 1); runN(1); CHECK(eng().songOn());
+    doubleTapB(); CHECK(!eng().songOn() && hasReq(kParamSong, 0) && eng().queuedPart() == 1);
+}
+static void aLoadDropsTheWaitingNewPart() {                             // Review Focus 5
+    freshPieces(); recordLoop(); saveTo(2); CHECK(runUntil([] { return eng().position() < 128; }, 200));
+    doubleTapB(); CHECK(eng().newPartTrack() == 0 && eng().queuedPart() == 1);
+    press(kParamLoad); if (status() == "LOAD 2?") press(kParamLoad);
+    CHECK(waitPieces() && eng().newPartTrack() == -1 && eng().queuedPart() == -1);
+}
+static void bDoubleTapAcrossAPartChangeIsANewFirstPress() {
+    fresh(); recordLoop(); set(kParamPart, 1); runN(1);                 // a switch queued for the loop's end
+    CHECK(runUntil([] { return eng().position() >= eng().loopLength() - 3 * 128; }, 200));
+    tapB(); CHECK(eng().part() == 1); runN(5); bDown();                 // the overdub closed at the switch
+    CHECK(eng().newPartTrack() == -1 && eng().state(0) == ouro::TrackState::Overdubbing); bUp();
+}
+static void bDoubleTapUndoesARecToDubAndAnArm() {                      // the table's other rows
+    fresh(); set(kParamAfterRec, 1); bDown(); bUp(); runN(187);         // the first recording, past the window
+    doubleTapB();                                                       // closed into an overdub: the overdub goes
+    CHECK(eng().state(0) == ouro::TrackState::Playing && eng().loopLength() > 0 && eng().newPartTrack() == 0);
+    fresh(); recordLoop(); set(kParamAutoRec, 1); set(kParamThreshold, -10); set(kParamTrack, 2);
+    doubleTapB(); CHECK(eng().armedTrack() == -1 && eng().newPartTrack() == 1);   // runN's sine stays under -10 dB
+}
+
 // The face's outputs (hmi/FaceView.hpp through the ports).
 static float out(uint32_t i) { return P().getParameterValue(i); }
 static void pressB() { set(kParamRec, 1); runN(1); set(kParamRec, 0); }
@@ -1027,10 +1115,10 @@ static void faceLooperFollowsTheEngine() {
     fresh(); runN(2); CHECK(out(kParamLooper) == 0);
     pressB(); runN(20); CHECK(out(kParamLooper) == 4 && out(kParamTakeSecs) == 0);    // the first take
     runN(400); CHECK(out(kParamTakeSecs) == 1);
-    pressB(); runN(40); CHECK(out(kParamLooper) == 2 && out(kParamTakeSecs) == 0);
+    pressB(); runN(160); CHECK(out(kParamLooper) == 2 && out(kParamTakeSecs) == 0);   // past B's Double-Tap window
     set(kParamTrack, 2); pressB(); runN(5); CHECK(out(kParamLooper) == 3);          // track 2 records onto the loop
     set(kParamTrack, 1); runN(2); CHECK(out(kParamLooper) == 3);                    // writing on a track not selected
-    set(kParamTrack, 2); pressB(); runN(40);
+    runN(160); set(kParamTrack, 2); pressB(); runN(40);
     set(kParamStopPlay, 1); runN(1); set(kParamStopPlay, 0); runN(10);
     CHECK(stopped() && out(kParamLooper) == 1);
 }
@@ -1092,6 +1180,12 @@ int main()
     cSyncWaitPutsTracksBackWhenCancelled(); cTapKeepsARestartQueuedWhileHeld();
     cAfterTheSongEndsActsInStepOnesPart();
     cDoubleTapAcrossASongStopPutsBackAndStaysStopped();
+    bDoubleTapOnAnEmptyTrackQueuesANewPartRecordingIt(); bDoubleTapOnAPlayingTrackCancelsTheOverdub();
+    bDoubleTapClosingATakeKeepsIt(); bDoubleTapAfterAHandoverKeepsTheClosedTake(); bSecondPressHeldDoesNotUndo();
+    aFirstPressHeldIntoAnUndoStartsNoDoubleTap(); cBetweenBPressesMakesANewFirstPress();
+    bDoubleTapWithTrackTurnedRecordsTheFirstPressTrack(); bDoubleTapWhileStoppedStartsTheNextPartRecording();
+    aTapOnBOrAPressOnCCancelsTheWaitingNewPart(); bDoubleTapTurnsTheSongOff(); aLoadDropsTheWaitingNewPart();
+    bDoubleTapAcrossAPartChangeIsANewFirstPress(); bDoubleTapUndoesARecToDubAndAnArm();
     doubleTapStops();
     bRestartsAfterStop();
     doubleTapThenHoldDoesNotClear();
