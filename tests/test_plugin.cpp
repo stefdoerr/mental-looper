@@ -1107,6 +1107,25 @@ static void bDoubleTapUndoesARecToDubAndAnArm() {                      // the ta
     fresh(); recordLoop(); set(kParamAutoRec, 1); set(kParamThreshold, -10); set(kParamTrack, 2);
     doubleTapB(); CHECK(eng().armedTrack() == -1 && eng().newPartTrack() == 1);   // runN's sine stays under -10 dB
 }
+// What the first press started is undone even when it landed between the presses: an Auto Rec arm that fired (here in
+// the press's own block: runN's sine is over -40 dB), a Sync start whose line passed.
+static void bDoubleTapAbortsAnArmThatFired() {
+    fresh(); recordLoop(); set(kParamAutoRec, 1); set(kParamThreshold, -40); set(kParamTrack, 2);
+    tapB(); CHECK(eng().state(1) == ouro::TrackState::Recording); runN(20); bDown(); bUp();
+    CHECK(eng().state(1) == ouro::TrackState::Empty && eng().part() == 0 && eng().newPartTrack() == 1);
+}
+static void bDoubleTapAbortsASyncStartThatLanded() {
+    fresh(); gT = 0; set(kParamSync, 1); runMod(true, 1);
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0);           // track 1's first loop: one bar
+    runTo(96000 - 1280); set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runTo(96000 + 128 * 20);
+    CHECK(eng().loopLength() == 96000 && eng().state(0) == ouro::TrackState::Playing);
+    set(kParamTrack, 2); runMod(true, 1);
+    runTo(2 * 96000 - 1280); set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runMod(true, 1);
+    CHECK(eng().userWaiting(1));                                     // track 2's start waits for the line
+    runTo(2 * 96000 + 1280); CHECK(eng().state(1) == ouro::TrackState::Recording);   // the line passed
+    set(kParamRec, 1); runMod(true, 1); set(kParamRec, 0); runMod(true, 1);   // the second press
+    CHECK(eng().state(1) == ouro::TrackState::Empty && eng().part() == 0 && eng().newPartTrack() == 1);
+}
 
 // The face's outputs (hmi/FaceView.hpp through the ports).
 static float out(uint32_t i) { return P().getParameterValue(i); }
@@ -1186,6 +1205,7 @@ int main()
     bDoubleTapWithTrackTurnedRecordsTheFirstPressTrack(); bDoubleTapWhileStoppedStartsTheNextPartRecording();
     aTapOnBOrAPressOnCCancelsTheWaitingNewPart(); bDoubleTapTurnsTheSongOff(); aLoadDropsTheWaitingNewPart();
     bDoubleTapAcrossAPartChangeIsANewFirstPress(); bDoubleTapUndoesARecToDubAndAnArm();
+    bDoubleTapAbortsAnArmThatFired(); bDoubleTapAbortsASyncStartThatLanded();
     doubleTapStops();
     bRestartsAfterStop();
     doubleTapThenHoldDoesNotClear();

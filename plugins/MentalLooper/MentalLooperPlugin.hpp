@@ -556,22 +556,27 @@ protected:
         }
         // B acts on the press, and what it did (fBDid) is kept. A second press within the Double-Tap window after a
         // tap, in the tap's part, is a double-tap: it undoes that, then goes to the next part from the tap's track.
-        using TS = ouro::TrackState;
         const bool bSecond = rising(kParamRec) && fBTapPending && fEngine.part() == fBPart;
         if (rising(kParamRec)) fBTapPending = false;
         if (bSecond)
         {
+            using TS = ouro::TrackState;
             const int t = fBTrack;
-            switch (fBDid)
+            if (fBDid == BDid::Started)               // stopped again; a restart waiting (stopped: the only wait) goes
             {
-            case BDid::Started:                       // stopped again; a restart waiting (stopped: the only wait) goes
                 if (fEngine.transport() == ouro::Transport::Running) fEngine.stop(ouro::StopMode::Instant);
                 else fEngine.cancelWait(t);
-                break;
-            case BDid::Rec:     if (fEngine.state(t) == TS::Recording) fEngine.undo(t); break;     // aborted
-            case BDid::Dub:     if (fEngine.state(t) == TS::Overdubbing) fEngine.undo(t); break;   // cancelled
-            case BDid::Wait:    fEngine.dropStart(t); break;
-            case BDid::Nothing: break;
+            }
+            else if (fBDid == BDid::Press)
+            {
+                // An arm or a wait still pending goes (a first recording's waiting close stays), then what landed on
+                // t, at the press or since, is undone: a recording it started aborted, an overdub cancelled (Rec > Dub
+                // too). undo() acts on the take: dropStart leaves no arm, and the one wait it can leave means nothing
+                // landed on t.
+                fEngine.dropStart(t);
+                const TS now = fEngine.state(t);
+                if ((fBWas == TS::Empty && now == TS::Recording) || (fBWas != TS::Overdubbing && now == TS::Overdubbing))
+                    fEngine.undo(t);
             }
             fEngine.newPart(t);
         }
@@ -579,16 +584,10 @@ protected:
         {
             const ouro::Transport tp = fEngine.transport();
             const bool newPart = fEngine.newPartTrack() >= 0;    // the press cancels it, and only that
-            const auto waits = [&] { return fEngine.armedTrack() == sel || fEngine.userWaiting(sel); };
-            const bool waited = waits();
-            const TS was = fEngine.state(sel);
+            fBWas = fEngine.state(sel);
             fEngine.pressRec(sel);
-            const TS now = fEngine.state(sel);
             fBDid = newPart || tp == ouro::Transport::Stopping ? BDid::Nothing   // Stopping: the stop is cancelled
-                  : tp == ouro::Transport::Stopped ? BDid::Started
-                  : now != was && now == TS::Recording ? BDid::Rec               // from Empty
-                  : now != was && now == TS::Overdubbing ? BDid::Dub             // from Playing, or Rec > Dub
-                  : !waited && waits() ? BDid::Wait : BDid::Nothing;             // else a close or a cancel
+                  : tp == ouro::Transport::Stopped ? BDid::Started : BDid::Press;
         }
         if (rising(kParamUndo))       fEngine.undo(sel);
         if (rising(kParamRedo))       fEngine.redo(sel);
@@ -1017,8 +1016,9 @@ private:
     uint64_t fBHold = 0, fBSinceTap = 0;    // samples rec (B) has been held; since its tap's release
     bool fBHeld = false, fBDone = false;
     bool fBTapPending = false;              // B's tap was released: the Double-Tap window runs
-    enum class BDid : uint8_t { Nothing, Started, Rec, Dub, Wait };   // what B's tap did: its second press undoes it
-    BDid fBDid = BDid::Nothing;
+    enum class BDid : uint8_t { Nothing, Started, Press };   // B's tap: nothing to undo, a start from stopped, a press
+    BDid fBDid = BDid::Nothing;                              // while running (its second press undoes what landed)
+    ouro::TrackState fBWas = ouro::TrackState::Empty;        // the tap's track before it
     int fBTrack = 0, fBPart = 0;
     uint64_t fHold = 0, fSinceTap = 0;      // samples stop_clear (C) has been held; since the tap's release
     bool fHeld = false;                     // C is down
