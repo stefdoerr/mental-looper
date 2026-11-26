@@ -15,7 +15,9 @@ namespace ouro {
 
 enum HmiPort : uint8_t { kHmiRec, kHmiStop, kHmiOnOff, kHmiVolume, kHmiRedo, kHmiPortCount };
 
-struct HmiView { TrackState state; NextAction next; bool canRedo; int selected; bool on; Transport transport; bool armed; bool waiting = false; bool newPart = false; };   // newPart: B's double-tap waits for the bar line   // waiting: the user's press, arm or restart waits for the bar line
+struct HmiView { TrackState state; NextAction next; bool canRedo; int selected; bool on; Transport transport; bool armed;
+                 bool waiting = false;   // the user's press, arm or restart waits for the bar line
+                 bool newPart = false; };   // B's double-tap waits for the end of the pass to start a new part
 
 class HmiBridge {
 public:

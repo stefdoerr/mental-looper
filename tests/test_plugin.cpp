@@ -1049,6 +1049,16 @@ static void bDoubleTapAfterAHandoverKeepsTheClosedTake() {              // Revie
     CHECK(eng().state(1) == ouro::TrackState::Playing && eng().trackLength(1) == 2 * eng().loopLength());
     CHECK(eng().state(2) == ouro::TrackState::Empty && eng().newPartTrack() == 2);
 }
+static void bDoubleTapWithNothingRecordedAbortsTheFirstRecording() {
+    fresh(); tapB(); CHECK(eng().state(0) == ouro::TrackState::Recording);   // the first press starts a first recording
+    runN(20); bDown(); bUp();
+    CHECK(eng().part() == 1 && eng().state(0) == ouro::TrackState::Recording && eng().loopLength() == 0);
+}
+static void aThirdPressIsAFirstPress() {
+    fresh(); recordLoop(500); doubleTapB(); CHECK(eng().newPartTrack() == 0);
+    runN(20); bDown();                                                  // inside what would be a window: a plain tap
+    CHECK(eng().newPartTrack() == -1 && eng().queuedPart() == -1 && eng().state(0) == ouro::TrackState::Playing); bUp();
+}
 static void bSecondPressHeldDoesNotUndo() {
     fresh(); recordLoop(700);                                           // a long pass: the switch comes after the hold
     tapB(); runN(160); tapB(); runN(160); CHECK(eng().undoDepth(0) == 1);   // one overdub
@@ -1096,7 +1106,7 @@ static void aLoadDropsTheWaitingNewPart() {                             // Revie
 }
 static void bDoubleTapAcrossAPartChangeIsANewFirstPress() {
     fresh(); recordLoop(); set(kParamPart, 1); runN(1);                 // a switch queued for the loop's end
-    CHECK(runUntil([] { return eng().position() >= eng().loopLength() - 3 * 128; }, 200));
+    CHECK(runUntil([] { return eng().position() + 3 * 128 >= eng().loopLength(); }, 200));
     tapB(); CHECK(eng().part() == 1); runN(5); bDown();                 // the overdub closed at the switch
     CHECK(eng().newPartTrack() == -1 && eng().state(0) == ouro::TrackState::Overdubbing); bUp();
 }
@@ -1210,6 +1220,7 @@ int main()
     bRestartsAfterStop();
     doubleTapThenHoldDoesNotClear();
     doubleTapBegunWhileStoppingOnlyStops();
+    bDoubleTapWithNothingRecordedAbortsTheFirstRecording(); aThirdPressIsAFirstPress();
     doubleTapDuringAShortFirstRecording();
     stopPlayPortToggles();
     stopAndAutoRecSettingsReachTheEngine();
