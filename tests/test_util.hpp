@@ -2,6 +2,13 @@
 #include <cstdio>
 #include <cmath>
 
+// Every test binary runs under AddressSanitizer: cap it, so a runaway test (a wrapped-around sample count asking for
+// gigabytes) dies at once instead of filling the machine's memory, which twice made the kernel kill the terminal it
+// ran in. Normal peaks are about 400 MB. ASAN_OPTIONS from the environment still applies on top.
+extern "C" const char* __asan_default_options() {
+    return "allocator_may_return_null=1:max_allocation_size_mb=2048:hard_rss_limit_mb=2048";
+}
+
 inline int& failures() { static int f = 0; return f; }
 
 #define CHECK(cond) do { if (!(cond)) { failures()++; \
