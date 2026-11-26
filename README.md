@@ -10,7 +10,7 @@ piece to bring it back later. Built with the [DISTRHO Plugin Framework (DPF)](ht
 mono in and mono out, plus a click output.
 
 - **Free or in time.** Free by default, with no click and no bars. Set Sync to Bars and loops start on MOD's bar lines, last whole bars and follow MOD's play and stop, with an optional click and a fixed loop length in bars.
-- **Parts and a song.** Four parts (A-D) of four tracks each. Switch parts at the end of a pass, or let a 16-step song play them in order, with repeats, Loop and Stop.
+- **Parts and a song.** Four parts (A-D) of four tracks each. Switch parts at the end of a pass, or let a 16-step song play them in order, with repeats, Loop and Stop. Double-tap B to go to the next part, keeping the tracks below the selected one and recording it from the first beat.
 - **Saved pieces.** Save the whole piece (4 parts, mix, arrangement) to one of 16 slots on the Dwarf and load another between songs. Pieces are plain WAV folders you can copy.
 - **Two footswitches.** B records, plays and overdubs; hold it to undo. C turns the selected track off and on, clears it on a hold, and stops or starts everything on a double-tap. Redo is on a knob.
 - Overdub as much as you like and undo one layer at a time. The loop point is click-free.

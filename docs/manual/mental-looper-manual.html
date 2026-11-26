@@ -332,6 +332,7 @@ p:has(+ table) { break-after: avoid; }   /* a lead-in stays on the page of its t
 <tr><td>Overdubbing</td><td>back to playing</td><td>PLAY</td></tr>
 <tr><td>Stopped</td><td>starts every track again from the top</td><td>PLAY</td></tr>
 <tr><td>Auto Rec on, track empty</td><td>arms it: recording starts on your first note</td><td>ARM</td></tr>
+<tr><td>Any, double-tap</td><td>goes to the next part and records the selected track there (see New part)</td><td>REC</td></tr>
 </table>
 <p><b>Hold B</b> (for the hold time) to undo the newest layer of the selected track. Each hold undoes one more layer, and never the first one: with only the first recording left, a hold does nothing. A hold never aborts a recording. The press that starts the hold counts as a tap first, so the hold deals with what that press did:</p>
 <table>
@@ -348,6 +349,25 @@ p:has(+ table) { break-after: avoid; }   /* a lead-in stays on the page of its t
 B on another track cancels the arm and then does that track&rsquo;s own action.</p>
 <p>Set <b>After Rec</b> to <i>Rec &gt; Dub</i> to go from recording straight into overdubbing.
 The light shows the track&rsquo;s state: white empty, blinking red recording, blinking green overdubbing, green playing, slowly blinking red armed, and off while stopped.</p>
+<p><b>New part.</b> Press B twice within the Double-Tap window and Mental Looper goes to the next part (D goes to A). If that part is empty, the tracks <i>below</i> the selected one are copied into it, the selected track records from the new part&rsquo;s first beat, and the tracks <i>above</i> it stay empty. Close the recording with B, as any recording onto a loop. With Auto Rec on, the selected track is armed instead and records from your first note.</p>
+<p>Example: tracks 1 to 3 play in part A and track 3 is selected. Double-tap B. At the end of the pass, part B starts with tracks 1 and 2 playing as they were in A, and track 3 recording from the first beat. Track 4 is empty. If the next part already holds audio, the double-tap is only a switch to it, as turning Part would be: nothing is copied or recorded.</p>
+<p>The second press first deals with what the first press did, as a hold does:</p>
+<table>
+<tr><th>The first press</th><th>The second press</th></tr>
+<tr><td>started an overdub</td><td>cancels it: nothing is kept</td></tr>
+<tr><td>closed an overdub</td><td>the overdub stays</td></tr>
+<tr><td>started a recording onto the loop, or the first recording</td><td>aborts it: the track is empty again</td></tr>
+<tr><td>closed a recording</td><td>it stays (with After Rec set to Rec &gt; Dub, the overdub the closing press started is cancelled)</td></tr>
+<tr><td>closed another track&rsquo;s take and started this one (one-press handover)</td><td>the other take stays closed, and this one&rsquo;s start is undone</td></tr>
+<tr><td>armed the track (Auto Rec), or waited to start a recording (Sync)</td><td>cancelled, or aborted if it already started recording</td></tr>
+<tr><td>waited to close the first recording (Sync)</td><td>the loop still closes on its bar line, and the switch comes at the end of that first pass</td></tr>
+</table>
+<p>With Sync, if the first press handed over from another track&rsquo;s recording onto a loop or an overdub, that take closes at once and is kept. A first recording&rsquo;s waiting close still closes on its bar line.</p>
+<p><b>Two quick presses are always a double-tap.</b> If you close a loop and press B again within the Double-Tap window to start an overdub, you go to the next part instead. Two ways round it: set <b>After Rec</b> to <i>Rec &gt; Dub</i>, so one press closes the loop and starts the overdub; or lower <b>Double-Tap</b> (down to 150&nbsp;ms), so a double-tap needs quicker presses.</p>
+<p><b>The wait.</b> The switch comes at the end of the current part&rsquo;s pass. Until then B blinks fast red and its label reads <code>REC</code>, the screen shows <code>A&gt;B</code> blinking, and the web face shows its waiting look. A tap on B or a press on C cancels the new part and its recording and does nothing else; a second press within the window after that is a double-tap again. Turning Part to another part makes it a plain switch to that part. Turning Track does not move the recording. Any stop (Stop/Play, MOD&rsquo;s stop, a double-tap on C, End of loop or Fade) cancels it, so a double-tap on C leaves you in the current part, stopped. Clear All cancels it too. When the next part held audio, the wait is a plain switch and B and C act as usual.</p>
+<p><b>While stopped.</b> The first press starts everything from the top; the second replaces that start. The loops stop again, the next part becomes the current one at once, and playback starts from its top, with the new recording (or arm) starting with it. With Sync that start waits for the bar line, and if you cancel the wait the looper stays stopped in the new part. If the next part holds audio, it plays with no recording. With Song on, the double-tap turns Song off.</p>
+<p><b>With nothing recorded.</b> The first press starts the first recording and the second aborts it. The looper moves to the next part at once and records there on the selected track.</p>
+<p>The copies and the new recording count as changes, so a later Load asks <code>LOAD n?</code>. A first press held past the hold time is an undo and starts no double-tap, and holding the second press does nothing more. A press on C between the two presses makes the second a new press. If the part changes between the presses, the second press is a new first press.</p>
 <p><b>One-press handover.</b> Press B on another track while one is recording: the running one closes and the new one starts, in the same press.
 This is how you set the loop length from track 1 and start track 2 without a gap.</p>
 <p><b>Long tracks.</b> Record a track over an existing loop and keep playing past the loop end: it becomes 2, 3 or more loops long, up to 5 minutes.
@@ -409,8 +429,9 @@ Without the widget everything still works, just without the screen. On stock MOD
 
 <h2>Song parts</h2>
 <p>Mental Looper has four <b>parts</b>, A to D. Each part is its own set of four tracks, so you can record a verse in A and a chorus in B. The Track, Redo and Volume knobs act on the current part. The loop length L is set once, by the first recording, and every track in every part is a whole multiple of it. A part&rsquo;s pass is its longest track, so parts can last a different number of Ls.</p>
-<p><b>Copy on entry.</b> Switch to an empty part and it starts as a copy of the part you left: every track&rsquo;s audio as heard, with its on/off and volume, one layer each (no undo history). Clear what you do not want.</p>
+<p><b>Copy on entry.</b> Switch to an empty part and it starts as a copy of the part you left: every track&rsquo;s audio as heard, with its on/off and volume, one layer each (no undo history). Clear what you do not want. This is what the Part knob does; a double-tap on B copies only the tracks below the selected one (see below).</p>
 <p><b>Switching.</b> Turn <b>Part</b> and the switch waits for the end of the current part&rsquo;s pass (its longest track). The screen shows <code>A&gt;B</code> blinking, and the knob shows the queued part until the switch. The switch is a crossfade of a few ms on both sides, so the new part&rsquo;s downbeat keeps its attack.</p>
+<p><b>Switching by foot.</b> Double-tap B to go to the next part (D goes to A) and layer a new one: if it is empty, the tracks below the selected track are copied, the selected track records from the new part&rsquo;s first beat, and the tracks above stay empty. If it holds audio, you only switch to it. It turns Song off, as turning Part does. See Footswitch B.</p>
 <h3>The song</h3>
 <p>The song is up to 16 <b>steps</b>. Each step has a part (A&ndash;D, <b>Loop</b> or <b>Stop</b>) and repeats (1&ndash;16). A repeat is one pass of that part. At the end of the last repeat the song moves to the next step. <b>Loop</b> sends the song back to step 1 (so it repeats the part for ever only when that is the song&rsquo;s only step); <b>Stop</b> stops with the Stop Mode, and the song goes back to step 1 with Song still on.</p>
 <ul style="margin:0 0 5px 0;padding-left:16px">
@@ -485,7 +506,7 @@ Without the widget everything still works, just without the screen. On stock MOD
 <tr><td class="ctl">Fade Time</td><td>0.5&ndash;10&nbsp;s</td><td>3&nbsp;s</td><td>How long the Fade stop takes.</td></tr>
 <tr><td class="ctl">Auto Rec</td><td>off / on</td><td>off</td><td>B on an empty track arms it instead of recording. An arm is cancelled by B on the armed track, a press on C with that track selected, and so on (see Footswitch B). Recording starts when you play past the Threshold, and keeps the 10&nbsp;ms before it.</td></tr>
 <tr><td class="ctl">Threshold</td><td>&minus;60&hellip;&minus;10&nbsp;dB</td><td>&minus;40&nbsp;dB</td><td>How loud your first note must be to start an armed recording.</td></tr>
-<tr><td class="ctl">Double-Tap</td><td>150&ndash;600&nbsp;ms</td><td>400&nbsp;ms</td><td>The window for a second press on C. B has no double-tap.</td></tr>
+<tr><td class="ctl">Double-Tap</td><td>150&ndash;600&nbsp;ms</td><td>400&nbsp;ms</td><td>The window for a second press on B and on C.</td></tr>
 <tr><td class="ctl">Sync</td><td>Off / Bars</td><td>Off</td><td>Bars: recording starts and the first loop closes on MOD&rsquo;s bar lines, and the loops follow MOD&rsquo;s play and stop. See Tempo sync.</td></tr>
 <tr><td class="ctl">Click</td><td>off / on</td><td>off</td><td>With Sync on and MOD playing, a tick on each beat on the Click output.</td></tr>
 <tr><td class="ctl">Click Level</td><td>&minus;40&hellip;0&nbsp;dB</td><td>&minus;10&nbsp;dB</td><td>How loud the click is.</td></tr>
