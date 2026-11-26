@@ -96,7 +96,11 @@ static void layout()
         CHECK((h & kParameterIsOutput) != 0 && (h & kParameterIsHidden) != 0 && (k == 0) == ((h & kParameterIsInteger) == 0));
     }
     CHECK(P().getParameterRanges(kParamProgressLoops).def == 1.0f && P().getParameterRanges(kParamLooper).max == 5.0f);
-    CHECK(kParamProgress == 75 && kParamBypass == 80 && P().getParameterCount() == 81);
+    CHECK(kParamProgress == 75 && kParamBypass == 80 && P().getParameterCount() == 82);
+    // Snap: the first port added after the release, at the end; a setting, 0-50 % of a loop, default 25.
+    CHECK(kParamSnap == 81 && std::strcmp(P().getParameterSymbol(kParamSnap), "snap") == 0 && P().getParameterGroupId(kParamSnap) == 2);
+    CHECK(P().getParameterRanges(kParamSnap).min == 0.0f && P().getParameterRanges(kParamSnap).max == 50.0f && P().getParameterRanges(kParamSnap).def == 25.0f);
+    CHECK((P().getParameterHints(kParamSnap) & (kParameterIsOutput | kParameterIsHidden)) == 0 && (P().getParameterHints(kParamSnap) & kParameterIsInteger) != 0);
     static const char* kPieceSym[] = { "slot", "save", "load", "piece" };   // before Bypass, in g5_pieces
     for (uint32_t i = 0; i < 4; ++i)
         CHECK(std::strcmp(P().getParameterSymbol(kParamSlot + i), kPieceSym[i]) == 0 && P().getParameterGroupId(kParamSlot + i) == 4);
@@ -349,6 +353,8 @@ static void settingsReachTheEngine()
     set(kParamRec, 1); runN(1); set(kParamRec, 0); runN(10);
     CHECK(eng().nextAction(0) == ouro::NextAction::Dub);    // Rec > Dub
     set(kParamBudget, 16); set(kParamTail, 100); set(kParamOffset, 5); set(kParamTriggerLatency, 10); runN(1);
+    CHECK(std::fabs(eng().snap() - 0.25f) < 1e-6f);
+    set(kParamSnap, 20); runN(1); CHECK(std::fabs(eng().snap() - 0.2f) < 1e-6f);
 }
 
 static void bypassSemantics()      // replaces the template's test_bypass

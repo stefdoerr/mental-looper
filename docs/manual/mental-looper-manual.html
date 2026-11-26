@@ -351,7 +351,7 @@ The light shows the track&rsquo;s state: white empty, blinking red recording, bl
 <p><b>One-press handover.</b> Press B on another track while one is recording: the running one closes and the new one starts, in the same press.
 This is how you set the loop length from track 1 and start track 2 without a gap.</p>
 <p><b>Long tracks.</b> Record a track over an existing loop and keep playing past the loop end: it becomes 2, 3 or more loops long, up to 5 minutes.
-Press B to stop recording. The length rounds to whole loops, counted from when you started that track. Press within a quarter loop after a whole number of loops and it rounds down: what you played past that point lands on top of the track&rsquo;s beginning, where it falls in time. Press later and it rounds up, and the rest of the last loop is silent. Less than one loop gives one loop.
+Press B to stop recording. The length rounds to whole loops, counted from when you started that track. If you started a little before a loop&rsquo;s top, within <b>Snap</b> (a quarter loop by default), they count from that top instead: the track begins there, and what you played before it ends the track, leading into its beginning. Press within Snap after a whole number of loops and it rounds down: what you played past that point lands on top of the track&rsquo;s beginning, where it falls in time. Press later and it rounds up, and the rest of the last loop is silent. Less than one loop gives one loop.
 A long track stays locked to the first loop. Overdub, undo and redo, on/off, volume and clear work over its whole length.
 Restart (B, or a double-tap on C while stopped; a tap on C starts the selected track alone) begins the longest track from its start, and every other track keeps its alignment.</p>
 </div>
@@ -490,6 +490,7 @@ Without the widget everything still works, just without the screen. On stock MOD
 <tr><td class="ctl">Click</td><td>off / on</td><td>off</td><td>With Sync on and MOD playing, a tick on each beat on the Click output.</td></tr>
 <tr><td class="ctl">Click Level</td><td>&minus;40&hellip;0&nbsp;dB</td><td>&minus;10&nbsp;dB</td><td>How loud the click is.</td></tr>
 <tr><td class="ctl">Length</td><td>Free, 1&ndash;16 bars</td><td>Free</td><td>With Sync on, the first loop closes by itself after this many bars.</td></tr>
+<tr><td class="ctl">Snap</td><td>0&ndash;50&nbsp;%</td><td>25&nbsp;%</td><td>How far off a loop&rsquo;s top, in % of the loop, a long track&rsquo;s start or stop may be and still count as on it (see Long tracks). At 0 nothing snaps: a track counts from its start, and any overshoot adds a loop.</td></tr>
 <tr><td class="ctl">Part</td><td>A&ndash;D</td><td>A</td><td>The current part. Changing it queues a switch at the end of the pass.</td></tr>
 <tr><td class="ctl">Song</td><td>off / on</td><td>off</td><td>Plays the steps in order. See Song parts.</td></tr>
 <tr><td class="ctl">Step</td><td>1&ndash;16</td><td>1</td><td>The step the next two settings edit.</td></tr>

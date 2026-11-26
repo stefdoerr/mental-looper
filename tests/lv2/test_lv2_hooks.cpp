@@ -323,16 +323,18 @@ static void onlyVolumePortsHaveRangeSteps(const std::string& ttlPath)
 }
 
 // The pieces ports go before Bypass: slot at kLv2FirstParam (4) + kParamSlot (71), piece at + kParamPiece (74); then
-// the face's five outputs (progress at + 75, song_step at + 79); 81 parameters in all.
+// the face's five outputs (progress at + 75, song_step at + 79), Bypass (+ 80), then Snap, the first port added after
+// the release (+ 81); 82 parameters in all.
 static void piecePortsBeforeBypass(const std::string& ttlPath)
 {
     CHECK(portIndex(ttlPath, "slot") == 4 + 71 && portIndex(ttlPath, "piece") == 4 + 74);
     CHECK(portIndex(ttlPath, "progress") == 4 + 75 && portIndex(ttlPath, "song_step") == 4 + 79);
+    CHECK(portIndex(ttlPath, "snap") == 4 + 81);
     std::ifstream ttl(ttlPath);
     std::string tok;
     int controls = 0;
     while (ttl >> tok) controls += tok == "lv2:ControlPort";
-    CHECK(controls == 81);
+    CHECK(controls == 82);
 }
 
 // rec and stop_clear are the momentary footswitches: their port blocks carry mod:preferMomentaryOnByDefault.

@@ -298,7 +298,36 @@ static void aFoldSplitByAParkIsHeardFinal() {
     CHECK(e < 1e-6f && r.lp.pendingOps(1) == 0 && maxAbsDiff(trackImage(r, 1), want) < 1e-6f);
 }
 
+// Track 1: B e before a loop top, nothing until the top, then x (2 loops from the top and l more), B.
+static std::vector<float> recordFromTheTop(Rig& r, uint32_t e, uint32_t l) {
+    toPos(r, L - e);
+    auto x = sine(220, 0.1f, 2 * L + l);
+    r.lp.pressRec(1); r.silence(e); r.feed(x); r.lp.pressRec(1); r.silence(1000);
+    return x;
+}
+static void anEarlyPressCountsFromTheTop() {                           // within Snap (25%) before the top
+    { Rig r; silentBase(r); recordFromTheTop(r, 4800, 2400); CHECK(r.lp.trackLength(1) == 2 * L); }   // 0.2 early, 0.1 late
+    { Rig r; silentBase(r); recordFromTheTop(r, 7200, 0); CHECK(r.lp.trackLength(1) == 3 * L); }      // 0.3 early: from the press
+}
+static void anEarlyPressBeginsAtTheTop() {                             // not at the top before the press
+    Rig r; silentBase(r); auto x = recordFromTheTop(r, 2400, 1200);
+    CHECK(r.lp.trackLength(1) == 2 * L);
+    auto img = trackImage(r, 1);                                       // 0: the track's beginning
+    CHECK(errAt(img, 0, x, 1500, 2 * L) < 1e-6f);                      // the last 0.1 loop folds onto the pre-roll
+    float e = 0.0f;                                                    // the overshoot lands on the beginning
+    for (uint32_t j = 200; j < 1100; ++j) e = std::max(e, std::fabs(img[j] - (x[j] + x[2 * L + j])));
+    CHECK(e < 1e-6f);
+}
+static void snapSetsTheWindow() {
+    { Rig r; silentBase(r); r.lp.setSnap(0.2f); recordFromTheTop(r, 3600, 2400); CHECK(r.lp.trackLength(1) == 2 * L); }
+    { Rig r; silentBase(r); r.lp.setSnap(0.2f); recordFromTheTop(r, 3600, 5400); CHECK(r.lp.trackLength(1) == 3 * L); }
+    { Rig r; silentBase(r); r.lp.setSnap(0.0f); recordFromTheTop(r, 1200, 0); CHECK(r.lp.trackLength(1) == 3 * L); }
+    { Rig r; silentBase(r); r.lp.setSnap(0.0f); recordLong(r, 2 * L); CHECK(r.lp.trackLength(1) == 2 * L); }
+    { Rig r; r.lp.setSnap(0.9f); CHECK(r.lp.snap() == 0.5f); r.lp.setSnap(-1.0f); CHECK(r.lp.snap() == 0.0f); }
+}
+
 int main() {
+    anEarlyPressCountsFromTheTop(); anEarlyPressBeginsAtTheTop(); snapSetsTheWindow();
     oneLoopTracksReportLengthAndPosition();
     longRecordingRoundsUp(); longRecordingRoundsDownOntoTheStart(); oneLoopFromMidPassStaysOneLoop(); lessThanALoopIsOneLoop();
     roundingCountsFromTheStartPress(); bStopsAtThePress(); handoverAndStopCloseWithTheRule(); maximumClosesAtWholeLoops();

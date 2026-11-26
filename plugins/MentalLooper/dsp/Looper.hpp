@@ -538,6 +538,10 @@ public:
     void setTriggerLatencyMs(float ms) { trigMs_ = std::max(0.0f, std::min(ms, kMinLoopMs)); }
     void setRecToDub(bool on) { recToDub_ = on; }
     void setFixedBars(uint32_t n) { fixedBars_ = n; }   // Length: 0 = free
+    // Snap (0-kSnapMax of a loop): how far off a loop top a recording onto the loop may start or stop and still count
+    // as on it (see closeOntoLoop()).
+    void setSnap(float f) { snapWin_ = std::max(0.0f, std::min(f, kSnapMax)); }
+    float snap() const { return snapWin_; }
     void setAdvanceMs(float ms) { advMs_ = std::max(0.0f, std::min(ms, 30.0f)); }   // earlier only (R7)
     void setAutoRec(bool on) {                           // off: nothing starts by itself
         autoRec_ = on;
@@ -965,16 +969,21 @@ private:
         return tr.fade.left > 0;
     }
 
-    // A recording onto the loop stops at the press, n samples after its start (the playhead): it is k whole loops long
-    // counted from the start, rounded down within kRoundDownFraction of a loop past them, never below one. From now on
-    // its writer (the punch-out fade) and playhead wrap at len. Nothing long happens here: rounded up, the unrecorded
-    // rest already reads 0 (the buffer started empty, see startDub()); rounded down, a fold op adds what the writer put
-    // past len onto the beginning on the next pass. Only the lead-in kept aside is placed now, at the end, just before
-    // index 0.
+    // A recording onto the loop stops at the press, n samples after its start (the playhead). Its whole loops count
+    // from the start, or from the next loop top if the start was less than Snap of a loop before it: e samples, which
+    // then end the track, leading into its beginning (that top, not the one before the start). It is k whole loops
+    // long, rounded down within Snap of a loop past them, never below one; the overshoot past len stays under L. From
+    // now on its writer (the punch-out fade) and playhead wrap at len. Nothing long happens here: rounded up, the
+    // unrecorded rest already reads 0 (the buffer started empty, see startDub()); rounded down, a fold op adds what the
+    // writer put past len onto the beginning on the next pass. Only the lead-in kept aside is placed now, at the end,
+    // just before index 0.
     void closeOntoLoop(Track& tr) {
         const uint32_t n = tr.pos, L = L_, b = tr.leadIn;
-        const uint32_t k = n < L ? 1 : float(n % L) <= kRoundDownFraction * float(L) ? n / L : n / L + 1;
+        const float w = snapWin_ * float(L);
+        const uint32_t e = float(L - tr.phase) < w ? L - tr.phase : 0, m = n > e ? n - e : 0;   // phase: at the start
+        const uint32_t k = m < L ? 1 : float(m % L) <= w ? m / L : m / L + 1;
         const uint32_t len = k * L, a = (n + cap_ - tr.dub.w) % cap_;   // a: the writer's lag (the offset)
+        if (e) tr.phase += len - L;                     // the beginning: index len - phase = e
         tr.len = len;
         tr.pos = n % len;
         tr.dub.w = (n + len - a) % len;                 // index n - a, wrapped
@@ -1535,7 +1544,7 @@ private:
     uint32_t rec_ = 0, recD_ = 0;    // first recording: write index and its back-date D
     uint32_t seq_ = 0;               // global layer sequence number (oldest first, across tracks)
     int recTrack_ = -1;              // the track making the first recording (L unset), else -1
-    float tailMs_ = 50.0f, trigMs_ = 3.0f, advMs_ = 0.0f, dryGain_ = 0.0f;
+    float tailMs_ = 50.0f, trigMs_ = 3.0f, advMs_ = 0.0f, dryGain_ = 0.0f, snapWin_ = kSnapDefault;
     Ramp dry_;
     LoopGain lg_;                    // multiplies the tracks' output only: the stop's fade-out, the restart's fade-in
     Transport tp_ = Transport::Running;

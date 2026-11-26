@@ -81,6 +81,8 @@ enum ParamIndex {
     // The MOD face's outputs (hidden; modgui.ttl monitors them): hmi/FaceView.hpp.
     kParamProgress, kParamProgressLoops, kParamLooper, kParamTakeSecs, kParamSongStep,
     kParamBypass,
+    // Added after the first release: new ports go at the end. Settings only, read every block (fPrev stops at Bypass).
+    kParamSnap,
     kNumParams
 };
 
@@ -245,6 +247,16 @@ protected:
         if (index == kParamBypass)
         {
             p.initDesignation(kParameterDesignationBypass);
+            return;
+        }
+        if (index == kParamSnap)                // % of a loop: the engine's Snap (Looper::setSnap)
+        {
+            p.symbol = "snap";
+            p.name = "Snap";
+            p.unit = "%";
+            p.ranges.min = 0; p.ranges.max = ouro::kSnapMax * 100; p.ranges.def = ouro::kSnapDefault * 100;
+            p.groupId = kGroupSettings;
+            p.hints = kParameterIsAutomatable | kParameterIsInteger;
             return;
         }
         if (index >= kParamProgress && index <= kParamSongStep)
@@ -489,6 +501,7 @@ protected:
         if (changed(kParamStopMode) || changed(kParamFadeTime))   // what a Stop step uses
             fEngine.setStopMode(stopMode(), fVal[kParamFadeTime] * 1000.0f);
         fEngine.setBypass(on(kParamBypass));
+        fEngine.setSnap(fVal[kParamSnap] * 0.01f);
 
         // Sync = Bars: MOD's bar grid, before the presses below so they see this block's grid, then its play/stop
         // edges. The first run and Sync turning on only take MOD's state: neither is an edge. Off: only the flag test.
