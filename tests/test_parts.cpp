@@ -458,6 +458,25 @@ static void dropStartCancelsAWaitingStartAndAnArm() {
     r.lp.dropStart(2); CHECK(!r.lp.userWaiting());
     r.silenceSync(96000); CHECK(r.lp.state(2) == TrackState::Empty);
 }
+// F1: a handover waiting for its line closes another track's take first; dropStart closes that take now (a closed take
+// stays), as a press on it would, and drops the start. A recording onto the loop, then an overdub.
+static void dropStartClosesTheTakeAWaitingHandoverWouldClose() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(std::vector<float>(96000, 0.0f)); r.lp.pressRec(0);   // a silent 1-bar loop
+    r.lp.pressRec(1); CHECK(r.lp.state(1) == TrackState::Recording);    // on the line: at once
+    r.feedSync(sine(330, 0.1f, 96000 + 48000));                          // 1.5 loops, half a bar past the line
+    r.lp.pressRec(2); CHECK(r.lp.userWaiting(2) && r.lp.state(1) == TrackState::Recording);
+    r.lp.dropStart(2);
+    CHECK(!r.lp.waiting() && r.lp.state(1) == TrackState::Playing && r.lp.trackLength(1) == 2 * 96000);
+    CHECK(r.lp.state(2) == TrackState::Empty);
+    r.toPhase(0); r.lp.pressRec(0); CHECK(r.lp.state(0) == TrackState::Overdubbing);
+    r.feedSync(sine(440, 0.1f, 48000));
+    r.lp.pressRec(3); CHECK(r.lp.userWaiting(3) && r.lp.state(0) == TrackState::Overdubbing);
+    r.lp.dropStart(3);
+    CHECK(!r.lp.waiting() && r.lp.state(0) == TrackState::Playing && r.lp.undoDepth(0) == 1);
+    r.silenceSync(96000);                                                // past the line: nothing starts
+    CHECK(r.lp.state(2) == TrackState::Empty && r.lp.state(3) == TrackState::Empty);
+}
 // Review Focus 6: the close waits for its line, the new part for the end of the first pass that close makes.
 static void newPartAfterAWaitingCloseSwitchesAtThatPassEnd() {
     SyncRig r; r.lp.setSync(true); r.toPhase(0);
@@ -492,7 +511,8 @@ int main() {
     newPartWhileStoppedSwitchesAndStartsRecording(); newPartWhileStoppingStartsAtThePark();
     newPartWhileStoppedWithSyncWaitsForTheLine(); newPartWithNothingRecordedMovesAndRecords();
     dropStartKeepsAWaitingCloseOfTheFirstRecording(); dropStartTurnsAWaitingHandoverIntoAClose();
-    dropStartCancelsAWaitingStartAndAnArm(); newPartAfterAWaitingCloseSwitchesAtThatPassEnd();
+    dropStartCancelsAWaitingStartAndAnArm(); dropStartClosesTheTakeAWaitingHandoverWouldClose();
+    newPartAfterAWaitingCloseSwitchesAtThatPassEnd();
     aStoppedNewPartKeepsAWaitingRestartAndStopPlayDropsIt(); cancelWaitStopAndClearAllDropAStoppedNewPart();
     newPartStartedLateInTheGraceKeepsFromTheLine();
     newPartWhileStoppedArmsWithAutoRec();

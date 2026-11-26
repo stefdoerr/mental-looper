@@ -340,13 +340,19 @@ public:
         return arm || wait;
     }
     // B's double-tap, its second press (see newPart()): t's arm, and a press or arm on t waiting for its line to start
-    // a recording, go. A press waiting to close the first recording stays, and so does the close in a waiting handover
-    // to t (the first recording's close, then t's start): either way only the close lands on the line, never Rec->Dub.
+    // a recording, go. The takes that waiting press would close first (a recording onto the loop, an overdub) close now,
+    // as a press on them would: a closed take stays. A press waiting to close the first recording stays, and so does
+    // the close in a waiting handover to t (the first recording's close, then t's start): either way only the close
+    // lands on the line, never Rec->Dub.
     void dropStart(int t) {
         if (!valid(t)) return;
         if (armed_ == t) armed_ = -1;
         if (pend_.t != t) return;                        // none on t (a restart, MOD's lone retrigger: t -1)
-        if (recTrack_ < 0) { cancelWaiting(); return; }  // a start: first recording, onto the loop, or an arm's
+        if (recTrack_ < 0) {                             // a start: first recording, onto the loop, or an arm's
+            cancelWaiting();
+            closeOthers(t);                              // the handover's closes (an arm's were done when it armed)
+            return;
+        }
         pend_.kind = Pending::Close;                     // the close alone: no Rec->Dub, no start after it
         pend_.t = recTrack_;
     }
