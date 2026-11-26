@@ -336,6 +336,142 @@ static void aFirstRecordingAbortedUnderANewPartSwitchesPlainly() {
     CHECK(r.lp.state(2) == TrackState::Empty && !r.lp.recWaiting());
 }
 
+// Stopped, the new part is switched to at once (copies below, nothing above) and starts with t recording.
+static void newPartWhileStoppedSwitchesAndStartsRecording() {
+    Rig r; recordBase(r, 24000, 0.1f); recordBaseOn(r, 2);              // track 2: above the new part's track
+    r.lp.stop(ouro::StopMode::Instant); r.silence(2000);
+    CHECK(r.lp.transport() == ouro::Transport::Stopped);
+    r.lp.newPart(1);
+    CHECK(r.lp.part() == 1 && r.lp.transport() == ouro::Transport::Running && r.lp.state(0) == TrackState::Playing);
+    CHECK(r.lp.state(1) == TrackState::Recording && r.lp.state(2) == TrackState::Empty && r.lp.newPartTrack() == -1);
+    r.silence(24000); r.lp.pressRec(1); CHECK(r.lp.trackLength(1) == 24000);   // from the start, the loop's top
+}
+// Stopping (the plugin stopped Instant first): the park switches and restarts, t recording.
+static void newPartWhileStoppingStartsAtThePark() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.stop(ouro::StopMode::Instant); r.lp.newPart(1);
+    CHECK(r.lp.transport() == ouro::Transport::Stopping && r.lp.part() == 0 && r.lp.newPartTrack() == 1);
+    r.silence(2000);
+    CHECK(r.lp.part() == 1 && r.lp.transport() == ouro::Transport::Running && r.lp.state(1) == TrackState::Recording);
+    CHECK(r.lp.state(0) == TrackState::Playing && r.lp.newPartTrack() == -1);
+    Rig q; recordBase(q, 24000, 0.1f); q.lp.stop(ouro::StopMode::Instant); q.lp.newPart(1);
+    q.lp.pressRec(0); q.silence(2000);                                   // beyond the brief: B cancels the restart too
+    CHECK(q.lp.part() == 0 && q.lp.transport() == ouro::Transport::Stopped && q.lp.newPartTrack() == -1);
+}
+// A 1-bar loop on MOD's grid, stopped half a bar before MOD's next line (R1: MOD plays, so a start waits for it).
+static void stopMidBar(SyncRig& r) {
+    r.lp.setSync(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 96000)); r.lp.pressRec(0); r.silenceSync(20000);
+    r.lp.stop(ouro::StopMode::Instant); r.silenceSync(2000); r.toPhase(48000);
+    CHECK(r.lp.transport() == ouro::Transport::Stopped);
+}
+// R1: stopped while MOD plays, the start waits for the line; a press before it cancels it, the switch stays.
+static void newPartWhileStoppedWithSyncWaitsForTheLine() {
+    SyncRig r; stopMidBar(r); r.lp.newPart(1);
+    CHECK(r.lp.part() == 1 && r.lp.transport() == ouro::Transport::Stopped && r.lp.newPartTrack() == 1);
+    CHECK(r.lp.recWaiting() && r.lp.state(0) == TrackState::Playing);
+    r.silenceSync(48000 - 128); CHECK(r.lp.transport() == ouro::Transport::Stopped);
+    r.silenceSync(256);
+    CHECK(r.lp.transport() == ouro::Transport::Running && r.lp.state(1) == TrackState::Recording);
+    CHECK(r.lp.newPartTrack() == -1);
+    SyncRig q; stopMidBar(q); q.lp.newPart(1); q.lp.pressRec(0);
+    CHECK(q.lp.newPartTrack() == -1 && q.lp.part() == 1 && q.lp.transport() == ouro::Transport::Stopped);
+    CHECK(q.lp.state(1) == TrackState::Empty && !q.lp.recWaiting());
+    q.silenceSync(48000 + 128);                                          // past the line: still stopped
+    CHECK(q.lp.transport() == ouro::Transport::Stopped && q.lp.state(1) == TrackState::Empty);
+}
+// Beyond the brief: stopped, a restart already waiting (B's first press) is kept for the new part; Stop/Play while it
+// waits cancels the start, and the next start records nothing.
+static void aStoppedNewPartKeepsAWaitingRestartAndStopPlayDropsIt() {
+    SyncRig r; stopMidBar(r); r.lp.restart(); CHECK(r.lp.userWaiting());
+    r.lp.newPart(1);
+    CHECK(r.lp.part() == 1 && r.lp.userWaiting() && r.lp.newPartTrack() == 1);
+    r.lp.restart();                                                      // Stop/Play while stopped: the wait goes
+    CHECK(!r.lp.userWaiting() && r.lp.newPartTrack() == -1 && !r.lp.recWaiting());
+    r.lp.restart(); r.silenceSync(48000 + 128);
+    CHECK(r.lp.transport() == ouro::Transport::Running && r.lp.part() == 1 && r.lp.state(1) == TrackState::Empty);
+}
+// Beyond the brief: C's cancel, a stop (MOD's, with Sync) and Clear All forget a stopped new part's waiting start.
+static void cancelWaitStopAndClearAllDropAStoppedNewPart() {
+    { SyncRig r; stopMidBar(r); r.lp.newPart(1);
+      CHECK(r.lp.cancelWait(3) && r.lp.newPartTrack() == -1 && !r.lp.userWaiting() && r.lp.part() == 1); }
+    { SyncRig r; stopMidBar(r); r.lp.newPart(1); r.lp.stop(ouro::StopMode::Instant);
+      CHECK(r.lp.newPartTrack() == -1 && !r.lp.userWaiting());
+      r.lp.restart(); r.silenceSync(48000 + 128);                        // the next start records nothing
+      CHECK(r.lp.transport() == ouro::Transport::Running && r.lp.state(1) == TrackState::Empty); }
+    { SyncRig r; stopMidBar(r); r.lp.newPart(1); r.lp.clearAll(); CHECK(r.lp.newPartTrack() == -1); }
+}
+// Beyond the brief: a start late within the grace back-dates the new recording to the line, as a press there is.
+static void newPartStartedLateInTheGraceKeepsFromTheLine() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(std::vector<float>(96000, 0.0f)); r.lp.pressRec(0);   // a silent 1-bar loop
+    r.silenceSync(20000); r.lp.stop(ouro::StopMode::Instant); r.silenceSync(2000);
+    r.toPhase(96000 - 2000); r.feedSync(std::vector<float>(3280, 0.5f));             // 0.5 up to 1280 past the line
+    r.lp.newPart(1);
+    CHECK(r.lp.transport() == ouro::Transport::Running && r.lp.position() == 1280);
+    CHECK(r.lp.state(1) == TrackState::Recording);
+    r.silenceSync(96000 - 1280); r.lp.pressRec(1); r.silenceSync(4800);             // closed at one loop
+    CHECK(r.lp.trackLength(1) == 96000);
+    ouro::PieceMeta m; CHECK(r.lp.takeSnapshot(m));
+    std::vector<float> t1(2000); r.lp.readSnapshot(1, 1, 0, t1.data(), 2000);         // from its beginning: the line
+    r.lp.dropSnapshot();
+    float e = 0.0f;
+    for (uint32_t i = 0; i < 2000; ++i) e = std::max(e, std::fabs(t1[i] - (i < 1280 ? 0.5f * fadeInGain(i) : 0.0f)));
+    CHECK(e < 1e-6f);
+}
+static void newPartWhileStoppedArmsWithAutoRec() {
+    Rig r; recordBase(r, 24000, 0.1f); r.lp.stop(ouro::StopMode::Instant); r.silence(2000);
+    r.lp.setAutoRec(true); r.lp.newPart(1);
+    CHECK(r.lp.part() == 1 && r.lp.transport() == ouro::Transport::Running && r.lp.armedTrack() == 1);
+    CHECK(r.lp.state(1) == TrackState::Empty);
+}
+static void newPartWithNothingRecordedMovesAndRecords() {
+    Rig r; r.lp.newPart(0);
+    CHECK(r.lp.part() == 1 && r.lp.state(0) == TrackState::Recording && r.lp.loopLength() == 0);
+}
+// dropStart: the second press keeps a waiting close of the first recording (never Rec->Dub) and drops any start.
+static void dropStartKeepsAWaitingCloseOfTheFirstRecording() {
+    SyncRig r; r.lp.setSync(true); r.lp.setRecToDub(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 2 * 96000 - 48000)); r.lp.pressRec(0);   // half a bar early: waits
+    CHECK(r.lp.userWaiting(0));
+    r.lp.dropStart(0); CHECK(r.lp.userWaiting(0) && r.lp.recWaiting());
+    r.silenceSync(48000 + 128);
+    CHECK(!r.lp.waiting() && r.lp.loopLength() == 2 * 96000 && r.lp.state(0) == TrackState::Playing);
+}
+static void dropStartTurnsAWaitingHandoverIntoAClose() {
+    SyncRig r; r.lp.setSync(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 2 * 96000 - 48000)); r.lp.pressRec(1);   // a handover: waits
+    CHECK(r.lp.userWaiting(1));
+    r.lp.dropStart(1); CHECK(r.lp.userWaiting(0) && !r.lp.userWaiting(1));             // the first recording's close
+    r.silenceSync(48000 + 128);
+    CHECK(r.lp.loopLength() == 2 * 96000 && r.lp.state(0) == TrackState::Playing && r.lp.state(1) == TrackState::Empty);
+}
+static void dropStartCancelsAWaitingStartAndAnArm() {
+    SyncRig r; r.lp.setSync(true); r.lp.setTailMs(0); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(std::vector<float>(96000, 0.0f)); r.lp.pressRec(0);   // a silent 1-bar loop
+    r.toPhase(48000); r.lp.pressRec(1); CHECK(r.lp.userWaiting(1));
+    r.lp.dropStart(1); CHECK(!r.lp.userWaiting());
+    r.silenceSync(48000 + 128); CHECK(r.lp.state(1) == TrackState::Empty);
+    r.lp.setAutoRec(true); r.lp.pressRec(2); CHECK(r.lp.armedTrack() == 2);
+    r.lp.dropStart(2); CHECK(r.lp.armedTrack() == -1);
+    r.lp.pressRec(2); r.toPhase(7680); r.feedSync(sine(220, 0.2f, 128));   // the arm fires past the grace: waits
+    CHECK(r.lp.userWaiting(2));
+    r.lp.dropStart(2); CHECK(!r.lp.userWaiting());
+    r.silenceSync(96000); CHECK(r.lp.state(2) == TrackState::Empty);
+}
+// Review Focus 6: the close waits for its line, the new part for the end of the first pass that close makes.
+static void newPartAfterAWaitingCloseSwitchesAtThatPassEnd() {
+    SyncRig r; r.lp.setSync(true); r.toPhase(0);
+    r.lp.pressRec(0); r.feedSync(sine(220, 0.1f, 2 * 96000 - 48000)); r.lp.pressRec(0);   // half a bar early: waits
+    r.lp.dropStart(0); r.lp.newPart(1);
+    CHECK(r.lp.userWaiting(0) && r.lp.queuedPart() == 1 && r.lp.newPartTrack() == 1);
+    r.silenceSync(48000 + 128);                                          // the line: the loop closes
+    CHECK(r.lp.loopLength() == 2 * 96000 && r.lp.state(0) == TrackState::Playing && r.lp.part() == 0);
+    if (r.lp.loopLength() != 2 * 96000) return;                          // not closed: the count below would wrap
+    r.silenceSync(r.lp.loopLength() - r.lp.position() - 1); CHECK(r.lp.part() == 0);
+    r.silenceSync(2);
+    CHECK(r.lp.part() == 1 && r.lp.state(0) == TrackState::Playing && r.lp.state(1) == TrackState::Recording);
+}
+
 int main() {
     switchWaitsForThePartEnd(); copyIsIndependentAndKeepsOnAndVolume(); copyOnEntryAllocatesNothing();
     partLengthIsTheLongestTrack(); choosingTheCurrentPartCancels(); stoppedSwitchesAtOnce(); firstRecordingDefersTheSwitch();
@@ -353,5 +489,12 @@ int main() {
     newPartTurnsTheSongOff();
     songOnDropsTheNewPart(); newPartArmsWithAutoRec(); newPartPassFollowsALongCopy(); newPartWithMemoryFullStillCopies();
     recWaitingWhileANewPartWaits(); aFirstRecordingAbortedUnderANewPartSwitchesPlainly();
+    newPartWhileStoppedSwitchesAndStartsRecording(); newPartWhileStoppingStartsAtThePark();
+    newPartWhileStoppedWithSyncWaitsForTheLine(); newPartWithNothingRecordedMovesAndRecords();
+    dropStartKeepsAWaitingCloseOfTheFirstRecording(); dropStartTurnsAWaitingHandoverIntoAClose();
+    dropStartCancelsAWaitingStartAndAnArm(); newPartAfterAWaitingCloseSwitchesAtThatPassEnd();
+    aStoppedNewPartKeepsAWaitingRestartAndStopPlayDropsIt(); cancelWaitStopAndClearAllDropAStoppedNewPart();
+    newPartStartedLateInTheGraceKeepsFromTheLine();
+    newPartWhileStoppedArmsWithAutoRec();
     REPORT();
 }

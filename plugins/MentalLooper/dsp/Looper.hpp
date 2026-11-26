@@ -131,7 +131,7 @@ public:
         if (queued_ >= 0) part_ = queued_;
         if (songPart() >= 0) part_ = songPart();
         cp_ = &parts_[part_];
-        queued_ = out_ = step_ = newRec_ = -1;
+        queued_ = out_ = step_ = newRec_ = startRec_ = -1;
         pass_ = 0;
         L_ = pos_ = rec_ = recD_ = 0;
         recTrack_ = armed_ = -1;
@@ -157,6 +157,7 @@ public:
                     if (p.kind == Pending::Press) pressRec(p.t);
                     else if (p.kind == Pending::Arm) fireArm(p.t);
                     else if (p.kind == Pending::Restart) restart();
+                    else if (p.kind == Pending::Close && recTrack_ >= 0) close(recTrack_, false);   // see dropStart()
                 }
                 at_ = 0;
             }
@@ -238,7 +239,7 @@ public:
     // earlier, it waits for the next line. One action waits at a time, like the arm: a press cancels it, and on another
     // track then acts (a waiting restart, any press only cancels). An arm's start and a restart go on a line too (see
     // fireArm() and restart()). MOD's retrigger waiting for its line stays (see modStarted()). A new part waiting (see
-    // newPart()): any press cancels it, and only that.
+    // newPart()): any press cancels it, and only that (stopped: the restart that would start it, with it).
     void pressRec(int t) {
         if (!valid(t)) return;
         if (cancelNewPart()) return;
@@ -328,7 +329,8 @@ public:
         ++changes_;
     }
     // Cancels t's arm, its press wait or a pending restart (every track's); true if one was. A waiting new part (any
-    // track's) is cancelled alone, as a press cancels it (a first loop's close waiting for its line stays).
+    // track's) is cancelled alone, as a press cancels it (a first loop's close waiting for its line stays; stopped, the
+    // restart that would start the new part goes with it).
     bool cancelWait(int t) {
         if (!valid(t)) return false;
         if (cancelNewPart()) return true;
@@ -336,6 +338,17 @@ public:
         if (arm) armed_ = -1;
         if (wait) cancelWaiting();
         return arm || wait;
+    }
+    // B's double-tap, its second press (see newPart()): t's arm, and a press or arm on t waiting for its line to start
+    // a recording, go. A press waiting to close the first recording stays, and so does the close in a waiting handover
+    // to t (the first recording's close, then t's start): either way only the close lands on the line, never Rec->Dub.
+    void dropStart(int t) {
+        if (!valid(t)) return;
+        if (armed_ == t) armed_ = -1;
+        if (pend_.t != t) return;                        // none on t (a restart, MOD's lone retrigger: t -1)
+        if (recTrack_ < 0) { cancelWaiting(); return; }  // a start: first recording, onto the loop, or an arm's
+        pend_.kind = Pending::Close;                     // the close alone: no Rec->Dub, no start after it
+        pend_.t = recTrack_;
     }
     // t recording onto the loop or overdubbing closes as its B press would, ending in Playing; else nothing.
     void closeTake(int t) {
@@ -357,7 +370,7 @@ public:
     }
     // Every track of every part, then part A (Song on: step 1's part, the song rewound). The parts still heard (the
     // current one, a switch's outgoing one) ramp out and A is queued: L's reset (see reset()) goes there; with nothing
-    // recorded, at once. A waiting new part goes.
+    // recorded, at once. A waiting new part goes (stopped: its start's recording too).
     void clearAll() {
         if (!enabled_) return;
         for (int t = 0; t < kTracks; ++t) clearTrack(t);
@@ -367,7 +380,7 @@ public:
         step_ = -1; pass_ = 0;
         const int to = std::max(songPart(), 0);
         queued_ = to != part_ ? to : -1;
-        newRec_ = -1;
+        newRec_ = startRec_ = -1;
         if (!L_ && queued_ >= 0) switchPart(queued_);
     }
 
@@ -378,23 +391,33 @@ public:
     // don't come here).
     void setPart(int p) {
         if (!enabled_ || p < 0 || p >= kParts) return;
-        newRec_ = -1;
+        newRec_ = startRec_ = -1;                        // stopped, a new part's start records nothing (it still comes)
         if (p == part_) { queued_ = -1; return; }
         song_ = false; step_ = -1; pass_ = 0;
         if (tp_ == Transport::Stopped || (!L_ && recTrack_ < 0)) switchPart(p);
         else queued_ = p;
     }
-    // B's double-tap: the next part (D wraps to A) is queued as setPart() queues it. An empty one starts from track t at
+    // B's double-tap: the next part (D wraps to A), Song off as setPart() turns it. An empty one starts from track t at
     // the switch (see switchPart()): the tracks below t copied, t recording from the switch sample (Auto Rec: armed),
-    // nothing above. While it waits, a press (any track) or cancelWait() cancels it, and so do a stop, Clear All, Song
-    // on and a load; Part replaces it. Stopping, stopped, or with nothing recorded (a switch at once): only setPart().
+    // nothing above; one holding audio is a plain switch. Running, it is queued as setPart() queues it. While it waits,
+    // a press (any track) or cancelWait() cancels it, and so do a stop, Clear All, Song on and a load; Part replaces it.
+    // Stopped: switched at once, then restart(), whose start records t; with Sync it can wait for the line (a restart
+    // already waiting is kept), and cancelled the looper stays stopped in the new part, nothing recording. Stopping:
+    // queued for the park, and restart() (see there: the park restarts in the new part; a sounding End of loop or Fade
+    // stop is cancelled instead, and the switch waits as running). Nothing recorded: switched at once, then t's press as
+    // B's tap (the first recording, an arm or a Sync wait).
     void newPart(int t) {
         if (!valid(t)) return;
         const int p = (part_ + 1) % kParts;
-        setPart(p);
-        if (tp_ == Transport::Running && queued_ == p && emptyPart(p)) newRec_ = t;
+        if (!L_ && recTrack_ < 0) { setPart(p); pressRec(t); return; }
+        song_ = false; step_ = -1; pass_ = 0;            // as setPart()
+        queued_ = p;
+        newRec_ = emptyPart(p) ? t : -1;
+        if (tp_ == Transport::Stopped) switchPart(p);
+        if (tp_ != Transport::Running && pend_.kind != Pending::Restart) restart();
     }
-    int newPartTrack() const { return newRec_; }         // the track a waiting new part records, -1: none
+    // The track a waiting new part records (stopped: once its start comes), -1: none.
+    int newPartTrack() const { return newRec_ >= 0 ? newRec_ : startRec_; }
     int part() const { return part_; }
     int queuedPart() const { return queued_; }           // -1: none
     // A pass of the current part: its longest track; L if it has none; 0 before L.
@@ -412,7 +435,7 @@ public:
         if (on == song_) return;
         song_ = on; step_ = -1; pass_ = 0;
         ++changes_;
-        if (on) queued_ = newRec_ = -1;
+        if (on) queued_ = newRec_ = startRec_ = -1;
         songHome();
     }
     // Step i (0-15): part 0-3, kStepLoop or kStepStop, played repeats (1-16) times. Default: A x1, then Loop.
@@ -437,7 +460,8 @@ public:
     uint32_t stepRepeats(int i) const { return i >= 0 && i < kSteps ? steps_[i].reps : 1; }
 
     // Closes every writer and cancels an arm or a waiting action, then fades the loops out (stopped: it only cancels a
-    // waiting restart). Any stop cancels a waiting new part, its switch too (one queued with Part happens at the park).
+    // waiting restart, a new part's recording with it). Any stop cancels a waiting new part, its switch too (one queued
+    // with Part happens at the park).
     // Stopping never changes the loop: the engine parks (see park()) once the fade, every tail and every punch-out fade
     // have ended. Instant: kRampMs now.
     // EndOfLoop: kRampMs ending where the longest track's pass ends (measured after the closes). A rest of
@@ -493,7 +517,7 @@ public:
             return;
         }
         if (tp_ != Transport::Stopped) return;
-        if (pend_.kind == Pending::Restart) { pend_ = {}; return; }
+        if (pend_.kind == Pending::Restart) { cancelWaiting(); return; }
         double ph;
         const uint32_t since = gridPhase(ph) ? uint32_t(ph) : 0;
         if (since > msToSamples(kSyncGraceMs, sr_)) { pend_ = {Pending::Restart, -1}; return; }
@@ -625,14 +649,19 @@ public:
     Transport transport() const { return tp_; }
     int armedTrack() const { return armed_; }            // -1: none
     bool waiting() const { return pend_.kind; }          // an action waits for the next bar line
-    // The wait is the user's own: a press or arm on t, or a restart (not MOD's lone retrigger). No t: on any track.
+    // The wait is the user's own: a press or arm on t, a close on t (the first recording's, see dropStart()), or a
+    // restart (not MOD's lone retrigger). No t: on any track.
     bool userWaiting() const { return pend_.kind && pend_.kind != Pending::Retrigger; }
-    bool userWaiting(int t) const { return pend_.kind == Pending::Restart || ((pend_.kind == Pending::Press || pend_.kind == Pending::Arm) && pend_.t == t); }
+    bool userWaiting(int t) const {
+        const bool onT = pend_.kind == Pending::Press || pend_.kind == Pending::Arm || pend_.kind == Pending::Close;
+        return pend_.kind == Pending::Restart || (onT && pend_.t == t);
+    }
     int waitingTrack() const { return pend_.t; }         // its track; -1: none, or a restart
-    // A REC waits: an Auto Rec arm, a new part's recording, or a press or arm waiting for the bar line (not a restart,
-    // not MOD's retrigger).
+    // A REC waits: an Auto Rec arm, a new part's recording, or a press, arm or close waiting for the bar line (not a
+    // restart, unless it starts a new part's recording; not MOD's retrigger).
     bool recWaiting() const {
-        return armed_ >= 0 || newRec_ >= 0 || pend_.kind == Pending::Press || pend_.kind == Pending::Arm;
+        return armed_ >= 0 || newPartTrack() >= 0 || pend_.kind == Pending::Press || pend_.kind == Pending::Arm
+            || pend_.kind == Pending::Close;
     }
     uint32_t bars() const { return L_ ? bars_ : 0; }     // the first loop's bars (1 if recorded without a grid)
     // What L would be if closed now (with a grid: before the rounding to bars). An arm's start can be back-dated less
@@ -800,10 +829,21 @@ private:
         const float v = tr.vol;
         return (tr.state != TrackState::Empty) & tr.on & !bypass_ ? v : 0.0f;
     }
-    // Cancels the waiting press, arm or restart. MOD's retrigger stays: only a stop or Sync off cancels it.
-    void cancelWaiting() { pend_ = {pend_.retrig ? Pending::Retrigger : Pending::None, -1, pend_.retrig}; }
-    // Cancels a waiting new part, its switch with it; true if one was.
-    bool cancelNewPart() { if (newRec_ < 0) return false; queued_ = newRec_ = -1; return true; }
+    // Cancels the waiting press, arm, close or restart (one starting a new part: its recording too, see newPart()).
+    // MOD's retrigger stays: only a stop or Sync off cancels it.
+    void cancelWaiting() {
+        pend_ = {pend_.retrig ? Pending::Retrigger : Pending::None, -1, pend_.retrig};
+        startRec_ = -1;
+    }
+    // Cancels a waiting new part, its switch with it (stopping: the park's restart too), or stopped the restart that
+    // would start it; true if one was.
+    bool cancelNewPart() {
+        if (startRec_ >= 0) { cancelWaiting(); return true; }   // stopped, only a restart can wait
+        if (newRec_ < 0) return false;
+        queued_ = newRec_ = -1;
+        restartQueued_ = false;
+        return true;
+    }
     bool emptyPart(int p) const {                        // every track of part p empty
         for (const Track& tr : parts_[p]) if (tr.state != TrackState::Empty) return false;
         return true;
@@ -879,7 +919,8 @@ private:
     }
 
     // Stopped: plays from the top, every playhead since samples on (see restart()); the loops fade in. Song on: from its
-    // top, step 1's part (switched to at once).
+    // top, step 1's part (switched to at once). A new part switched to while stopped (see newPart()): its track records
+    // onto the loop from the start, back-dated by since as a press within the grace is (Auto Rec: armed).
     void start(uint32_t since) {
         if (song_) { step_ = -1; songNext(); }
         if (since) { advance(since); pos_ = (pos_ + since) % L_; }   // stopped: L_ is set
@@ -887,6 +928,11 @@ private:
         for (Track& tr : cur()) tr.gain.snap(target(tr));
         lg_.v = 0.0f;
         lg_.start(true, 0, fadeIn_);
+        if (startRec_ >= 0) {
+            const int t = startRec_;
+            startRec_ = -1;
+            if (autoRec_) armed_ = t; else startDub(cur()[t], since, false, true);
+        }
     }
 
     // MOD started on a line, the looper running: every writer closes as a stop closes it, and every playhead moves on
@@ -1492,13 +1538,14 @@ private:
     // were on this part). An empty part p is filled from this one (see copy()); for a new part (see newPart()) only below
     // its track t: t and those above get only on/off and volume, and t, turned on, records onto the loop from this
     // sample (no back-date; Auto Rec: armed), taking the input after a take closed here as a one-press handover does.
-    // With nothing recorded that is a plain switch. Every switch forgets the new part. Part p's tracks start from their
-    // beginning. Running, they ramp in over kFadeInMs (the restart's fade-in: a downbeat's attack survives) as this
-    // part ramps out under them, a linear crossfade (seamless where a copy plays the same audio); this part goes on
-    // until its punch-out fades end, then freezes (see finishOut()). The current part is no switch.
+    // With nothing recorded that is a plain switch; stopped, start() records t instead (see newPart()). Every switch
+    // forgets the new part (stopped: one waiting for its start too). Part p's tracks start from their beginning.
+    // Running, they ramp in over kFadeInMs (the restart's fade-in: a downbeat's attack survives) as this part ramps out
+    // under them, a linear crossfade (seamless where a copy plays the same audio); this part goes on until its
+    // punch-out fades end, then freezes (see finishOut()). The current part is no switch.
     void switchPart(int p) {
         const int rec = newRec_;
-        queued_ = newRec_ = -1;
+        queued_ = newRec_ = startRec_ = -1;
         if (p == part_) return;                          // finishOut() would play it twice
         const Handover h = closeOthers(-1);
         armed_ = -1;
@@ -1520,7 +1567,11 @@ private:
             tr.gain = Ramp{0.0f, g, g / float(fadeIn_), fadeIn_};
         }
         if (L_ && tp_ != Transport::Stopped) out_ = from; else freeze(from);
-        if (t >= 0) { if (autoRec_) armed_ = t; else startDub(cur()[t], 0, h.cont, true, h.offset, h.trim); }
+        if (t >= 0) {
+            if (tp_ == Transport::Stopped) startRec_ = t;
+            else if (autoRec_) armed_ = t;
+            else startDub(cur()[t], 0, h.cont, true, h.offset, h.trim);
+        }
     }
     // d becomes what s plays, as one layer: its audio shared (no allocation; a write copies a block first), its on/off,
     // volume, length, phase and pending ops (each delta with one owner here), and its punch-out fade, which writes the
@@ -1597,8 +1648,8 @@ private:
     bool restartQueued_ = false;     // B during a stop that cannot cancel: restart as soon as the engine parks
     int armed_ = -1;                 // the track auto-record starts at the threshold, else -1
     struct Pending {                 // Sync: the action waiting for the next bar line: a press or an arm firing on
-        enum Kind : uint8_t { None, Press, Arm, Restart, Retrigger } kind = None;   // track t, a restart (t -1), or
-        int t = -1;                  // only MOD's retrigger (t -1)
+        enum Kind : uint8_t { None, Press, Arm, Restart, Retrigger, Close } kind = None;   // track t, a restart (t -1),
+        int t = -1;                  // only MOD's retrigger (t -1), or the first recording's close alone (t its track)
         bool retrig = false;         // MOD's retrigger goes first on that line (see modStarted())
     };
     Pending pend_;
@@ -1621,6 +1672,7 @@ private:
     uint32_t changes_ = 0;           // see changes()
     // Last too, for the same reason: with queued_, a new part's track to record (see newPart()), else -1.
     int newRec_ = -1;
+    int startRec_ = -1;              // stopped in a new part: the track start() records (see newPart()), else -1
 };
 
 } // namespace ouro
