@@ -15,7 +15,7 @@ namespace ouro {
 
 enum HmiPort : uint8_t { kHmiRec, kHmiStop, kHmiOnOff, kHmiVolume, kHmiRedo, kHmiPortCount };
 
-struct HmiView { TrackState state; NextAction next; bool canRedo; int selected; bool on; Transport transport; bool armed; bool waiting = false; };   // waiting: the user's press, arm or restart waits for the bar line
+struct HmiView { TrackState state; NextAction next; bool canRedo; int selected; bool on; Transport transport; bool armed; bool waiting = false; bool newPart = false; };   // newPart: B's double-tap waits for the bar line   // waiting: the user's press, arm or restart waits for the bar line
 
 class HmiBridge {
 public:
@@ -63,7 +63,7 @@ private:
     static int fingerprint(HmiPort p, const HmiView& v)
     {
         switch (p) {
-        case kHmiRec:    return ((int(v.state) * 3 + int(v.next)) * 6 + int(v.transport) * 2 + v.armed) * 2 + v.waiting;
+        case kHmiRec:    return (((int(v.state) * 3 + int(v.next)) * 6 + int(v.transport) * 2 + v.armed) * 2 + v.waiting) * 2 + v.newPart;
         case kHmiStop:   return (v.selected * 4 + (v.state == TrackState::Empty ? 3 : int(v.transport))) * 2 + v.on;
         case kHmiRedo:   return v.canRedo;
         case kHmiOnOff:  return v.selected * 2 + v.on;
@@ -77,7 +77,7 @@ private:
         const char* label = text;
         switch (p) {
         case kHmiRec:
-            label = v.armed ? "ARM" : v.transport != Transport::Running ? "PLAY"
+            label = v.newPart ? "REC" : v.armed ? "ARM" : v.transport != Transport::Running ? "PLAY"
                 : v.next == NextAction::Rec ? "REC" : v.next == NextAction::Play ? "PLAY" : "DUB";
             if (caps & LV2_HMI_AddressingCapability_LED)
             {
@@ -86,7 +86,8 @@ private:
                     : v.state == TrackState::Recording ? LV2_HMI_LED_Colour_Red : LV2_HMI_LED_Colour_Green;
                 int t = blink ? LV2_HMI_LED_Blink_Mid : LV2_HMI_LED_Blink_None;
                 LV2_HMI_LED_Colour col = c;
-                if (v.waiting) { col = v.next == NextAction::Rec && v.transport == Transport::Running ? LV2_HMI_LED_Colour_Red : LV2_HMI_LED_Colour_Green; t = LV2_HMI_LED_Blink_Fast; }
+                if (v.newPart) { col = LV2_HMI_LED_Colour_Red; t = LV2_HMI_LED_Blink_Fast; }
+                else if (v.waiting) { col = v.next == NextAction::Rec && v.transport == Transport::Running ? LV2_HMI_LED_Colour_Red : LV2_HMI_LED_Colour_Green; t = LV2_HMI_LED_Blink_Fast; }
                 else if (v.armed) { col = LV2_HMI_LED_Colour_Red; t = LV2_HMI_LED_Blink_Slow; }
                 else if (v.transport == Transport::Stopped) { col = LV2_HMI_LED_Colour_Off; t = LV2_HMI_LED_Blink_None; }
                 wc_->set_led_with_blink(wc_->handle, a, col, t, t);

@@ -16,9 +16,9 @@ static LV2_HMI_Addressing A1 = (LV2_HMI_Addressing)0x1, A2 = (LV2_HMI_Addressing
 static const uint32_t kAllCaps = LV2_HMI_AddressingCapability_LED | LV2_HMI_AddressingCapability_Label | LV2_HMI_AddressingCapability_Value;
 
 static ouro::HmiView view(ouro::TrackState s, ouro::NextAction n, bool redo = false, int sel = 0, bool on = true,
-                            ouro::Transport tp = ouro::Transport::Running, bool armed = false, bool waiting = false)
+                            ouro::Transport tp = ouro::Transport::Running, bool armed = false, bool waiting = false, bool newPart = false)
 {
-    return { s, n, redo, sel, on, tp, armed, waiting };
+    return { s, n, redo, sel, on, tp, armed, waiting, newPart };
 }
 static std::string lastLabel(LV2_HMI_Addressing a)
 {
@@ -51,6 +51,20 @@ static void recLabelShowsArmAndStop()
     CHECK(lastLabel(A1) == "DUB");
 }
 
+static void recLabelAndLedWhileANewPartWaits()
+{
+    using namespace ouro;
+    gCalls.clear(); HmiBridge b; b.setFeature(&gFake); b.addressed(kHmiRec, A1, kAllCaps);
+    b.update(view(TrackState::Playing, NextAction::Dub));
+    CHECK(lastLabel(A1) == "DUB");
+    b.update(view(TrackState::Playing, NextAction::Dub, false, 0, true, Transport::Running, false, false, true));
+    CHECK(lastLabel(A1) == "REC" && lastLed(A1).colour == LV2_HMI_LED_Colour_Red && lastLed(A1).on == LV2_HMI_LED_Blink_Fast);
+    const size_t n = gCalls.size();
+    b.update(view(TrackState::Playing, NextAction::Dub, false, 0, true, Transport::Running, false, false, true));
+    CHECK(gCalls.size() == n);
+    b.update(view(TrackState::Playing, NextAction::Dub));
+    CHECK(lastLabel(A1) == "DUB" && lastLed(A1).colour == LV2_HMI_LED_Colour_Green && lastLed(A1).on == LV2_HMI_LED_Blink_None);
+}
 static void waitingBlinksFastInTheComingColour()
 {
     using namespace ouro;
@@ -177,7 +191,7 @@ static void noFeatureNoCalls()
 int main()
 {
     labelsSentOnlyOnChange();
-    recLabelShowsArmAndStop(); waitingBlinksFastInTheComingColour();
+    recLabelShowsArmAndStop(); waitingBlinksFastInTheComingColour(); recLabelAndLedWhileANewPartWaits();
     stopLabelFollowsTheSelectedTrack(); stopLedShowsPlayStopAndTheTrack();
     redoLabelShowsAvailability();
     knobLabelsFollowTrack();

@@ -36,10 +36,18 @@ static void firstTakeShowsSeconds() {
     CHECK(f.takeSecs == 0 && f.looper != ouro::kFaceFirstTake);
 }
 
+static void faceWaitsWhileANewPartWaits() {
+    Rig r; recordBase(r, L, 0.1f); toPos(r, 100); r.lp.newPart(1);
+    CHECK(faceView(r.lp, 0).looper == ouro::kFaceWaiting);
+    r.silence(L); r.silence(256);   // the switch
+    CHECK(faceView(r.lp, 0).looper == ouro::kFaceWriting);
+}
+
 int main() {
     emptyTrackFollowsTheLoop();
     oneLoopTrack();
     fourLoopTrack();
     firstTakeShowsSeconds();
+    faceWaitsWhileANewPartWaits();
     REPORT();
 }

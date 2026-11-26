@@ -819,7 +819,7 @@ protected:
         if (fDrawAcc >= 960) { fDrawAcc %= 960; drawWidgets(); }
 
         fHmi.update({fEngine.state(sel), fEngine.nextAction(sel), fEngine.canRedo(sel), sel, fEngine.isOn(sel),
-                     fEngine.transport(), fEngine.armedTrack() == sel, fEngine.userWaiting(sel)});
+                     fEngine.transport(), fEngine.armedTrack() == sel, fEngine.userWaiting(sel), fEngine.newPartTrack() >= 0});
         updateFace(frames);
     }
 
