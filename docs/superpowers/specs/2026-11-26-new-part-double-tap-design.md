@@ -4,6 +4,9 @@ Status: approved, 2026-11-26 (after the builder check). Decisions marked *my cal
 proposed by me and accepted in one "sounds good", or settled by me after the builder check (marked *my call, after the
 check*); they are open to correction. Everything else was decided by the user.
 
+Amended 2026-11-26 after the final review, decided by the user: a press that closes the first recording opens no
+double-tap window (see The gesture), so closing your first loop and pressing B again at once overdubs, as before.
+
 ## Why
 
 The user: "honestly one thing I'm not sure about is the parts UX". What the code and the manual show:
@@ -83,6 +86,10 @@ B as usual. No subpage, no knob, no clearing.
 - A press on C between the two presses makes B's second press a new first press, as a press on B already does between
   C's (*my call*, symmetric).
 - A third press is a new first press.
+- **A first press that closes the first recording opens no double-tap window** (decided by the user after the final
+  review): at once, as a close queued for a Sync bar line, or as a one-press handover from it. The next press is a new
+  first press, so closing your first loop and pressing B again at once starts an overdub, as before this feature.
+  Otherwise two quick presses would leave the loop you just made at the end of its first pass.
 - During a load, presses are ignored, as today.
 
 ### The second press first deals with what the first press did
@@ -94,10 +101,10 @@ As B's hold does (*my call*):
 | started an overdub | cancels it: nothing is kept (as the web UNDO cancels a running overdub) |
 | closed an overdub | the overdub stays |
 | started a recording onto the loop, or the first recording | aborts it: the track is empty again |
-| closed a recording (the first, or onto the loop) | it stays. With After Rec = Rec > Dub, the overdub the close started is cancelled |
+| closed a recording onto the loop | it stays. With After Rec = Rec > Dub, the overdub the close started is cancelled |
+| closed the first recording, or queued its close (Sync), or handed over from it | no double-tap: the next press is a new first press (see The gesture) |
 | a one-press handover (closed another track's take, started this one's) | the other take stays closed; this one's start is undone as above |
 | armed an empty track (Auto Rec), or queued a wait to start a recording (Sync) | the arm or wait is cancelled |
-| queued a wait to close the first recording (Sync, more than 150 ms after a bar line) | the close stays: the loop closes on the line, and the switch comes at the end of that first pass. If the press was a one-press handover, only the other track's start is dropped (*my call, after the check*: a waiting close is a close that has not landed yet, and a closed take stays) |
 | cancelled a wait, an arm or a pending double-tap switch | nothing to undo |
 | cancelled an End of loop or Fade stop | the stop stays cancelled |
 | started everything from stopped | see While stopped |
@@ -216,8 +223,8 @@ No new setting, no new port.
 4. Memory full at the switch: the recording closes at once as at the 5-minute limit (FULL), and the copies (shared
    blocks) still play.
 5. A Save while the switch waits, and a Load or a pedalboard change in the same window.
-6. A double-tap on the first recording with Sync: the close waits for the line while the new part waits for the end
-   of the pass that close creates. Two waits at once, where today one action waits at a time.
+6. (Withdrawn by the amendment: a press that closes the first recording opens no double-tap window. The engine keeps
+   `dropStart`'s waiting-close path, which the gesture no longer reaches.)
 
 ## Left to the builder
 
