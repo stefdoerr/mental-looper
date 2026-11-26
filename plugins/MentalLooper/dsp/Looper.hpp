@@ -327,14 +327,15 @@ public:
         addOp(tr, tr.layers[i].d, -1.0f, true, int32_t(i));
         ++changes_;
     }
-    // Cancels t's arm, its press wait, a pending restart (every track's) or a waiting new part (any track's); true if
-    // one was.
+    // Cancels t's arm, its press wait or a pending restart (every track's); true if one was. A waiting new part (any
+    // track's) is cancelled alone, as a press cancels it (a first loop's close waiting for its line stays).
     bool cancelWait(int t) {
         if (!valid(t)) return false;
-        const bool arm = armed_ == t, wait = userWaiting(t), next = cancelNewPart();
+        if (cancelNewPart()) return true;
+        const bool arm = armed_ == t, wait = userWaiting(t);
         if (arm) armed_ = -1;
         if (wait) cancelWaiting();
-        return arm || wait || next;
+        return arm || wait;
     }
     // t recording onto the loop or overdubbing closes as its B press would, ending in Playing; else nothing.
     void closeTake(int t) {
@@ -1566,8 +1567,7 @@ private:
     }
 
     Part parts_[kParts];
-    int part_ = 0, queued_ = -1;     // the current part; a switch queued to its end (-1: none)
-    int newRec_ = -1;                // with it, a new part's track to record (see newPart()), else -1
+    int part_ = 0, queued_ = -1;     // the current part; a switch queued to its end (-1: none); with it newRec_, below
     Part* cp_ = parts_;              // &parts_[part_]
     int out_ = -1;                   // the part a switch left, while it finishes (see finishOut()), else -1
     struct Step { int8_t part = kStepLoop; uint8_t reps = 1; };
@@ -1619,6 +1619,8 @@ private:
     Part snap_[kParts];              // the snapshot a save reads (see takeSnapshot()): reset(), clearAll(), switches leave it
     bool snapHeld_ = false;
     uint32_t changes_ = 0;           // see changes()
+    // Last too, for the same reason: with queued_, a new part's track to record (see newPart()), else -1.
+    int newRec_ = -1;
 };
 
 } // namespace ouro
