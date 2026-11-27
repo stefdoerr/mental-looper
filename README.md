@@ -25,6 +25,10 @@ mono in and mono out, plus a click output.
 
 ## Install
 
+**MOD Dwarf, Duo and Duo X: install from the browser.** Connect the unit to your computer
+over USB and open **[builder.mod.audio/install/8lrat00e](http://builder.mod.audio/install/8lrat00e)** (v0.2.0). The page installs
+the build for your unit. Chrome and Edge ask to access devices on your local network: allow it.
+
 Grab the latest bundle for your device from the
 **[Releases page](https://github.com/stefdoerr/mental-looper/releases/latest)**.
 Replace `X.Y.Z` below with the version you downloaded. The plugin appears

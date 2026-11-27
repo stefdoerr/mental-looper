@@ -62,6 +62,15 @@ Fill in `patchstorage.json` at the repo root (`source_code_url` / `donate_url`)
 before publishing. See
 [`patchstorage-build/README.md`](patchstorage-build/README.md) for prerequisites and details.
 
+## MOD Cloud Builder
+
+[`mod-build/mental-looper.mk`](mod-build/mental-looper.mk) is a mod-plugin-builder recipe that
+builds the tagged release from GitHub. Upload it at
+[builder.mod.audio/buildroot](https://builder.mod.audio/buildroot) with **Create shareable,
+persistent build** ticked: the builder compiles it for every MOD unit and gives a share link that
+installs the plugin from the browser onto a unit connected over USB. `make release` bumps the
+tag in the recipe; each upload gives a new link, so update the README after a release.
+
 ## Project layout
 
 ```
